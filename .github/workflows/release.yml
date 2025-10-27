@@ -13,7 +13,7 @@ jobs:
     uses: hotosm/gh-workflows/.github/workflows/image_build.yml@2.0.5
     with:
       build_target: release
-      image_name: "ghcr.io/${{ github.repository }}"
+      image_name: ghcr.io/${{ toLower(github.repository) }}
 
   binaries:
     runs-on: ubuntu-latest

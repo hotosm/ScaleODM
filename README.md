@@ -23,8 +23,6 @@ Info here.
 
 ## Development
 
-- This package mostly uses the standard library, plus a Postgres driver
-and testing framework.
 - Binary and container image distribution is automated on new **release**.
 
 ### Run The Tests

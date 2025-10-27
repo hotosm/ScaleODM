@@ -13,7 +13,7 @@ jobs:
   tests:
     uses: hotosm/gh-workflows/.github/workflows/test_compose.yml@2.0.5
     with:
-      image_name: ghcr.io/${{ github.repository }}
+      image_name: ghcr.io/${{ toLower(github.repository) }}
       build_target: build
       tag_override: ci
       compose_file: compose.yml
