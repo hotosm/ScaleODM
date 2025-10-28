@@ -8,16 +8,23 @@ permissions:
   contents: write  # To add binaries to release
   packages: write  # Required for nested job in image_build workflow
 
-env:
-  # Convert to all lowercase for container image names
-  REPO: ${GITHUB_REPOSITORY@L}
-
 jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      repo: ${{ steps.set_repo.outputs.repo }}
+    steps:
+      - name: Lowercase GITHUB_REPOSITORY
+        id: set_repo
+        run: |
+          repo=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+
   container-img:
     uses: hotosm/gh-workflows/.github/workflows/image_build.yml@2.0.5
     with:
       build_target: release
-      image_name: ghcr.io/${REPO}
+      image_name: ghcr.io/${{ needs.prep.outputs.repo }}
 
   binaries:
     runs-on: ubuntu-latest

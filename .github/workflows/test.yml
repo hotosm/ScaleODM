@@ -3,21 +3,27 @@ name: 🧪 Test
 on:
   push:
     branches: [main]
-  # Run tests on PR, prior to merge to main & development
   pull_request:
     branches: [main]
-  # Allow manual trigger (workflow_dispatch)
   workflow_dispatch:
 
-env:
-  # Convert to all lowercase for container image names
-  REPO: ${GITHUB_REPOSITORY@L}
-
 jobs:
+  prep:
+    runs-on: ubuntu-latest
+    outputs:
+      repo: ${{ steps.set_repo.outputs.repo }}
+    steps:
+      - name: Lowercase GITHUB_REPOSITORY
+        id: set_repo
+        run: |
+          repo=$(echo "$GITHUB_REPOSITORY" | tr '[:upper:]' '[:lower:]')
+          echo "repo=$repo" >> "$GITHUB_OUTPUT"
+
   tests:
+    needs: prep
     uses: hotosm/gh-workflows/.github/workflows/test_compose.yml@2.0.5
     with:
-      image_name: ghcr.io/${REPO}
+      image_name: ghcr.io/${{ needs.prep.outputs.repo }}
       build_target: build
       tag_override: ci
       compose_file: compose.yml
