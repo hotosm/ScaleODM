@@ -41,8 +41,8 @@ services:
     # restart: "no"
 
   db:
-    # NOTE do we need PostGIS, or swap to vanilla Postgres?
-    image: "postgis/postgis:17-3.5-alpine"
+    # image: "postgis/postgis:18-3.6-alpine"
+    image: "docker.io/postgres:18-alpine"
     container_name: scaleodm-db
     environment:
       - POSTGRES_USER=odm
