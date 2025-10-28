@@ -9,11 +9,15 @@ on:
   # Allow manual trigger (workflow_dispatch)
   workflow_dispatch:
 
+env:
+  # Convert to all lowercase for container image names
+  REPO: ${GITHUB_REPOSITORY@L}
+
 jobs:
   tests:
     uses: hotosm/gh-workflows/.github/workflows/test_compose.yml@2.0.5
     with:
-      image_name: ghcr.io/${{ toLower(github.repository) }}
+      image_name: ghcr.io/${REPO}
       build_target: build
       tag_override: ci
       compose_file: compose.yml
