@@ -15,19 +15,20 @@ services:
         condition: service_healthy
       s3:
         condition: service_healthy
-    environment:
-      SCALEODM_DATABASE_URL: postgresql://odm:odm@db:5432/scaleodm?sslmode=disable
-      ENQUEUE_TEST_JOBS: true
+    env_file: .env
     volumes:
       # Mount local files
       - ./go.mod:/app/go.mod:ro
       - ./go.sum:/app/go.sum:ro
       - ./main.go:/app/main.go:ro
       - ./main_test.go:/app/main_test.go:ro
+      - ./api:/app/api:ro
+      - ./config:/app/config:ro
       - ./db:/app/db:ro
       - ./queue:/app/queue:ro
+      - ./s3:/app/s3:ro
+      - ./splitmerge:/app/splitmerge:ro
       - ./worker:/app/worker:ro
-      - ./api:/app/api:ro
     ports:
       - "8080:8080"
     networks:
@@ -72,8 +73,8 @@ services:
   s3:
     image: "docker.io/minio/minio:RELEASE.2025-01-20T14-49-07Z"
     environment:
-      MINIO_ROOT_USER: ${S3_ACCESS_KEY:-odm}
-      MINIO_ROOT_PASSWORD: ${S3_SECRET_KEY:-somelongpassword}
+      MINIO_ROOT_USER: ${SCALEODM_S3_ACCESS_KEY:-odm}
+      MINIO_ROOT_PASSWORD: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
       MINIO_VOLUMES: "/mnt/data"
       MINIO_BROWSER: ${MINIO_BROWSER:-off}
     # volumes:

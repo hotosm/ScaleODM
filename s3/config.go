@@ -14,11 +14,9 @@ import (
 // Get S3 credentials to send to a job
 func GetS3JobCreds() (string, string) {
 	if config.SCALEODM_S3_STS_ROLE_ARN != "" {
-		return config.SCALEODM_S3_ACCESS_KEY, config.SCALEODM_S3_SECRET_KEY
+		return getS3TempCreds()
 	}
-
-	minioClient := GetS3Client()
-	return getS3TempCreds(minioClient)
+	return config.SCALEODM_S3_ACCESS_KEY, config.SCALEODM_S3_SECRET_KEY
 }
 
 func GetS3Client() *minio.Client {
@@ -38,11 +36,11 @@ func GetS3Client() *minio.Client {
 }
 
 // Get temp credentials via STS
-func getS3TempCreds(minioClient *minio.Client) (string, string) {
-	endpoint := config.SCALEODM_S3_ENDPOINT
+func getS3TempCreds() (string, string) {
+	sts_endpoint := config.SCALEODM_S3_STS_ENDPOINT
 	accessKey := config.SCALEODM_S3_ACCESS_KEY
 	secretKey := config.SCALEODM_S3_SECRET_KEY
-	
+
 	// IAM user/role to assume
 	roleARN := config.SCALEODM_S3_STS_ROLE_ARN
 
@@ -59,7 +57,9 @@ func getS3TempCreds(minioClient *minio.Client) (string, string) {
 	}
 
 	// Create temporary credentials
-	stsCreds, err := credentials.NewSTSAssumeRole(endpoint, opts)
+	// NOTE: even if sts_endpoint is empty here, the default for minio-go is
+	// https://sts.amazonaws.com, so above we only check SCALEODM_S3_STS_ROLE_ARN
+	stsCreds, err := credentials.NewSTSAssumeRole(sts_endpoint, opts)
 	if err != nil {
 		log.Fatalln(err)
 	}

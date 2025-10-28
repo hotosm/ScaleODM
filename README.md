@@ -128,6 +128,32 @@ as an alternative processing API (with different requirements).
 
 Details to come once API is stabilised.
 
+### S3 Usage
+
+- Setting the access / secret key will pass these credentials to all
+  jobs. This isn't the most secure setup.
+- A better option is to set the `SCALEODM_S3_STS_ROLE_ARN` variable too.
+- The user for the access/secret key pair must have permission to
+  generate temporary security credentials.
+- The role of the provided ARN will be assumed for the temp creds
+  (24hr access), so be sure this user has permission to read/write
+  to the required S3 buckets with imagery.
+
+  Allowing to assume any role (*) is less secure than specifying
+  an exact role that can be assumed, but more restrictive:
+  ```json
+  {
+    "Version": "2012-10-17",
+    "Statement": [
+      {
+        "Effect": "Allow",
+        "Action": "sts:AssumeRole",
+        "Resource": "*"
+      }
+    ]
+  }
+  ```
+
 ## Development
 
 - Binary and container image distribution is automated on new **release**.

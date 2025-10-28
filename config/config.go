@@ -3,43 +3,47 @@
 package config
 
 import (
-	"os"
 	"cmp"
 	"log"
+	"os"
 )
 
 var SCALEODM_DATABASE_URL = cmp.Or(
-  os.Getenv("SCALEODM_DATABASE_URL"),
-  "",
+	os.Getenv("SCALEODM_DATABASE_URL"),
+	"",
 )
 
 // Note this S3 user must have permissions
 // to create temporary credentials for STS
 var SCALEODM_S3_ENDPOINT = cmp.Or(
-  os.Getenv("SCALEODM_S3_ENDPOINT"),
-  "",
+	os.Getenv("SCALEODM_S3_ENDPOINT"),
+	"",
 )
 var SCALEODM_S3_ACCESS_KEY = cmp.Or(
-  os.Getenv("SCALEODM_S3_ACCESS_KEY"),
-  "",
+	os.Getenv("SCALEODM_S3_ACCESS_KEY"),
+	"",
 )
 var SCALEODM_S3_SECRET_KEY = cmp.Or(
-  os.Getenv("SCALEODM_S3_SECRET_KEY"),
-  "",
+	os.Getenv("SCALEODM_S3_SECRET_KEY"),
+	"",
+)
+var SCALEODM_S3_STS_ENDPOINT = cmp.Or(
+	os.Getenv("SCALEODM_S3_STS_ENDPOINT"),
+	"",
 )
 var SCALEODM_S3_STS_ROLE_ARN = cmp.Or(
-  os.Getenv("SCALEODM_S3_STS_ROLE_ARN"),
-  "",
+	os.Getenv("SCALEODM_S3_STS_ROLE_ARN"),
+	"",
 )
 
 var ENQUEUE_TEST_JOBS = cmp.Or(
-  os.Getenv("ENQUEUE_TEST_JOBS"),
-  "false",
+	os.Getenv("ENQUEUE_TEST_JOBS"),
+	"false",
 )
 
 func ValidateEnv() {
 	required := []struct {
-		val string
+		val  string
 		name string
 	}{
 		{SCALEODM_DATABASE_URL, "SCALEODM_DATABASE_URL"},

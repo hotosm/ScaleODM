@@ -26,11 +26,19 @@ CREATE TABLE IF NOT EXISTS scaleodm_job_queue (
 
 -- Foreign keys
 
-ALTER TABLE scaleodm_job_queue
-    ADD CONSTRAINT fk_job_queue_cluster
-    FOREIGN KEY (cluster_url)
-    REFERENCES scaleodm_clusters (cluster_url)
-    ON DELETE CASCADE;
+DO $$ 
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint 
+        WHERE conname = 'fk_job_queue_cluster'
+    ) THEN
+        ALTER TABLE scaleodm_job_queue
+            ADD CONSTRAINT fk_job_queue_cluster
+            FOREIGN KEY (cluster_url)
+            REFERENCES scaleodm_clusters (cluster_url)
+            ON DELETE CASCADE;
+    END IF;
+END $$;
 
 -- Indexes
 

@@ -23,10 +23,10 @@ import (
 
 	"github.com/danielgtaylor/huma/v2/humacli"
 	"github.com/hotosm/scaleodm/api"
+	"github.com/hotosm/scaleodm/config"
 	"github.com/hotosm/scaleodm/db"
 	"github.com/hotosm/scaleodm/queue"
 	"github.com/hotosm/scaleodm/worker"
-	"github.com/hotosm/scaleodm/config"
 )
 
 // Huma CLI Options
