@@ -41,6 +41,7 @@ services:
     # restart: "no"
 
   db:
+    # NOTE do we need PostGIS, or swap to vanilla Postgres?
     image: "postgis/postgis:17-3.5-alpine"
     container_name: scaleodm-db
     environment:
@@ -59,19 +60,14 @@ services:
       timeout: 5s
       retries: 3
 
-  nodeodm-1:
+  # In production this linked NodeODM instance is autoscaled by k8s
+  nodeodm:
     image: opendronemap/nodeodm:3.5.5
-    container_name: nodeodm-1
+    container_name: nodeodm
     networks:
       - net
     restart: on-failure:10
-
-  nodeodm-2:
-    image: opendronemap/nodeodm:3.5.5
-    container_name: nodeodm-2
-    networks:
-      - net
-    restart: on-failure:10
+    command: --parallel_queue_processing 1
 
   s3:
     image: "docker.io/minio/minio:RELEASE.2025-01-20T14-49-07Z"

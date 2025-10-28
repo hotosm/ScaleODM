@@ -2,11 +2,15 @@ package db
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+//go:embed schema.sql
+var schemaSQL string
 
 type DB struct {
 	Pool *pgxpool.Pool // Changed to export Pool
@@ -46,36 +50,23 @@ func (db *DB) Close() {
 	db.Pool.Close()
 }
 
-// InitSchema creates the required tables and indexes
+// Create the required tables and indexes
 func (db *DB) InitSchema(ctx context.Context) error {
-	schema := `
-	CREATE TABLE IF NOT EXISTS job_queue (
-		id BIGSERIAL PRIMARY KEY,
-		cluster_id TEXT NOT NULL,
-		job_type TEXT NOT NULL,
-		payload JSONB NOT NULL,
-		status TEXT DEFAULT 'pending',
-		priority INTEGER DEFAULT 0,
-		created_at TIMESTAMPTZ DEFAULT NOW(),
-		claimed_at TIMESTAMPTZ,
-		claimed_by TEXT,
-		completed_at TIMESTAMPTZ,
-		error_message TEXT
-	);
+	_, err := db.Pool.Exec(ctx, schemaSQL)
+	return err
+}
 
-	CREATE TABLE IF NOT EXISTS cluster_capacity (
-		cluster_id TEXT PRIMARY KEY,
-		max_concurrent_jobs INTEGER DEFAULT 10,
-		current_jobs INTEGER DEFAULT 0,
-		last_heartbeat TIMESTAMPTZ DEFAULT NOW()
-	);
+// InitSchema creates the required tables and indexes
+func (db *DB) InitLocalClusterRecord(ctx context.Context) error {
+	// FIXME consider setting via env var?
+	clusterUrl := "http://localhost:8080"
 
-	CREATE INDEX IF NOT EXISTS idx_job_queue_pending 
-		ON job_queue(cluster_id, status, priority DESC, created_at)
-		WHERE status = 'pending';
-	`
-
-	_, err := db.Pool.Exec(ctx, schema)
+	_, err := db.Pool.Exec(ctx, `
+		INSERT INTO scaleodm_clusters
+			(cluster_url)
+		VALUES
+			($1);
+	`, clusterUrl)
 	return err
 }
 

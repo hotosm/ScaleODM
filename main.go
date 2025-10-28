@@ -58,15 +58,20 @@ func main() {
 	if err := database.InitSchema(ctx); err != nil {
 		log.Fatalf("Failed to initialize schema: %v", err)
 	}
+	if err := database.InitLocalClusterRecord(ctx); err != nil {
+		log.Fatalf("Failed to add local cluster record: %v", err)
+	}
 
 	jobQueue := queue.NewQueue(database)
 
-	// Start workers in background
-	if getEnv("ENABLE_WORKERS", "true") == "true" {
-		numWorkers := 3
-		log.Printf("Starting %d workers...", numWorkers)
-		go startWorkers(ctx, jobQueue, numWorkers)
-	}
+	// Start job workers in background
+	numWorkers := 3
+	log.Printf("Starting %d workers...", numWorkers)
+	go startDbWorkers(ctx, jobQueue, numWorkers)
+
+	// Start cluster health check worker in background
+	healthChecker := queue.NewClusterHealthChecker(jobQueue)
+	go healthChecker.Start(ctx, 30*time.Second)
 
 	// Enqueue test jobs
 	if getEnv("ENQUEUE_TEST_JOBS", "false") == "true" {
@@ -135,7 +140,7 @@ func enqueueTestJobs(ctx context.Context, q *queue.Queue) error {
 		{
 			ProjectID:  "project-1",
 			ImageURLs:  []string{"s3://bucket/img1.jpg", "s3://bucket/img2.jpg"},
-			NodeODMURL: "http://nodeodm-1:3000",
+			NodeODMURL: "http://nodeodm:3000",
 			Options:    map[string]interface{}{"quality": "high"},
 		},
 		{
@@ -147,7 +152,7 @@ func enqueueTestJobs(ctx context.Context, q *queue.Queue) error {
 	}
 
 	for i, payload := range testJobs {
-		job, err := q.Enqueue(ctx, "local", "odm", payload, i)
+		job, err := q.Enqueue(ctx, "http://localhost:8080", "nodeodm", payload, i)
 		if err != nil {
 			return fmt.Errorf("job %d: %w", i, err)
 		}
@@ -156,15 +161,15 @@ func enqueueTestJobs(ctx context.Context, q *queue.Queue) error {
 	return nil
 }
 
-func startWorkers(ctx context.Context, q *queue.Queue, count int) {
+func startDbWorkers(ctx context.Context, q *queue.Queue, count int) {
 	processor := &worker.ODMProcessor{}
-	clusterID := getEnv("CLUSTER_ID", "local")
+	clusterID := "http://localhost:8080"
 
 	for i := 0; i < count; i++ {
 		id := fmt.Sprintf("worker-%d", i+1)
-		w := worker.NewWorker(id, clusterID, q, processor)
+		w := queue.NewWorker(id, clusterID, q, processor)
 
-		go func(w *worker.Worker, id string) {
+		go func(w *queue.Worker, id string) {
 			if err := w.Start(ctx); err != nil && err != context.Canceled {
 				log.Printf("Worker %s error: %v", id, err)
 			} else {

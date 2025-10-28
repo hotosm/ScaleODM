@@ -19,7 +19,13 @@
 
 ## Usage
 
-Info here.
+1. Run in a Kubernetes cluster, via provided Helm chart.
+2. Use the ScaleODM API as you would NodeODM.
+3. ScaleODM will handle task distribution to NodeODM
+   instances in the cluster, or defer to other ScaleODM
+   instances in other clusters.
+4. There is a separate SplitMerge option for large datasets,
+   which uses Argo workflows underneath.
 
 ## Development
 
