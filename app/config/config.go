@@ -13,6 +13,15 @@ var SCALEODM_DATABASE_URL = cmp.Or(
 	"",
 )
 
+var KUBECONFIG_PATH = cmp.Or(
+	os.Getenv("KUBECONFIG_PATH"),
+	"", // leave empty if in-cluster
+)
+var K8S_NAMESPACE = cmp.Or(
+	os.Getenv("K8S_NAMESPACE"),
+	"argo",
+)
+
 // Note this S3 user must have permissions
 // to create temporary credentials for STS
 var SCALEODM_S3_ENDPOINT = cmp.Or(

@@ -18,17 +18,16 @@ services:
     env_file: .env
     volumes:
       # Mount local files
-      - ./go.mod:/app/go.mod:ro
-      - ./go.sum:/app/go.sum:ro
-      - ./main.go:/app/main.go:ro
-      - ./main_test.go:/app/main_test.go:ro
-      - ./api:/app/api:ro
-      - ./config:/app/config:ro
-      - ./db:/app/db:ro
-      - ./queue:/app/queue:ro
-      - ./s3:/app/s3:ro
-      - ./splitmerge:/app/splitmerge:ro
-      - ./worker:/app/worker:ro
+      - ./go.mod:/code/go.mod:ro
+      - ./go.sum:/code/go.sum:ro
+      - ./main.go:/code/main.go:ro
+      - ./main_test.go:/code/main_test.go:ro
+      - ./app/api:/code/app/api:ro
+      - ./app/config:/code/app/config:ro
+      - ./app/db:/code/app/db:ro
+      - ./app/meta:/code/app/meta:ro
+      - ./app/s3:/code/app/s3:ro
+      - ./app/workflows:/code/app/workflows:ro
     ports:
       - "8080:8080"
     networks:

@@ -101,6 +101,9 @@ strong supporters of contributing to existing open-source projects.
 Long term, hopefully the ODM community can steward this project
 as an alternative processing API (with different requirements).
 
+For more details, see the [decisions](./decisions/README.md) section
+in this repo.
+
 ## Roadmap
 
 <!-- prettier-ignore-start -->

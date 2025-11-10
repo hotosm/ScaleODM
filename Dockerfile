@@ -3,11 +3,11 @@ FROM golang:1.25 AS base
 
 # Build statically compiled binary
 FROM base AS build
-WORKDIR /app
+WORKDIR /code
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /app/scaleodm
+RUN CGO_ENABLED=0 GOOS=linux go build -o /code/scaleodm
 
 
 # Run the tests in the container
@@ -33,10 +33,10 @@ RUN apt-get update --quiet \
 
 # Deploy the application binary into sratch image
 FROM scratch AS release
-WORKDIR /app
-COPY --from=build /app/scaleodm /app/scaleodm
+WORKDIR /code
+COPY --from=build /code/scaleodm /code/scaleodm
 COPY --from=useradd /etc/group /etc/group
 COPY --from=useradd /etc/passwd /etc/passwd
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 USER nonroot:nonroot
-ENTRYPOINT ["/app/scaleodm"]
+ENTRYPOINT ["/code/scaleodm"]

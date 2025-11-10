@@ -11,34 +11,49 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
 
-	"github.com/hotosm/scaleodm/app/queue"
+	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/app/workflows"
 )
 
-// Make the API and JobQueue available on each endpoint
+// Make the API, JobQueue, and WorkflowClient available on each endpoint
 type API struct {
-	queue *queue.Queue
-	api   huma.API
+	api            huma.API
+	workflowClient *workflows.Client
+	metadataStore  *meta.Store
 }
 
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
-func NewAPI(queue *queue.Queue) (*API, http.Handler) {
+func NewAPI(metadataStore *meta.Store, workflowClient *workflows.Client) (*API, http.Handler) {
 	config := huma.DefaultConfig("ScaleODM API", "1.0.0")
 	config.DocsPath = "/"
 	config.OpenAPIPath = "/openapi.json"
 	config.Servers = []*huma.Server{
 		{URL: "http://localhost:8080", Description: "ScaleODM"},
 	}
+	config.Info.Description = "Kubernetes-native auto-scaling and load balancing for OpenDroneMap."
+	config.Info.Contact = &huma.Contact{
+		Name: "Sam Woodcock",
+		URL:  "https://slack.hotosm.org",
+	}
+	config.Info.License = &huma.License{
+		Name: "AGPL-3.0-only",
+		URL:  "https://opensource.org/licenses/agpl-v3",
+	}
 
-	mux := http.NewServeMux()
-	humaAPI := humago.New(mux, config)
-	a := &API{queue: queue, api: humaAPI}
+	router := http.NewServeMux()
+	humaAPI := humago.New(router, config)
+	apiObj := &API{
+		metadataStore:  metadataStore,
+		workflowClient: workflowClient,
+		api:            humaAPI,
+	}
 
-	a.registerGlobalMRoutes()
-	a.registerNodeODMRoutes()
-	a.registerScaleODMRoutes()
+	apiObj.registerGlobalMRoutes()
+	apiObj.registerNodeODMRoutes()
+	// apiObj.registerScaleODMRoutes()
 
-	return a, mux
+	return apiObj, router
 }
 
 func (a *API) registerGlobalMRoutes() {
@@ -51,7 +66,7 @@ func (a *API) registerGlobalMRoutes() {
 		Description: "Returns service health status",
 		Tags:        []string{"System"},
 	}, func(ctx context.Context, input *struct{}) (*HealthResponse, error) {
-		if err := a.queue.HealthCheck(ctx); err != nil {
+		if err := a.metadataStore.HealthCheck(ctx); err != nil {
 			return nil, huma.NewError(503, "Database unavailable", err)
 		}
 		resp := &HealthResponse{}

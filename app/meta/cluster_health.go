@@ -1,4 +1,4 @@
-package queue
+package meta
 
 import (
 	"context"
@@ -8,11 +8,11 @@ import (
 )
 
 type ClusterHealthChecker struct {
-	queue *Queue
+	store *Store
 }
 
-func NewClusterHealthChecker(q *Queue) *ClusterHealthChecker {
-	return &ClusterHealthChecker{queue: q}
+func NewClusterHealthChecker(s *Store) *ClusterHealthChecker {
+	return &ClusterHealthChecker{store: s}
 }
 
 func (c *ClusterHealthChecker) Start(ctx context.Context, interval time.Duration) {
@@ -31,7 +31,7 @@ func (c *ClusterHealthChecker) Start(ctx context.Context, interval time.Duration
 }
 
 func (c *ClusterHealthChecker) checkClusters(ctx context.Context) {
-	clusters, err := c.queue.ListClusters(ctx)
+	clusters, err := c.store.ListClusters(ctx)
 	if err != nil {
 		log.Printf("[HealthChecker] Failed to list clusters: %v", err)
 		return
@@ -43,6 +43,10 @@ func (c *ClusterHealthChecker) checkClusters(ctx context.Context) {
 			log.Printf("[HealthChecker] Cluster unhealthy: %s (%v)", cluster.ClusterURL, err)
 			continue
 		}
-		c.queue.UpdateClusterHeartbeat(ctx, cluster.ClusterURL)
+		c.store.UpdateClusterHeartbeat(ctx, cluster.ClusterURL)
 	}
+}
+
+func (s *Store) HealthCheck(ctx context.Context) error {
+	return s.db.HealthCheck(ctx)
 }

@@ -46,8 +46,6 @@ spec:
               value: "false"
             - name: RCLONE_CONFIG_S3_REGION
               value: us-east-1
-            - name: RCLONE_CONFIG_S3_ACL
-              value: public-read
 
         - name: process
           image: opendronemap/odm:latest
@@ -85,5 +83,3 @@ spec:
               value: "false"
             - name: RCLONE_CONFIG_S3_REGION
               value: us-east-1
-            - name: RCLONE_CONFIG_S3_ACL
-              value: public-read

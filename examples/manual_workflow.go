@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"time"
 
 	"github.com/hotosm/scaleodm/app/workflows"
 )
@@ -19,13 +18,20 @@ func main() {
 		log.Fatalf("Failed to create client: %v", err)
 	}
 
-	// Example 1: Create and submit a workflow
+	// 1: Create and submit a workflow
 	fmt.Println("Creating ODM workflow...")
-	config := workflows.NewDefaultODMConfig("my-project-id")
 	
-	// Customize config if needed
-	config.S3Bucket = "my-bucket"
-	config.ODMArgs = []string{"--fast-orthophoto", "--dsm", "--dtm"}
+	// Define parameters
+	odmProjectID := "my-project-123"
+	readS3Path := "s3://drone-tm-public/dtm-data/projects/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/images/"
+	writeS3Path := "s3://drone-tm-public/dtm-data/projects/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/"
+	odmFlags := []string{"--fast-orthophoto"}
+	
+	config := workflows.NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path, odmFlags)
+	
+	// Optionally customize other config values
+	config.S3Region = "us-east-1"
+	config.ODMImage = "opendronemap/odm:latest"
 
 	wf, err := client.CreateODMWorkflow(ctx, config)
 	if err != nil {
@@ -33,7 +39,7 @@ func main() {
 	}
 	fmt.Printf("Workflow created: %s\n", wf.Name)
 
-	// Example 2: Watch workflow until completion
+	// 2: Watch workflow until completion
 	fmt.Println("Watching workflow...")
 	completedWf, err := client.WatchWorkflow(ctx, wf.Name)
 	if err != nil {
@@ -41,38 +47,28 @@ func main() {
 	}
 	fmt.Printf("Workflow completed with phase: %s\n", completedWf.Status.Phase)
 
-	// Example 3: Get workflow status
+	// 3: Get workflow status
 	phase, message, err := client.GetWorkflowStatus(ctx, wf.Name)
 	if err != nil {
 		log.Fatalf("Failed to get workflow status: %v", err)
 	}
 	fmt.Printf("Workflow phase: %s, message: %s\n", phase, message)
 
-	// Example 4: Get workflow logs
+	// 4: Get workflow logs
 	fmt.Println("\nRetrieving workflow logs...")
 	err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
 	if err != nil {
 		log.Fatalf("Failed to get workflow logs: %v", err)
 	}
 
-	// Example 5: List all workflows
-	fmt.Println("\nListing all workflows...")
-	wfList, err := client.ListWorkflows(ctx, "")
-	if err != nil {
-		log.Fatalf("Failed to list workflows: %v", err)
-	}
-	for _, w := range wfList.Items {
-		fmt.Printf("- %s (Phase: %s)\n", w.Name, w.Status.Phase)
-	}
-
-	// Example 6: Check if workflow is complete
+	// 5: Check if workflow is complete
 	isComplete, err := client.IsWorkflowComplete(ctx, wf.Name)
 	if err != nil {
 		log.Fatalf("Failed to check workflow completion: %v", err)
 	}
 	fmt.Printf("Workflow complete: %v\n", isComplete)
 
-	// Example 7: Delete workflow (optional, uncomment if needed)
+	// 6: Delete workflow (optional, uncomment if needed)
 	// fmt.Println("Deleting workflow...")
 	// err = client.DeleteWorkflow(ctx, wf.Name)
 	// if err != nil {
@@ -81,118 +77,118 @@ func main() {
 	// fmt.Println("Workflow deleted")
 }
 
-// Example: Create workflow and poll for completion
-func CreateAndWaitForWorkflow() {
-	ctx := context.Background()
+// // Example: Create workflow and poll for completion
+// func CreateAndWaitForWorkflow() {
+// 	ctx := context.Background()
 	
-	client, err := workflows.NewClient("/home/coder/.kube/config", "argo")
-	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
-	}
+// 	client, err := workflows.NewClient("/home/coder/.kube/config", "argo")
+// 	if err != nil {
+// 		log.Fatalf("Failed to create client: %v", err)
+// 	}
 
-	// Create workflow
-	config := workflows.NewDefaultODMConfig("my-project")
-	wf, err := client.CreateODMWorkflow(ctx, config)
-	if err != nil {
-		log.Fatalf("Failed to create workflow: %v", err)
-	}
+// 	// Create workflow
+// 	config := workflows.NewDefaultODMConfig("my-project")
+// 	wf, err := client.CreateODMWorkflow(ctx, config)
+// 	if err != nil {
+// 		log.Fatalf("Failed to create workflow: %v", err)
+// 	}
 
-	fmt.Printf("Workflow %s created, waiting for completion...\n", wf.Name)
+// 	fmt.Printf("Workflow %s created, waiting for completion...\n", wf.Name)
 
-	// Poll for completion
-	ticker := time.NewTicker(10 * time.Second)
-	defer ticker.Stop()
+// 	// Poll for completion
+// 	ticker := time.NewTicker(10 * time.Second)
+// 	defer ticker.Stop()
 
-	timeout := time.After(30 * time.Minute)
+// 	timeout := time.After(30 * time.Minute)
 
-	for {
-		select {
-		case <-timeout:
-			log.Fatal("Workflow timed out")
-		case <-ticker.C:
-			phase, message, err := client.GetWorkflowStatus(ctx, wf.Name)
-			if err != nil {
-				log.Printf("Error checking status: %v", err)
-				continue
-			}
+// 	for {
+// 		select {
+// 		case <-timeout:
+// 			log.Fatal("Workflow timed out")
+// 		case <-ticker.C:
+// 			phase, message, err := client.GetWorkflowStatus(ctx, wf.Name)
+// 			if err != nil {
+// 				log.Printf("Error checking status: %v", err)
+// 				continue
+// 			}
 
-			fmt.Printf("Status: %s - %s\n", phase, message)
+// 			fmt.Printf("Status: %s - %s\n", phase, message)
 
-			if phase == "Succeeded" {
-				fmt.Println("Workflow succeeded!")
+// 			if phase == "Succeeded" {
+// 				fmt.Println("Workflow succeeded!")
 				
-				// Get final logs
-				fmt.Println("\nFinal logs:")
-				err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
-				if err != nil {
-					log.Printf("Warning: failed to get logs: %v", err)
-				}
-				return
-			} else if phase == "Failed" || phase == "Error" {
-				fmt.Printf("Workflow failed with phase: %s\n", phase)
+// 				// Get final logs
+// 				fmt.Println("\nFinal logs:")
+// 				err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
+// 				if err != nil {
+// 					log.Printf("Warning: failed to get logs: %v", err)
+// 				}
+// 				return
+// 			} else if phase == "Failed" || phase == "Error" {
+// 				fmt.Printf("Workflow failed with phase: %s\n", phase)
 				
-				// Get error logs
-				fmt.Println("\nError logs:")
-				err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
-				if err != nil {
-					log.Printf("Warning: failed to get logs: %v", err)
-				}
-				return
-			}
-		}
-	}
-}
+// 				// Get error logs
+// 				fmt.Println("\nError logs:")
+// 				err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
+// 				if err != nil {
+// 					log.Printf("Warning: failed to get logs: %v", err)
+// 				}
+// 				return
+// 			}
+// 		}
+// 	}
+// }
 
-// Example: Stream logs in real-time while workflow runs
-func StreamLogsWhileRunning() {
-	ctx := context.Background()
+// // Example: Stream logs in real-time while workflow runs
+// func StreamLogsWhileRunning() {
+// 	ctx := context.Background()
 	
-	client, err := workflows.NewClient("/home/coder/.kube/config", "argo")
-	if err != nil {
-		log.Fatalf("Failed to create client: %v", err)
-	}
+// 	client, err := workflows.NewClient("/home/coder/.kube/config", "argo")
+// 	if err != nil {
+// 		log.Fatalf("Failed to create client: %v", err)
+// 	}
 
-	// Create workflow
-	config := workflows.NewDefaultODMConfig("streaming-project")
-	wf, err := client.CreateODMWorkflow(ctx, config)
-	if err != nil {
-		log.Fatalf("Failed to create workflow: %v", err)
-	}
+// 	// Create workflow
+// 	config := workflows.NewDefaultODMConfig("streaming-project")
+// 	wf, err := client.CreateODMWorkflow(ctx, config)
+// 	if err != nil {
+// 		log.Fatalf("Failed to create workflow: %v", err)
+// 	}
 
-	fmt.Printf("Workflow %s created\n", wf.Name)
+// 	fmt.Printf("Workflow %s created\n", wf.Name)
 
-	// Start goroutine to watch workflow
-	done := make(chan bool)
-	go func() {
-		completedWf, err := client.WatchWorkflow(ctx, wf.Name)
-		if err != nil {
-			log.Printf("Watch error: %v", err)
-		} else {
-			fmt.Printf("\nWorkflow completed with status: %s\n", completedWf.Status.Phase)
-		}
-		done <- true
-	}()
+// 	// Start goroutine to watch workflow
+// 	done := make(chan bool)
+// 	go func() {
+// 		completedWf, err := client.WatchWorkflow(ctx, wf.Name)
+// 		if err != nil {
+// 			log.Printf("Watch error: %v", err)
+// 		} else {
+// 			fmt.Printf("\nWorkflow completed with status: %s\n", completedWf.Status.Phase)
+// 		}
+// 		done <- true
+// 	}()
 
-	// Periodically fetch and display logs
-	ticker := time.NewTicker(30 * time.Second)
-	defer ticker.Stop()
+// 	// Periodically fetch and display logs
+// 	ticker := time.NewTicker(30 * time.Second)
+// 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-done:
-			// Fetch final logs
-			fmt.Println("\n=== FINAL LOGS ===")
-			err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
-			if err != nil {
-				log.Printf("Failed to get final logs: %v", err)
-			}
-			return
-		case <-ticker.C:
-			fmt.Println("\n=== CURRENT LOGS ===")
-			err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
-			if err != nil {
-				log.Printf("Failed to get logs: %v", err)
-			}
-		}
-	}
-}
+// 	for {
+// 		select {
+// 		case <-done:
+// 			// Fetch final logs
+// 			fmt.Println("\n=== FINAL LOGS ===")
+// 			err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
+// 			if err != nil {
+// 				log.Printf("Failed to get final logs: %v", err)
+// 			}
+// 			return
+// 		case <-ticker.C:
+// 			fmt.Println("\n=== CURRENT LOGS ===")
+// 			err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
+// 			if err != nil {
+// 				log.Printf("Failed to get logs: %v", err)
+// 			}
+// 		}
+// 	}
+// }

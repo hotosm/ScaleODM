@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -59,29 +60,27 @@ func NewClient(kubeconfig, namespace string) (*Client, error) {
 
 // ODMPipelineConfig holds configuration for ODM pipeline workflow
 type ODMPipelineConfig struct {
-	ProjectID      string
-	S3Bucket       string
-	S3Prefix       string
+	ODMProjectID   string
+	ReadS3Path     string   // S3 path where raw imagery is located (can contain zips)
+	WriteS3Path    string   // S3 path where final ODM outputs will be written
+	ODMFlags       []string // ODM command line flags
 	S3Region       string
-	MaxTransfer    string
 	ServiceAccount string
 	RcloneImage    string
 	ODMImage       string
-	ODMArgs        []string
 }
 
 // NewDefaultODMConfig returns default configuration
-func NewDefaultODMConfig(projectID string) *ODMPipelineConfig {
+func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags []string) *ODMPipelineConfig {
 	return &ODMPipelineConfig{
-		ProjectID:      projectID,
-		S3Bucket:       "drone-tm-public",
-		S3Prefix:       "dtm-data/projects/a93e99f5-5aab-4316-b6f8-0acd56975df3",
+		ODMProjectID:   odmProjectID,
+		ReadS3Path:     readS3Path,
+		WriteS3Path:    writeS3Path,
+		ODMFlags:       odmFlags,
 		S3Region:       "us-east-1",
-		MaxTransfer:    "1G",
 		ServiceAccount: "argo-odm",
 		RcloneImage:    "docker.io/rclone/rclone:1",
 		ODMImage:       "opendronemap/odm:latest",
-		ODMArgs:        []string{"--fast-orthophoto"},
 	}
 }
 
@@ -109,72 +108,143 @@ func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
 		{Name: "RCLONE_CONFIG_S3_PROVIDER", Value: "AWS"},
 		{Name: "RCLONE_CONFIG_S3_ENV_AUTH", Value: "false"},
 		{Name: "RCLONE_CONFIG_S3_REGION", Value: config.S3Region},
-		{Name: "RCLONE_CONFIG_S3_ACL", Value: "public-read"},
 	}
 
-	// Download container
+	// Generate unique job ID for this workflow instance
+	jobID := "{{workflow.name}}"
+
+	// Download container - downloads from readS3Path and extracts zips
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:    "rclone-download",
+			Name:    "download",
 			Image:   config.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{
 				fmt.Sprintf(`
-echo "Downloading S3 bucket files..."
-PROJECT_ID="{{workflow.name}}"
-echo "Project ID: $PROJECT_ID"
-rclone copy s3:%s/%s/${PROJECT_ID}/images/ /workspace/${PROJECT_ID}/images --progress --max-transfer %s --cutoff-mode soft
-echo "Download complete. Files in /workspace/${PROJECT_ID}/images:"
-ls -lh /workspace/${PROJECT_ID}/images
-				`, config.S3Bucket, config.S3Prefix, config.MaxTransfer),
+echo "Downloading imagery from S3..."
+JOB_ID="%s"
+echo "Job ID: $JOB_ID"
+echo "Source: %s"
+echo "Destination: /workspace/$JOB_ID/images"
+
+# Download files from S3 (includes zips and images)
+rclone copy %s /workspace/$JOB_ID/images --progress --max-transfer 100M --cutoff-mode soft
+
+cd /workspace/$JOB_ID/images
+
+# Extract any zip files
+for zipfile in *.zip; do
+  if [ -f "$zipfile" ]; then
+    echo "Extracting $zipfile..."
+    unzip -q "$zipfile"
+    rm "$zipfile"
+  fi
+done
+
+# Extract any tar files
+for tarfile in *.tar.gz; do
+  if [ -f "$tarfile" ]; then
+    echo "Extracting $tarfile..."
+    tar -xzsf "$tarfile"
+    rm "$tarfile"
+  fi
+done
+
+echo "Download complete. Files in /workspace/$JOB_ID/images:"
+ls -lh /workspace/$JOB_ID/images
+				`, jobID, config.ReadS3Path, config.ReadS3Path),
 			},
 			Env: rcloneEnv,
 		},
 	}
 
 	// ODM processing container
-	odmArgsStr := ""
-	for _, arg := range config.ODMArgs {
-		odmArgsStr += arg + " "
-	}
+	odmFlagsStr := strings.Join(config.ODMFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:    "odm-process",
+			Name:    "process",
 			Image:   config.ODMImage,
 			Command: []string{"/bin/bash", "-c"},
 			Args: []string{
 				fmt.Sprintf(`
-echo "Running ODM orthophoto process..."
-PROJECT_ID="{{workflow.name}}"
-echo "Processing project: $PROJECT_ID"
-odm_args="%s--project-path /workspace ${PROJECT_ID}"
+echo "Running ODM processing..."
+JOB_ID="{{workflow.name}}"
+echo "Processing job: $JOB_ID"
+echo "ODM Project ID: %s"
+odm_args="%s --project-path /workspace $JOB_ID"
 echo "Executing: python3 run.py $odm_args"
 python3 run.py $odm_args
-				`, odmArgsStr),
+echo "ODM processing complete"
+				`, config.ODMProjectID, odmFlagsStr),
 			},
 		},
-		Dependencies: []string{"rclone-download"},
+		Dependencies: []string{"download"},
 	}
 
-	// Upload container
+	// Upload container - uploads results to writeS3Path
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:    "rclone-upload",
+			Name:    "upload",
 			Image:   config.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{
 				fmt.Sprintf(`
-echo "Listing output orthophotos..."
-PROJECT_ID="{{workflow.name}}"
-ls -lh /workspace/${PROJECT_ID}/odm_orthophoto || echo "No orthophoto yet."
-echo "Uploading results to S3..."
-rclone copy /workspace/${PROJECT_ID}/odm_orthophoto/ s3:%s/%s/${PROJECT_ID}/outputs/ --progress
-echo "Upload complete."
-				`, config.S3Bucket, config.S3Prefix),
+echo "Running final upload..."
+
+# Injected WriteS3Path var
+DEST_PATH="%s"
+
+echo "Validating S3 credentials with a test write..."
+TEST_FILE="$(mktemp)"
+echo "s3 write test $(date)" > "$TEST_FILE"
+
+# Generate one timestamp for both upload & delete
+TEST_OBJECT="$DEST_PATH/.s3-write-test-$(date)"
+
+# Attempt to write a small temp file
+if ! rclone copyto "$TEST_FILE" "$TEST_OBJECT" --metadata test=1 --quiet >/dev/null 2>&1; then
+  echo "❌ S3 credentials or permissions invalid (cannot write to $DEST_PATH)"
+  rm -f "$TEST_FILE"
+  exit 1
+fi
+
+# Clean up test file (ignore delete errors)
+rclone deletefile "$TEST_OBJECT" --quiet >/dev/null 2>&1 || true
+rm -f "$TEST_FILE"
+
+echo "✅ S3 write access confirmed."
+
+# -------------------------
+# Continue with upload
+# -------------------------
+
+JOB_ID="{{workflow.name}}"
+SRC_DIR="/workspace/$JOB_ID"
+
+echo "Job ID: $JOB_ID"
+echo "Source: $SRC_DIR"
+echo "Destination: $DEST_PATH"
+
+# Delete the raw imagery
+rm -rf "$SRC_DIR/images"
+
+# List output files
+echo "Listing ODM imagery products..."
+ls -lh "$SRC_DIR"
+
+# Upload results to S3
+echo "Uploading to S3..."
+if ! rclone copy "$SRC_DIR" "$DEST_PATH" --progress; then
+  echo "❌ Upload failed."
+  exit 1
+fi
+
+echo "✅ Upload complete."
+				`, config.WriteS3Path),
 			},
 			Env: rcloneEnv,
 		},
-		Dependencies: []string{"odm-process"},
+		Dependencies: []string{"process"},
 	}
 
 	// Create workflow

@@ -7,21 +7,24 @@ CREATE TABLE IF NOT EXISTS scaleodm_clusters (
     last_heartbeat TIMESTAMPTZ  -- No default, we wait for a poll
 );
 
-CREATE TABLE IF NOT EXISTS scaleodm_job_queue (
+CREATE TABLE scaleodm_job_metadata (
     id BIGSERIAL PRIMARY KEY,
     cluster_url TEXT NOT NULL,
-    job_type TEXT NOT NULL,
-    payload JSONB NOT NULL,
-    status TEXT DEFAULT 'pending' CONSTRAINT job_queue_status_check
+    workflow_name TEXT NOT NULL UNIQUE,
+    odm_project_id TEXT NOT NULL,
+    job_type TEXT DEFAULT 'standard' CONSTRAINT job_type_check
+        CHECK (job_type IN ('standard', 'splitmerge')),
+    job_status TEXT DEFAULT 'pending' CONSTRAINT job_queue_status_check
         CHECK (status IN ('pending', 'claimed', 'running', 'failed', 'completed')),
-    priority INTEGER DEFAULT 0,
+    read_s3_path TEXT NOT NULL,
+    write_s3_path TEXT NOT NULL,
+    odm_flags JSONB,
+    s3_region TEXT DEFAULT 'us-east-1',
     created_at TIMESTAMPTZ DEFAULT NOW(),
-    claimed_at TIMESTAMPTZ,
-    claimed_by TEXT,
-    duration_seconds DOUBLE PRECISION,
+    started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
-    retry_count INTEGER DEFAULT 0,
-    error_message TEXT
+    error_message TEXT,
+    metadata JSONB
 );
 
 -- Foreign keys
@@ -42,11 +45,14 @@ END $$;
 
 -- Indexes
 
-CREATE INDEX IF NOT EXISTS idx_job_queue_pending 
-    ON scaleodm_job_queue(cluster_url, status, priority DESC, created_at)
-    WHERE status = 'pending';
+-- Index for looking up jobs by workflow name
+CREATE INDEX IF NOT EXISTS idx_workflow_name 
+    ON scaleodm_job_metadata(workflow_name);
 
-CREATE INDEX IF NOT EXISTS idx_job_queue_claimed 
-    ON scaleodm_job_queue(claimed_by, status)
-    WHERE status IN ('claimed', 'running');
+-- Index for listing jobs by status
+CREATE INDEX IF NOT EXISTS idx_job_status 
+    ON scaleodm_job_metadata(status, created_at DESC);
 
+-- Index for project lookups
+CREATE INDEX IF NOT EXISTS idx_project_id 
+    ON scaleodm_job_metadata(odm_project_id, created_at DESC);
