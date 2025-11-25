@@ -1,0 +1,59 @@
+{{- if .Values.kubernetes.rbac.create }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "scaleodm.fullname" . }}
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+rules:
+  # Permissions needed for Argo Workflows
+  - apiGroups:
+      - argoproj.io
+    resources:
+      - workflows
+      - workflowtemplates
+      - cronworkflows
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+      - update
+      - patch
+      - delete
+  # Permissions for pods (to check workflow status)
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+      - pods/log
+    verbs:
+      - get
+      - list
+      - watch
+  # Permissions for events (for workflow status)
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - get
+      - list
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "scaleodm.fullname" . }}
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "scaleodm.fullname" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "scaleodm.serviceAccountName" . }}
+    namespace: {{ .Release.Namespace }}
+{{- end }}
+

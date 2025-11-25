@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -36,6 +37,37 @@ func NewStore(db *db.DB) *Store {
 	return &Store{db: db}
 }
 
+// isDeadlockError checks if an error is a PostgreSQL deadlock error
+func isDeadlockError(err error) bool {
+	if err == nil {
+		return false
+	}
+	errStr := err.Error()
+	return strings.Contains(errStr, "deadlock") || strings.Contains(errStr, "40P01")
+}
+
+// retryOnDeadlock retries a function if it encounters a deadlock error
+func retryOnDeadlock(ctx context.Context, maxRetries int, fn func() error) error {
+	var lastErr error
+	for i := 0; i < maxRetries; i++ {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if !isDeadlockError(lastErr) {
+			return lastErr
+		}
+		// Wait before retrying (exponential backoff)
+		waitTime := time.Duration(i+1) * 10 * time.Millisecond
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(waitTime):
+		}
+	}
+	return lastErr
+}
+
 // CreateJob records a new job metadata entry
 func (s *Store) CreateJob(ctx context.Context, clusterURL, workflowName, projectID, readPath, writePath string, odmFlags []string, s3Region string) (*JobMetadata, error) {
 	flagsJSON, err := json.Marshal(odmFlags)
@@ -51,11 +83,18 @@ func (s *Store) CreateJob(ctx context.Context, clusterURL, workflowName, project
 		          odm_flags, s3_region, job_status, created_at
 	`
 
-	job := &JobMetadata{}
-	err = s.db.Pool.QueryRow(ctx, query, clusterURL, workflowName, projectID, readPath, writePath, flagsJSON, s3Region).Scan(
-		&job.ID, &job.WorkflowName, &job.ODMProjectID, &job.ReadS3Path,
-		&job.WriteS3Path, &job.ODMFlags, &job.S3Region, &job.JobStatus, &job.CreatedAt,
-	)
+	var job *JobMetadata
+	err = retryOnDeadlock(ctx, 3, func() error {
+		job = &JobMetadata{}
+		scanErr := s.db.Pool.QueryRow(ctx, query, clusterURL, workflowName, projectID, readPath, writePath, flagsJSON, s3Region).Scan(
+			&job.ID, &job.WorkflowName, &job.ODMProjectID, &job.ReadS3Path,
+			&job.WriteS3Path, &job.ODMFlags, &job.S3Region, &job.JobStatus, &job.CreatedAt,
+		)
+		if scanErr != nil {
+			return scanErr
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create job metadata: %w", err)
 	}

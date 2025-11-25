@@ -1,0 +1,158 @@
+# Default values for ScaleODM
+# This is a YAML-formatted file.
+
+# Name override for the chart
+nameOverride: ""
+fullnameOverride: ""
+
+# Global settings
+global:
+  imageRegistry: ""
+  imagePullSecrets: []
+
+# ScaleODM API configuration
+api:
+  enabled: true
+  image:
+    repository: ghcr.io/hotosm/scaleodm
+    tag: ""
+    pullPolicy: IfNotPresent
+  
+  replicaCount: 1
+  
+  service:
+    type: ClusterIP
+    port: 31100
+    targetPort: 31100
+  
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+  
+  # Port configuration
+  port: 31100
+  
+  # Security context
+  podSecurityContext: {}
+  securityContext: {}
+  
+  # Node selector, tolerations, and affinity
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+# Database configuration
+database:
+  # Use external database (set connection string in secrets)
+  external:
+    enabled: true
+    # If false, you must provide SCALEODM_DATABASE_URL in secrets
+  
+  # Optional: Deploy PostgreSQL as subchart
+  postgresql:
+    enabled: false
+    # PostgreSQL subchart values (if enabled)
+    auth:
+      postgresPassword: ""
+      database: scaleodm
+    primary:
+      persistence:
+        enabled: true
+        size: 20Gi
+
+# S3 configuration
+s3:
+  # Use external S3 (set endpoint and credentials in secrets)
+  external:
+    enabled: true
+    # If false, you must provide S3 configuration in secrets
+  
+  # Optional: Deploy MinIO as subchart
+  minio:
+    enabled: false
+    # MinIO subchart values (if enabled)
+    auth:
+      rootUser: ""
+      rootPassword: ""
+    persistence:
+      enabled: true
+      size: 100Gi
+
+# Kubernetes configuration
+kubernetes:
+  # Namespace for Argo Workflows
+  namespace: argo
+  
+  # ServiceAccount configuration
+  serviceAccount:
+    create: true
+    name: ""
+    annotations: {}
+  
+  # RBAC configuration
+  rbac:
+    create: true
+    # Role permissions needed for Argo Workflows
+    # The service account needs permissions to create/list/watch workflows
+
+# Configuration (non-sensitive)
+config:
+  # ODM image to use in workflows
+  odmImage: "docker.io/opendronemap/odm:3.6.0"
+  
+  # Cluster URL (used for federation)
+  clusterUrl: ""
+  
+  # Enqueue test jobs (for testing)
+  enqueueTestJobs: "false"
+
+# Secrets (sensitive values - should be provided via --set or secrets)
+# These are not set by default and must be provided during installation
+secrets:
+  # Database connection string
+  # Format: postgres://user:password@host:port/database?sslmode=disable
+  databaseUrl: ""
+  
+  # S3 configuration
+  s3Endpoint: ""
+  s3AccessKey: ""
+  s3SecretKey: ""
+  
+  # Optional: STS configuration for temporary credentials
+  s3StsEndpoint: ""
+  s3StsRoleArn: ""
+
+# Argo Workflows subchart configuration
+argo:
+  enabled: true
+  # Argo Workflows will be deployed as a subchart if enabled
+  # If disabled, ensure Argo Workflows is already installed in the cluster
+  
+  # Common Argo Workflows values
+  server:
+    enabled: true
+    service:
+      type: ClusterIP
+  
+  controller:
+    enabled: true
+  
+  # Namespace for Argo Workflows (should match kubernetes.namespace)
+  namespace: argo
+
+# Ingress configuration (optional)
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: scaleodm.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
