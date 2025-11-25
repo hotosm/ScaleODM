@@ -128,7 +128,7 @@ test-cluster-destroy:
   talosctl cluster destroy --name "$CLUSTER_NAME"
   echo "✓ Cluster destroyed"
 
-# Run tests (requires Talos cluster and compose services)
+# Run all tests (requires Talos cluster and compose services)
 # Will start DB and S3 if not already running
 test:
   #!/usr/bin/env bash
@@ -143,7 +143,43 @@ test:
   fi
   echo "✓ Services are healthy"
   echo "Running tests..."
-  docker compose run --rm api go test -timeout=2m -v ./...
+  docker compose run --rm api
+
+# Run unit tests only (no external dependencies)
+test-unit:
+  go test -v -short ./app/api/helpers_test.go ./app/api/helpers.go ./app/workflows/workflow_test.go
+
+# Run integration tests only (requires DB)
+test-integration:
+  #!/usr/bin/env bash
+  set -e
+  echo "Ensuring compose services are running..."
+  docker compose up -d db s3
+  echo "Waiting for services to be healthy..."
+  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
+      echo "❌ Error: Services failed to become healthy within 60 seconds"
+      docker compose ps
+      exit 1
+  fi
+  echo "✓ Services are healthy"
+  echo "Running integration tests..."
+  docker compose run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
+
+# Run E2E tests only (requires DB, S3, and K8s)
+test-e2e:
+  #!/usr/bin/env bash
+  set -e
+  echo "Ensuring compose services are running..."
+  docker compose up -d db s3
+  echo "Waiting for services to be healthy..."
+  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
+      echo "❌ Error: Services failed to become healthy within 60 seconds"
+      docker compose ps
+      exit 1
+  fi
+  echo "✓ Services are healthy"
+  echo "Running E2E tests..."
+  docker compose run --rm api go test -v -tags=e2e .
 
 # Start compose services (DB, S3, API)
 # Assumes Talos cluster is already running

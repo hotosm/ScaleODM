@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+
+	"github.com/jackc/pgx/v5"
 )
 
 type Cluster struct {
@@ -38,10 +40,12 @@ func (s *Store) ListClusters(ctx context.Context) ([]*Cluster, error) {
 }
 
 func (s *Store) UpdateClusterHeartbeat(ctx context.Context, clusterID string) error {
+	// Use INSERT ... ON CONFLICT to ensure cluster exists before updating heartbeat
 	_, err := s.db.Pool.Exec(ctx, `
-		UPDATE scaleodm_clusters
-		SET last_heartbeat = NOW()
-		WHERE cluster_url = $1
+		INSERT INTO scaleodm_clusters (cluster_url, max_concurrent_jobs, priority_weighting, last_heartbeat)
+		VALUES ($1, 10, 10, NOW())
+		ON CONFLICT (cluster_url) 
+		DO UPDATE SET last_heartbeat = NOW()
 	`, clusterID)
 	return err
 }
@@ -64,12 +68,21 @@ func (s *Store) UpdateClusterDetails(ctx context.Context, clusterID string, maxJ
 // Find the number of jobs running currently, with max jobs that can run
 func (s *Store) GetClusterCapacity(ctx context.Context, clusterID string) (maxJobs, activeJobs int, err error) {
 	query := `
-		SELECT c.max_concurrent_jobs, COUNT(j.id) AS active_jobs
+		SELECT 
+			c.max_concurrent_jobs, 
+			COUNT(j.id) AS active_jobs
 		FROM scaleodm_clusters c
-		LEFT JOIN scaleodm_job_metadata j ON j.cluster_url = c.cluster_url AND j.status IN ('claimed', 'running')
+		LEFT JOIN scaleodm_job_metadata j ON j.cluster_url = c.cluster_url AND j.job_status IN ('claimed', 'running')
 		WHERE c.cluster_url = $1
 		GROUP BY c.max_concurrent_jobs
 	`
 	err = s.db.Pool.QueryRow(ctx, query, clusterID).Scan(&maxJobs, &activeJobs)
+	if err != nil {
+		// Check if it's a "no rows" error using pgx error
+		if err == pgx.ErrNoRows {
+			return 0, 0, fmt.Errorf("cluster not found: %s", clusterID)
+		}
+		return 0, 0, err
+	}
 	return
 }

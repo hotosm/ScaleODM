@@ -1,0 +1,17 @@
+apiVersion: v2
+type: application
+name: ScaleODM
+description: Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
+version: "0.1.0"
+appVersion: "0.1.0"
+maintainers:
+- email: sam.woodcock@hotosm.org
+  name: Sam Woodcock
+home: https://github.com/hotosm/ScaleODM/tree/main/chart
+icon: https://docs.hotosm.org/assets/images/favicon.png
+dependencies:
+  - name: argo-workflows
+    version: 0.45.28
+    repository: https://argoproj.github.io/argo-helm
+    condition: argo.enabled
+    alias: argo

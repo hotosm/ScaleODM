@@ -16,7 +16,7 @@ Returns information about the node including queue count and engine version.
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
-  "engineVersion": "opendronemap/odm:latest"
+  "engineVersion": "opendronemap/odm:3.6.0"
 }
 ```
 
@@ -287,7 +287,7 @@ spec:
       serviceAccountName: argo-odm
       containers:
       - name: scaleodm
-        image: ghcr.io/hotosm/scaleodm:latest
+        image: ghcr.io/hotosm/scaleodm:3.6.0
         ports:
         - containerPort: 31100
         env:
@@ -296,7 +296,7 @@ spec:
         - name: K8S_NAMESPACE
           value: "default"
         - name: SCALEODM_ODM_IMAGE
-          value: "opendronemap/odm:latest"
+          value: "opendronemap/odm:3.6.0"
 ---
 apiVersion: v1
 kind: Service

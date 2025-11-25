@@ -17,38 +17,37 @@ services:
     build:
       target: build
     container_name: scaleodm
+    depends_on:
+      db:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
     # Use host networking to access localhost Kubernetes API (Talos cluster)
     # This also allows direct access to DB and S3 via localhost ports
-    # Note: depends_on doesn't work with host networking, so ensure DB/S3 are up first
     network_mode: "host"
     env_file: .env
     environment:
       KUBECONFIG_PATH: /root/.kube/config
-      # Override DB URL to use localhost since we're on host network
       SCALEODM_DATABASE_URL: ${SCALEODM_DATABASE_URL:-postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable}
-      # Override S3 endpoint to use localhost since we're on host network
       SCALEODM_S3_ENDPOINT: ${SCALEODM_S3_ENDPOINT:-localhost:31102}
+      SCALEODM_S3_ACCESS_KEY: ${SCALEODM_S3_ACCESS_KEY:-odm}
+      SCALEODM_S3_SECRET_KEY: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
     volumes:
       # Mount local files
       - ./go.mod:/code/go.mod:ro
       - ./go.sum:/code/go.sum:ro
       - ./main.go:/code/main.go:ro
       - ./main_test.go:/code/main_test.go:ro
-      - ./app/api:/code/app/api:ro
-      - ./app/config:/code/app/config:ro
-      - ./app/db:/code/app/db:ro
-      - ./app/meta:/code/app/meta:ro
-      - ./app/s3:/code/app/s3:ro
-      - ./app/workflows:/code/app/workflows:ro
+      - ./app:/code/app:ro
+      - ./testutil:/code/testutil:ro
+      - ./e2e:/code/e2e:ro
       - $HOME/.kube/config:/root/.kube/config
     entrypoint: go
-    command: run main.go
-    restart: "unless-stopped"
-    # entrypoint: test -timeout=2m -v ./...
-    # restart: "no"
+    # command: run main.go
+    command: test -timeout=5m -v -tags=e2e ./...
+    restart: "no"
 
   db:
-    # image: "postgis/postgis:18-3.6-alpine"
     image: "docker.io/postgres:18-alpine"
     container_name: scaleodm-db
     environment:

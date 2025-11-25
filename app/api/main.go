@@ -18,13 +18,13 @@ import (
 // Make the API, JobQueue, and WorkflowClient available on each endpoint
 type API struct {
 	api            huma.API
-	workflowClient *workflows.Client
+	workflowClient workflows.WorkflowClient
 	metadataStore  *meta.Store
 }
 
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
-func NewAPI(metadataStore *meta.Store, workflowClient *workflows.Client) (*API, http.Handler) {
+func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) (*API, http.Handler) {
 	config := huma.DefaultConfig("ScaleODM API", "0.1.0")
 	config.DocsPath = "/"
 	config.OpenAPIPath = "/openapi.json"

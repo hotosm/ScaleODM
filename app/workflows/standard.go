@@ -21,6 +21,9 @@ import (
 )
 
 // Client wraps the Argo Workflows client and Kubernetes client
+// Ensure Client implements WorkflowClient interface
+var _ WorkflowClient = (*Client)(nil)
+
 type Client struct {
 	wfClientset *workflowclient.Clientset
 	k8sClient   *kubernetes.Clientset
@@ -367,42 +370,20 @@ func (c *Client) getWorkflowLogsFromPods(ctx context.Context, wf *wfv1.Workflow,
 // This is used when the workflow has been cleaned up
 // writeS3Path is the S3 path where logs should be stored (e.g., s3://bucket/path/)
 // s3Client is the minio client to use for fetching logs
+// Note: This function is a placeholder - the API layer calls s3.GetWorkflowLogsFromS3 directly
 func (c *Client) getWorkflowLogsFromS3(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
 	fmt.Fprintf(writer, "Workflow %s not found (may have been cleaned up).\n", workflowName)
 	fmt.Fprintf(writer, "Attempting to fetch logs from S3...\n\n")
 	
-	// Parse S3 path: s3://bucket/path -> bucket and path
+	// Validate S3 path format
 	if !strings.HasPrefix(writeS3Path, "s3://") {
 		return fmt.Errorf("invalid S3 path: %s", writeS3Path)
 	}
 	
-	pathParts := strings.TrimPrefix(writeS3Path, "s3://")
-	parts := strings.SplitN(pathParts, "/", 2)
-	if len(parts) < 1 {
-		return fmt.Errorf("invalid S3 path format: %s", writeS3Path)
-	}
-	
-	bucket := parts[0]
-	prefix := ""
-	if len(parts) > 1 {
-		prefix = strings.TrimSuffix(parts[1], "/") + "/"
-	}
-	
-	// Use the s3 package to fetch logs
-	// s3Client should be *minio.Client
-	if s3Client == nil {
-		return fmt.Errorf("S3 client required to fetch logs from S3")
-	}
-	
-	// Import s3 package to use GetWorkflowLogsFromS3
-	// We'll need to import it at the top of the file
-	// For now, we'll use a type assertion and call the function
-	// Actually, we should import the s3 package and use it directly
-	// But to avoid circular dependency, we'll do the fetch here
-	
-	// The API will call s3.GetWorkflowLogsFromS3 directly
-	// This function signature is kept for compatibility
-	return fmt.Errorf("use s3.GetWorkflowLogsFromS3 directly from API layer")
+	// The API layer should call s3.GetWorkflowLogsFromS3 directly
+	// This function signature is kept for compatibility but the actual
+	// S3 fetch is done in the API layer to avoid circular dependencies
+	return fmt.Errorf("S3 log retrieval should be handled by API layer using s3.GetWorkflowLogsFromS3")
 }
 
 // GetWorkflowLogsWithS3Path retrieves logs for a workflow, with fallback to S3

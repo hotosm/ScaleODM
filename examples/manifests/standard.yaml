@@ -48,7 +48,7 @@ spec:
               value: us-east-1
 
         - name: process
-          image: opendronemap/odm:latest
+          image: opendronemap/odm:3.6.0
           command: ["/bin/bash", "-c"]
           args:
             - |
