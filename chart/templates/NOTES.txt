@@ -57,3 +57,4 @@
    Access details are in the secret: {{ include "scaleodm.fullname" . }}-secret
 {{- end }}
 
+

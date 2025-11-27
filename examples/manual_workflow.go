@@ -119,17 +119,17 @@ func main() {
 			elapsed := time.Since(startTime)
 			fmt.Printf("[%s] Status: %d, Progress: %d%%, Processing time: %dms\n",
 				elapsed.Round(time.Second),
-				info.Status.Code,
+				info.Status,
 				info.Progress,
 				info.ProcessingTime,
 			)
 
 			// Check if complete
-			if info.Status.Code == 40 { // COMPLETED
+			if info.Status == 40 { // COMPLETED
 				fmt.Printf("\n✅ Task completed successfully!\n")
 				fmt.Printf("🎉 Final products should be available at:\n   %s\n", writeS3Path)
 				return
-			} else if info.Status.Code == 30 { // FAILED
+			} else if info.Status == 30 { // FAILED
 				fmt.Printf("\n❌ Task failed!\n")
 				// Try to get output/logs
 				output, err := getTaskOutput(apiURL, taskUUID)
@@ -140,7 +140,7 @@ func main() {
 					fmt.Println("==================================================================================")
 				}
 				os.Exit(1)
-			} else if info.Status.Code == 50 { // CANCELED
+			} else if info.Status == 50 { // CANCELED
 				fmt.Printf("\n⚠️  Task was canceled\n")
 				os.Exit(1)
 			}
@@ -243,12 +243,12 @@ func getTaskInfo(apiURL, uuid string) (*api.TaskInfo, error) {
 		return nil, fmt.Errorf("API returned non-JSON response: %s", string(bodyBytes[:min(200, len(bodyBytes))]))
 	}
 
-	var result api.TaskInfoResponse
+	var result api.TaskInfo
 	if err := json.Unmarshal(bodyBytes, &result); err != nil {
 		return nil, fmt.Errorf("failed to decode response: %w (response: %s)", err, string(bodyBytes[:min(200, len(bodyBytes))]))
 	}
 
-	return &result.Body, nil
+	return &result, nil
 }
 
 func min(a, b int) int {

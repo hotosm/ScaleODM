@@ -1,4 +1,3 @@
-{{- if .Values.api.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,5 +8,3 @@ data:
   ODM_IMAGE: {{ .Values.config.odmImage | quote }}
   CLUSTER_URL: {{ .Values.config.clusterUrl | default (printf "http://%s.%s.svc.cluster.local:%d" (include "scaleodm.fullname" .) .Release.Namespace .Values.api.service.port) | quote }}
   K8S_NAMESPACE: {{ .Values.kubernetes.namespace | quote }}
-{{- end }}
-

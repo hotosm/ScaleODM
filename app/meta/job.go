@@ -164,7 +164,16 @@ func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string
 		WHERE workflow_name = $1
 	`
 
-	_, err := s.db.Pool.Exec(ctx, query, workflowName, status, errorMsg)
+	// Normalise the error message parameter so the driver always sees either a
+	// concrete string or nil, not a pointer type.
+	var errValue interface{}
+	if errorMsg != nil {
+		errValue = *errorMsg
+	} else {
+		errValue = nil
+	}
+
+	_, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue)
 	if err != nil {
 		return fmt.Errorf("failed to update job status: %w", err)
 	}

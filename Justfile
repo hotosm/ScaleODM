@@ -133,15 +133,6 @@ test-cluster-destroy:
 test:
   #!/usr/bin/env bash
   set -e
-  echo "Ensuring compose services are running..."
-  docker compose up -d db s3
-  echo "Waiting for services to be healthy..."
-  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
-      echo "❌ Error: Services failed to become healthy within 60 seconds"
-      docker compose ps
-      exit 1
-  fi
-  echo "✓ Services are healthy"
   echo "Running tests..."
   docker compose run --rm api
 
@@ -153,15 +144,6 @@ test-unit:
 test-integration:
   #!/usr/bin/env bash
   set -e
-  echo "Ensuring compose services are running..."
-  docker compose up -d db s3
-  echo "Waiting for services to be healthy..."
-  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
-      echo "❌ Error: Services failed to become healthy within 60 seconds"
-      docker compose ps
-      exit 1
-  fi
-  echo "✓ Services are healthy"
   echo "Running integration tests..."
   docker compose run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
 
@@ -169,36 +151,46 @@ test-integration:
 test-e2e:
   #!/usr/bin/env bash
   set -e
-  echo "Ensuring compose services are running..."
-  docker compose up -d db s3
-  echo "Waiting for services to be healthy..."
-  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
-      echo "❌ Error: Services failed to become healthy within 60 seconds"
-      docker compose ps
-      exit 1
-  fi
-  echo "✓ Services are healthy"
   echo "Running E2E tests..."
   docker compose run --rm api go test -v -tags=e2e .
+
+# Test the API via Python script
+test-python:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  echo "Starting API container with go run main.go..."
+  docker compose run --rm -d api run main.go
+
+  echo "Running Python API test inside container..."
+  docker run --rm \
+    --network host \
+    --env-file .env \
+    -v "$PWD/examples/python:/app" \
+    --workdir /app \
+    docker.io/python:3.13-slim-trixie \
+    bash -lc '
+      set -euo pipefail
+      python -V
+      pip install --no-cache-dir uv
+      uv sync
+      uv run python api_test.py
+    '
+  
+  echo "Shutting down containers..."
+  docker compose down --remove-orphans
 
 # Start compose services (DB, S3, API)
 # Assumes Talos cluster is already running
 start:
   #!/usr/bin/env bash
   set -e
-  echo "Starting compose services..."
-  docker compose up -d db s3
-  echo "Waiting for services to be healthy..."
-  if ! timeout 60 bash -c 'until docker compose ps | grep -q "healthy.*db" && docker compose ps | grep -q "healthy.*s3"; do sleep 2; done'; then
-      echo "⚠️  Warning: Services may not be healthy yet"
-      docker compose ps
-  fi
-  echo "✓ Services ready, starting API..."
-  docker compose up api
+  echo "Starting API..."
+  docker compose run --rm -d api run main.go
 
 # Stop compose services
 stop:
-  docker compose down
+  docker compose down --remove-orphans
 
 # Setup Talos cluster and start all services for development
 dev: test-cluster-init start

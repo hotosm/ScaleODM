@@ -1,6 +1,3 @@
-# Default values for ScaleODM
-# This is a YAML-formatted file.
-
 # Name override for the chart
 nameOverride: ""
 fullnameOverride: ""
@@ -12,7 +9,6 @@ global:
 
 # ScaleODM API configuration
 api:
-  enabled: true
   image:
     repository: ghcr.io/hotosm/scaleodm
     tag: ""
@@ -47,17 +43,23 @@ api:
 
 # Database configuration
 database:
-  # Use external database (set connection string in secrets)
+  # Use an existing Kubernetes Secret for an external database.
+  # The secret should contain a key with the full PostgreSQL URI
+  # (e.g. postgres://user:password@host:port/database?sslmode=disable).
   external:
     enabled: true
-    # If false, you must provide SCALEODM_DATABASE_URL in secrets
+    secret:
+      name: "scaleodm-db-vars"
+      key: "SCALEODM_DATABASE_URL"
   
-  # Optional: Deploy PostgreSQL as subchart
-  postgresql:
+  # Optional: Deploy PostgreSQL as a subchart when external.enabled is false.
+  # NOTE: This path is mainly for development; for production, prefer an
+  # operator-managed or externally provisioned database and external.secret.
+  postgres:
     enabled: false
-    # PostgreSQL subchart values (if enabled)
     auth:
-      postgresPassword: ""
+      username: scaleodm
+      password: ""
       database: scaleodm
     primary:
       persistence:
@@ -66,12 +68,26 @@ database:
 
 # S3 configuration
 s3:
-  # Use external S3 (set endpoint and credentials in secrets)
+  # Use an existing Kubernetes Secret for S3 configuration. This secret
+  # should live in the same namespace as ScaleODM and contain some or all
+  # of the keys:
+  # - SCALEODM_S3_ENDPOINT
+  # - SCALEODM_S3_ACCESS_KEY
+  # - SCALEODM_S3_SECRET_KEY
+  # - SCALEODM_S3_STS_ENDPOINT
+  # - SCALEODM_S3_STS_ROLE_ARN
   external:
     enabled: true
-    # If false, you must provide S3 configuration in secrets
+    secret:
+      name: "scaleodm-s3-vars"
+      keys:
+        endpoint: "SCALEODM_S3_ENDPOINT"
+        accessKey: "SCALEODM_S3_ACCESS_KEY"
+        secretKey: "SCALEODM_S3_SECRET_KEY"
+        stsEndpoint: "SCALEODM_S3_STS_ENDPOINT"
+        stsRoleArn: "SCALEODM_S3_STS_ROLE_ARN"
   
-  # Optional: Deploy MinIO as subchart
+  # Optional: Deploy MinIO as a subchart when external.enabled is false.
   minio:
     enabled: false
     # MinIO subchart values (if enabled)
@@ -102,29 +118,13 @@ kubernetes:
 # Configuration (non-sensitive)
 config:
   # ODM image to use in workflows
-  odmImage: "docker.io/opendronemap/odm:3.6.0"
+  odmImage: "docker.io/opendronemap/odm:3.5.6"
   
   # Cluster URL (used for federation)
   clusterUrl: ""
   
   # Enqueue test jobs (for testing)
   enqueueTestJobs: "false"
-
-# Secrets (sensitive values - should be provided via --set or secrets)
-# These are not set by default and must be provided during installation
-secrets:
-  # Database connection string
-  # Format: postgres://user:password@host:port/database?sslmode=disable
-  databaseUrl: ""
-  
-  # S3 configuration
-  s3Endpoint: ""
-  s3AccessKey: ""
-  s3SecretKey: ""
-  
-  # Optional: STS configuration for temporary credentials
-  s3StsEndpoint: ""
-  s3StsRoleArn: ""
 
 # Argo Workflows subchart configuration
 argo:
