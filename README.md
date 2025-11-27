@@ -110,14 +110,14 @@ in this repo.
 
 | Status | Feature | Release |
 |:------:|:-------:|:--------|
-| 🔄 | NodeODM-compatible API (submit, status, download) | v1 |
-| 🔄 | Processing pipeline using Argo workflows + ODM containers | v1 |
-| 🔄 | Using the same job statuses as NodeODM (QUEUED, RUNNING, FAILED, COMPLETED, CANCELED) | v1 |
-| 🔄 | Env var config for API / pipeline | v1 |
-| 🔄 | Pre-processing to determine the required resource usage for the workflow (CPU / RAM allocated) | v1 |
-| 🔄 | Accept both zipped and unzipped imagery via S3 dir | v1 |
-| 📅 | Progress monitoring via API by hooking into the ODM container logs | v2 |
-| 📅 | Split-merge workflow | v2 |
+| ✅ | NodeODM-compatible API (submit, status, download) | v1 |
+| ✅ | Processing pipeline using Argo workflows + ODM containers | v1 |
+| ✅ | Using the same job statuses as NodeODM (QUEUED, RUNNING, FAILED, COMPLETED, CANCELED) | v1 |
+| ✅ | Env var config for API / pipeline | v1 |
+| ✅ | Accept both zipped and unzipped imagery via S3 dir | v1 |
+| ✅ | Progress monitoring via API by hooking into the ODM container logs | v1 |
+| 🔄 | Pre-processing to determine the required resource usage for the workflow (CPU / RAM allocated) | v2 |
+| 🔄 | Split-merge workflow | v2 |
 | 📅 | Accept GCP as part of job submission | v2 |
 | 📅 | Federation of ScaleODM instances and task distribution | v3 |
 | 📅 | Webhook triggering - send a notification to external system when complete | v3 |
