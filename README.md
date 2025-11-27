@@ -262,7 +262,7 @@ This will:
 
 ```bash
 # 1. Setup Talos cluster (one-time)
-just test-cluster-init
+just test cluster-init
 
 # 2. Start compose services
 just start
@@ -271,9 +271,9 @@ just start
 **Testing workflow:**
 
 ```bash
-just test-cluster-init  # Setup cluster
+just test cluster-init  # Setup cluster
 just test              # Run tests
-just test-cluster-destroy  # Clean up
+just test cluster-destroy  # Clean up
 ```
 
 See [compose.README.md](./compose.README.md) for detailed setup instructions.

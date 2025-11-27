@@ -1,7 +1,7 @@
 # This file is used for running tests with an attached database
 # 
 # Prerequisites:
-#   1. Talos cluster must be running (created via: just test-cluster-init)
+#   1. Talos cluster must be running (created via: just test cluster-init)
 #   2. Kubeconfig must be configured and point to the Talos cluster
 #
 # Quick start:

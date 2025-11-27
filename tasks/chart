@@ -1,0 +1,76 @@
+# List available commands
+[private]
+default:
+  just --justfile {{justfile()}} --list chart
+
+# Build the Helm chart: lint, update deps, test, and package
+build:
+  #!/usr/bin/env bash
+  set -e
+  
+  echo "🔨 Building Helm chart..."
+  echo ""
+  
+  echo "🔍 Linting chart..."
+  helm lint ./chart
+  echo "✓ Lint passed"
+  echo ""
+  
+  echo "📥 Updating dependencies..."
+  cd chart
+  helm dependency update
+  cd ..
+  echo "✓ Dependencies updated"
+  echo ""
+  
+  echo "🧪 Testing chart (dry-run)..."
+  helm install scaleodm-test ./chart --dry-run --debug > /dev/null
+  echo "✓ Test passed"
+  echo ""
+  
+  echo "📦 Packaging chart..."
+  helm package ./chart
+  PACKAGE=$(ls -t scaleodm-*.tgz | head -1)
+  echo "✓ Chart packaged: $PACKAGE"
+  echo ""
+  echo "✅ Build complete!"
+
+# Lint the Helm chart
+lint:
+  helm lint ./chart
+
+# Package the Helm chart
+package:
+  #!/usr/bin/env bash
+  set -e
+  
+  cd chart
+  helm dependency update
+  cd ..
+  helm package ./chart
+  echo "Package: $(ls -t scaleodm-*.tgz | head -1)"
+
+# Render chart templates
+template:
+  helm template scaleodm ./chart
+
+# Validate chart templates
+validate:
+  helm template scaleodm ./chart | kubectl --dry-run=client -f - validate
+
+# Test chart installation (dry-run)
+test:
+  helm install scaleodm-test ./chart --dry-run --debug
+
+# Show chart information
+show:
+  helm show all ./chart
+
+# Clean up packaged charts
+clean:
+  #!/usr/bin/env bash
+  set -e
+  
+  rm -f scaleodm-*.tgz
+  rm -rf chart/charts/
+  echo "✓ Cleaned up chart artifacts"
