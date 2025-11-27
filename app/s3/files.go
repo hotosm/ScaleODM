@@ -44,6 +44,8 @@ rclone copy "$S3_REMOTE" "$DEST_DIR" \
   --include "*.tiff" --include "*.tif" --include "*.TIFF" --include "*.TIF" \
   --include "*.zip" --include "*.ZIP" \
   --include "*.tar.gz" --include "*.tar" --include "*.TAR.GZ" --include "*.TAR" \
+  --exclude "output/**" \
+  --exclude "**/output/**" \
 
 cd "$DEST_DIR"
 
@@ -74,19 +76,28 @@ echo "Extracting archives..."
 extract_and_clean "$DEST_DIR"
 
 echo "Cleaning up non-image files..."
+# Delete non-image files, but skip anything in output directories
 find "$DEST_DIR" -type f ! \( \
   -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \
-\) -delete
+\) ! -path "*/output/*" -delete
 
-find "$DEST_DIR" -type d -empty -delete
+# Remove empty directories, but skip output directories entirely
+find "$DEST_DIR" -type d ! -path "*/output/*" -empty -delete
 
 echo "Flattening directory structure..."
 FLAT_DIR="$DEST_DIR"
 TEMP_LIST=$(mktemp)
 
-find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) > "$TEMP_LIST"
+# Find image files, excluding any in output directories
+find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) \
+  ! -path "*/output/*" > "$TEMP_LIST"
 
 while IFS= read -r imgfile; do
+  # Skip files in output directories (defensive check)
+  if echo "$imgfile" | grep -q "/output/"; then
+    continue
+  fi
+  
   filename=$(basename "$imgfile")
   if [ "$(dirname "$imgfile")" != "$FLAT_DIR" ]; then
     counter=1
