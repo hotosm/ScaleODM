@@ -9,7 +9,101 @@ default:
 help:
   just --justfile {{justfile()}} --list
 
-# Setup Talos Kubernetes cluster for testing
+# Check if Kubernetes cluster is available and configured
+[private]
+_check-cluster:
+  #!/usr/bin/env bash
+  set +e
+  
+  # Check if kubectl is available
+  if ! command -v kubectl &> /dev/null; then
+      exit 1
+  fi
+  
+  # Check if we can connect to the cluster
+  if ! kubectl cluster-info &> /dev/null; then
+      exit 1
+  fi
+  
+  # Check if we can get nodes (basic connectivity test)
+  if ! kubectl get nodes &> /dev/null; then
+      exit 1
+  fi
+  
+  exit 0
+
+# Install curl if missing
+[private]
+_install-curl:
+  #!/usr/bin/env bash
+  set -e
+  
+  if ! command -v curl &> /dev/null; then
+      echo "📦 Installing curl..."
+      if command -v apt-get &> /dev/null; then
+          sudo apt-get update -qq && sudo apt-get install -y curl
+      elif command -v yum &> /dev/null; then
+          sudo yum install -y curl
+      elif command -v apk &> /dev/null; then
+          sudo apk add --no-cache curl
+      else
+          echo "❌ Error: curl is not installed and no package manager found"
+          echo "   Please install curl manually"
+          exit 1
+      fi
+      echo "✓ curl installed"
+  fi
+
+# Install talosctl if missing
+[private]
+_install-talosctl:
+  #!/usr/bin/env bash
+  set -e
+  
+  if ! command -v talosctl &> /dev/null; then
+      echo "📦 Installing talosctl..."
+      curl -sL https://talos.dev/install | sh
+      # Ensure its in PATH (install script usually adds to ~/.local/bin)
+      if [ -f "$HOME/.local/bin/talosctl" ]; then
+          export PATH="$HOME/.local/bin:$PATH"
+      fi
+      # Verify installation
+      if ! command -v talosctl &> /dev/null; then
+          echo "❌ Error: Failed to install talosctl"
+          exit 1
+      fi
+      echo "✓ talosctl installed"
+  fi
+
+# Install kubectl if missing
+[private]
+_install-kubectl:
+  #!/usr/bin/env bash
+  set -e
+  
+  if ! command -v kubectl &> /dev/null; then
+      echo "📦 Installing kubectl..."
+      # Download latest stable kubectl
+      KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
+      curl -LO "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
+      chmod +x kubectl
+      # Try to install to system path, fallback to user local bin
+      if sudo mv kubectl /usr/local/bin/kubectl 2>/dev/null; then
+          echo "✓ kubectl installed to /usr/local/bin"
+      else
+          mkdir -p "$HOME/.local/bin"
+          mv kubectl "$HOME/.local/bin/kubectl"
+          export PATH="$HOME/.local/bin:$PATH"
+          echo "✓ kubectl installed to ~/.local/bin"
+      fi
+      # Verify installation
+      if ! command -v kubectl &> /dev/null; then
+          echo "❌ Error: Failed to install kubectl"
+          exit 1
+      fi
+  fi
+
+# Setup Talos Kubernetes cluster for testing (idempotent)
 test-cluster-init:
   #!/usr/bin/env bash
   set -e
@@ -26,39 +120,83 @@ test-cluster-init:
   echo "   Control plane memory: ${CONTROL_PLANE_MEMORY}MB"
   echo ""
   
-  # Check if talosctl is installed
-  if ! command -v talosctl &> /dev/null; then
-      echo "❌ Error: talosctl is not installed"
-      echo "   Install from: https://www.talos.dev/latest/introduction/install/"
-      exit 1
-  fi
+  # Install required tools if missing
+  just _install-curl
+  just _install-talosctl
+  just _install-kubectl
   
-  # Check if cluster already exists
-  if talosctl config info --cluster "$CLUSTER_NAME" &> /dev/null; then
-      echo "ℹ️  Cluster '$CLUSTER_NAME' already exists"
-      read -p "   Do you want to destroy and recreate it? (y/N) " -n 1 -r
-      echo
-      if [[ $REPLY =~ ^[Yy]$ ]]; then
-          echo "🗑️  Destroying existing cluster..."
-          talosctl cluster destroy --name "$CLUSTER_NAME" || true
-      else
-          echo "✓ Using existing cluster"
-          echo ""
-          echo "To manually destroy the cluster later:"
-          echo "  just test-cluster-destroy"
-          exit 0
+  # Check if the expected cluster exists and is accessible
+  CLUSTER_SHOW_OUTPUT=$(talosctl cluster show 2>/dev/null || echo "")
+  if [ -n "$CLUSTER_SHOW_OUTPUT" ]; then
+      CURRENT_CLUSTER=$(echo "$CLUSTER_SHOW_OUTPUT" | grep "^NAME" | awk '{print $2}' | head -1 | tr -d '\n\r' || echo "")
+      NODE_COUNT=$(echo "$CLUSTER_SHOW_OUTPUT" | grep -E "^[a-z].*-.*(controlplane|worker)" | wc -l | tr -d '[:space:]')
+      
+      if [ -z "$NODE_COUNT" ] || ! [ "$NODE_COUNT" -ge 0 ] 2>/dev/null; then
+          NODE_COUNT=0
+      fi
+      
+      # Check if a different cluster is running
+      if [ -n "$CURRENT_CLUSTER" ] && [ "$NODE_COUNT" -gt 0 ] && [ "$CURRENT_CLUSTER" != "$CLUSTER_NAME" ]; then
+          echo "❌ Error: A different cluster '$CURRENT_CLUSTER' is currently running"
+          echo "   Expected cluster: $CLUSTER_NAME"
+          echo "   Please destroy the existing cluster or set TALOS_CLUSTER_NAME=$CURRENT_CLUSTER"
+          exit 1
+      fi
+      
+      # Check if expected cluster exists but is not accessible
+      if [ -n "$CURRENT_CLUSTER" ] && [ "$CURRENT_CLUSTER" = "$CLUSTER_NAME" ] && [ "$NODE_COUNT" -gt 0 ]; then
+          if ! kubectl cluster-info &> /dev/null || ! kubectl get nodes &> /dev/null; then
+              echo "❌ Error: Cluster '$CLUSTER_NAME' exists but is not accessible via kubectl"
+              echo "   Please check your cluster status and fix any issues"
+              exit 1
+          fi
+          
+          # Cluster exists and is accessible - verify configuration
+          echo "✓ Cluster '$CLUSTER_NAME' found and accessible"
+          
+          # Verify namespace exists
+          if ! kubectl get namespace "$NAMESPACE" &> /dev/null; then
+              echo "⚠️  Namespace '$NAMESPACE' missing, will create"
+          else
+              echo "✓ Namespace '$NAMESPACE' exists"
+          fi
+          
+          # Verify Argo Workflows is installed
+          if ! kubectl get crd workflows.argoproj.io &> /dev/null; then
+              echo "⚠️  Argo Workflows not installed, will install"
+          else
+              echo "✓ Argo Workflows CRD exists"
+              
+              # If everything is configured, we are done
+              if kubectl get namespace "$NAMESPACE" &> /dev/null; then
+                  echo ""
+                  echo "✅ Cluster is already configured and ready!"
+                  echo ""
+                  
+                  # Ensure service account and RBAC exist (idempotent)
+                  echo "📦 Verifying service account and RBAC..."
+                  kubectl create serviceaccount argo-odm -n "$NAMESPACE" --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
+                  kubectl create clusterrolebinding argo-odm-admin \
+                      --clusterrole=admin \
+                      --serviceaccount="$NAMESPACE:argo-odm" \
+                      --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
+                  echo "✓ Service account and RBAC verified"
+                  echo ""
+                  exit 0
+              fi
+          fi
       fi
   fi
   
-  # Create the cluster
-  echo "📦 Creating Talos cluster..."
+  echo "📦 Creating Talos cluster $CLUSTER_NAME..."
+  
   talosctl cluster create \
       --name "$CLUSTER_NAME" \
       --workers 1 \
+      --memory "${CONTROL_PLANE_MEMORY}" \
       --memory-workers "${WORKER_MEMORY}" \
-      --memory-control-plane "${CONTROL_PLANE_MEMORY}" \
+      --cpus 2 \
       --cpus-workers 2 \
-      --cpus-control-plane 2 \
       --wait
   
   echo ""
@@ -130,9 +268,23 @@ test-cluster-destroy:
 
 # Run all tests (requires Talos cluster and compose services)
 # Will start DB and S3 if not already running
+# Automatically initializes cluster if not available
 test:
   #!/usr/bin/env bash
   set -e
+
+  # Check if cluster is available
+  echo "Checking for Kubernetes cluster..."
+  if ! just _check-cluster; then
+      echo "⚠️  Kubernetes cluster not available"
+      echo "📦 Initializing test cluster (this may take a few minutes)..."
+      # Non-interactive mode will be auto-detected (no TTY in CI)
+      just test-cluster-init
+  else
+      echo "✓ Kubernetes cluster is available"
+  fi
+  
+  echo ""
   echo "Running tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api
 
