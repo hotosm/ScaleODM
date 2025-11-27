@@ -39,13 +39,26 @@ else
 fi
 
 echo "Downloading files with filters..."
+# Use --filter instead of --include/--exclude for deterministic ordering
+# Order matters: exclusions first, then inclusions, then exclude everything else
 rclone copy "$S3_REMOTE" "$DEST_DIR" \
-  --include "*.jpg" --include "*.jpeg" --include "*.JPG" --include "*.JPEG" \
-  --include "*.tiff" --include "*.tif" --include "*.TIFF" --include "*.TIF" \
-  --include "*.zip" --include "*.ZIP" \
-  --include "*.tar.gz" --include "*.tar" --include "*.TAR.GZ" --include "*.TAR" \
-  --exclude "output/**" \
-  --exclude "**/output/**" \
+  --filter "- output/**" \
+  --filter "- **/output/**" \
+  --filter "+ *.jpg" \
+  --filter "+ *.jpeg" \
+  --filter "+ *.JPG" \
+  --filter "+ *.JPEG" \
+  --filter "+ *.tiff" \
+  --filter "+ *.tif" \
+  --filter "+ *.TIFF" \
+  --filter "+ *.TIF" \
+  --filter "+ *.zip" \
+  --filter "+ *.ZIP" \
+  --filter "+ *.tar.gz" \
+  --filter "+ *.tar" \
+  --filter "+ *.TAR.GZ" \
+  --filter "+ *.TAR" \
+  --filter "- *" \
 
 cd "$DEST_DIR"
 
