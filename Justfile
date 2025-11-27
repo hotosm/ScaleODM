@@ -103,6 +103,23 @@ _install-kubectl:
       fi
   fi
 
+# Check test k8s cluster available
+[private]
+_cluster_available:
+  #!/usr/bin/env bash
+  set -e
+
+  echo "Checking for Kubernetes cluster..."
+  if ! just _check-cluster; then
+      echo "⚠️  Kubernetes cluster not available"
+      echo "📦 Initializing test cluster (this may take a few minutes)..."
+      # Non-interactive mode will be auto-detected (no TTY in CI)
+      just test-cluster-init
+  else
+      echo "✓ Kubernetes cluster is available"
+  fi
+  echo "" 
+
 # Setup Talos Kubernetes cluster for testing (idempotent)
 test-cluster-init:
   #!/usr/bin/env bash
@@ -280,6 +297,8 @@ test-cluster-destroy:
   talosctl cluster destroy --name "$CLUSTER_NAME"
   echo "✓ Cluster destroyed"
 
+
+
 # Run all tests (requires Talos cluster and compose services)
 # Will start DB and S3 if not already running
 # Automatically initializes cluster if not available
@@ -287,18 +306,8 @@ test:
   #!/usr/bin/env bash
   set -e
 
-  # Check if cluster is available
-  echo "Checking for Kubernetes cluster..."
-  if ! just _check-cluster; then
-      echo "⚠️  Kubernetes cluster not available"
-      echo "📦 Initializing test cluster (this may take a few minutes)..."
-      # Non-interactive mode will be auto-detected (no TTY in CI)
-      just test-cluster-init
-  else
-      echo "✓ Kubernetes cluster is available"
-  fi
-  
-  echo ""
+  just _cluster_available
+
   echo "Running tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api
 
@@ -317,13 +326,35 @@ test-integration:
 test-e2e:
   #!/usr/bin/env bash
   set -e
+  just _cluster_available
   echo "Running E2E tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
 
-# Test the API via Python script
-test-python:
+# Start compose services (DB, S3, API)
+# Assumes Talos cluster is already running
+start:
+  #!/usr/bin/env bash
+  set -e
+  echo "Starting API..."
+  docker compose run --rm -d api run main.go
+
+# Stop compose services
+stop:
+  docker compose down --remove-orphans
+
+# Setup Talos cluster and start all services for development
+dev: test-cluster-init start
+
+# Run the manual workflow example (loads .env automatically via dotenv-load)
+example-manual:
+  go run examples/manual_workflow.go
+
+# Example the API usage via Python script
+example-python:
   #!/usr/bin/env bash
   set -euo pipefail
+
+  just _cluster_available
 
   echo "Starting API..."
   docker compose up --wait --detach api
@@ -348,25 +379,6 @@ test-python:
   
   echo "Shutting down containers..."
   docker compose down --remove-orphans
-
-# Start compose services (DB, S3, API)
-# Assumes Talos cluster is already running
-start:
-  #!/usr/bin/env bash
-  set -e
-  echo "Starting API..."
-  docker compose run --rm -d api run main.go
-
-# Stop compose services
-stop:
-  docker compose down --remove-orphans
-
-# Setup Talos cluster and start all services for development
-dev: test-cluster-init start
-
-# Run the manual workflow example (loads .env automatically via dotenv-load)
-run-example:
-  go run examples/manual_workflow.go
 
 # Echo to terminal with blue colour
 [no-cd]
