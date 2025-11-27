@@ -173,9 +173,13 @@ func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string
 		errValue = nil
 	}
 
-	_, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue)
+	result, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue)
 	if err != nil {
 		return fmt.Errorf("failed to update job status: %w", err)
+	}
+	rowsAffected := result.RowsAffected()
+	if rowsAffected == 0 {
+		return fmt.Errorf("job not found: %s", workflowName)
 	}
 	return nil
 }
