@@ -8,6 +8,8 @@ build:
   #!/usr/bin/env bash
   set -e
   
+  cd {{justfile_directory()}}
+
   echo "🔨 Building Helm chart..."
   echo ""
   
