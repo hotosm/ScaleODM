@@ -140,6 +140,12 @@ argo:
   
   controller:
     enabled: true
+    # Parallelism configuration to prevent overwhelming worker nodes
+    # This limits the total number of workflows that can run concurrently
+    # across the entire cluster. Recommended: (number of worker nodes) * 2-3
+    # For example: 3 worker nodes = 6-9 concurrent workflows
+    # Set to 0 to disable the limit (not recommended for production)
+    parallelism: 10
   
   # Namespace for Argo Workflows (should match kubernetes.namespace)
   namespace: argo

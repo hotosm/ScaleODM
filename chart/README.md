@@ -152,7 +152,29 @@ argo:
     enabled: true
   controller:
     enabled: true
+    # Parallelism limits concurrent workflows to prevent overwhelming worker nodes
+    # Recommended: (number of worker nodes) * 2-3
+    # Example: 3 worker nodes = 6-9 concurrent workflows
+    parallelism: 10
 ```
+
+### Parallelism Configuration
+
+The `argo.controller.parallelism` setting limits the total number of workflows that can run concurrently across the entire cluster. This prevents overwhelming worker nodes with too many resource-intensive ODM processing jobs.
+
+**Recommendations:**
+- **Small clusters (1-2 worker nodes)**: 4-6 concurrent workflows
+- **Medium clusters (3-5 worker nodes)**: 6-15 concurrent workflows  
+- **Large clusters (6+ worker nodes)**: 12-30+ concurrent workflows
+
+**Formula:** `parallelism = (number of worker nodes) × 2-3`
+
+This accounts for:
+- Each ODM workflow can be CPU/memory intensive
+- Multiple workflows per node allows better resource utilization
+- Prevents node exhaustion while maintaining throughput
+
+**Note:** Set to `0` to disable the limit (not recommended for production as it can overwhelm nodes).
 
 ### Use Existing Argo Workflows
 
@@ -164,6 +186,14 @@ argo:
 
 kubernetes:
   namespace: argo  # Namespace where Argo Workflows is installed
+```
+
+**Important:** If using an existing Argo Workflows installation, you'll need to manually configure parallelism by creating/updating the `workflow-controller-configmap` ConfigMap in the Argo namespace:
+
+```bash
+kubectl create configmap workflow-controller-configmap \
+  --from-literal=parallelism=10 \
+  -n argo
 ```
 
 ## Uninstallation
@@ -227,6 +257,7 @@ kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `s3.external.enabled` | Use external S3 endpoint | `true` |
 | `s3.minio.enabled` | Deploy bundled MinIO subchart | `false` |
 | `argo.enabled` | Deploy Argo Workflows subchart | `true` |
+| `argo.controller.parallelism` | Max concurrent workflows (0 = unlimited) | `10` |
 | `kubernetes.namespace` | Namespace for Argo Workflows | `argo` |
 | `kubernetes.serviceAccount.create` | Create service account | `true` |
 | `kubernetes.rbac.create` | Create RBAC resources | `true` |
