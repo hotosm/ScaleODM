@@ -97,11 +97,12 @@ def task_info(uuid: str) -> None:
     print(f"Body: {resp.text}")
 
 
-def wait_for_task(uuid: str, timeout: int = 1800, interval: int = 10) -> None:
+def wait_for_task(uuid: str, timeout: int = 3600, interval: int = 60) -> None:
     """
     Poll /task/{uuid}/info until the task reaches a terminal state or timeout.
 
-    Terminal states are based on NodeODM/ScaleODM semantics. Adjust as needed.
+    Terminal states are based on NodeODM/ScaleODM semantics.
+    We wait 1hr for the job to complete by default.
     """
     deadline = time.time() + timeout
 
