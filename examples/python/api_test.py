@@ -32,6 +32,7 @@ def create_task() -> str:
     """
     s3_access_key = os.environ.get("SCALEODM_S3_ACCESS_KEY", "")
     s3_secret_key = os.environ.get("SCALEODM_S3_SECRET_KEY", "")
+    s3_endpoint = os.environ.get("SCALEODM_S3_ENDPOINT", "")
 
     read_s3_path = "s3://drone-tm-public/dtm-data/test/"
     # Allow the API to set this automatically: read_s3_path + 'output/'
@@ -48,11 +49,13 @@ def create_task() -> str:
         "options": json.dumps(options),
     }
 
-    # Only send explicit credentials if configured; otherwise the server
-    # can fall back to environment variables.
+    # Only send explicit credentials/endpoint if configured; otherwise the server
+    # can fall back to its own configuration and environment variables.
     if s3_access_key and s3_secret_key:
         payload["s3AccessKeyID"] = s3_access_key
         payload["s3SecretAccessKey"] = s3_secret_key
+    if s3_endpoint:
+        payload["s3Endpoint"] = s3_endpoint
 
     url = f"{BASE_URL}/task/new"
     print(f"POST {url}")
@@ -148,5 +151,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-

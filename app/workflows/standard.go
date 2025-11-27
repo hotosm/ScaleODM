@@ -78,6 +78,7 @@ type ODMPipelineConfig struct {
 	WriteS3Path    string   // S3 path where final ODM outputs will be written
 	ODMFlags       []string // ODM command line flags
 	S3Region       string
+	S3Endpoint     string            // Optional custom S3 endpoint for non-AWS providers
 	S3Credentials  *s3.S3Credentials // S3 credentials for the workflow
 	ServiceAccount string
 	RcloneImage    string
@@ -93,6 +94,7 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 		WriteS3Path:    writeS3Path,
 		ODMFlags:       odmFlags,
 		S3Region:       "us-east-1",
+		S3Endpoint:     "",
 		S3Credentials:  nil, // Must be set before creating workflow (always required)
 		ServiceAccount: "argo-odm",
 		RcloneImage:    "docker.io/rclone/rclone:1",
@@ -123,11 +125,11 @@ func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
 		panic("S3Credentials must be provided - credentials are required for all S3 operations")
 	}
 
-	// Configure AWS credentials via environment variables
+	// Configure AWS/S3 credentials via environment variables
 	// Note: We don't use RCLONE_CONFIG_* env vars because ContainerSet filters them
-	// Instead, we create rclone config on-the-fly in the scripts using AWS env vars
+	// Instead, we create rclone config on-the-fly in the scripts using AWS/S3 env vars
 	awsEnv := []apiv1.EnvVar{
-		// AWS credentials for S3 access (these are NOT filtered by ContainerSet)
+		// Credentials for S3-compatible access (these are NOT filtered by ContainerSet)
 		{Name: "AWS_ACCESS_KEY_ID", Value: config.S3Credentials.AccessKeyID},
 		{Name: "AWS_SECRET_ACCESS_KEY", Value: config.S3Credentials.SecretAccessKey},
 		{Name: "AWS_DEFAULT_REGION", Value: config.S3Region},
@@ -137,6 +139,14 @@ func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
 		awsEnv = append(awsEnv, apiv1.EnvVar{
 			Name:  "AWS_SESSION_TOKEN",
 			Value: config.S3Credentials.SessionToken,
+		})
+	}
+
+	// If a custom S3 endpoint is specified (e.g., for MinIO), expose it as an env var
+	if config.S3Endpoint != "" {
+		awsEnv = append(awsEnv, apiv1.EnvVar{
+			Name:  "AWS_S3_ENDPOINT",
+			Value: config.S3Endpoint,
 		})
 	}
 

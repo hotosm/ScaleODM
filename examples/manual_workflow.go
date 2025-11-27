@@ -66,12 +66,19 @@ func main() {
 		log.Fatalf("Failed to marshal options: %v", err)
 	}
 
-	// Create task request using the shared struct from API package with defaults
-	taskReq := api.NewTaskNewRequest()
-	taskReq.Name = "test-fast-orthophoto"
-	taskReq.ReadS3Path = readS3Path
-	taskReq.WriteS3Path = writeS3Path
-	taskReq.Options = string(optionsJSON) // JSON string, e.g., "[{\"name\":\"fast-orthophoto\",\"value\":true}]"
+	// Create task request using the shared struct from API package
+	taskReq := &api.TaskNewRequest{
+		Name:              "test-fast-orthophoto",
+		ReadS3Path:        readS3Path,
+		WriteS3Path:       writeS3Path,
+		Options:           string(optionsJSON), // JSON string, e.g., "[{\"name\":\"fast-orthophoto\",\"value\":true}]"
+		SkipPostProcessing: false,
+		Webhook:           "",
+		ZipURL:            "",
+		S3Region:          "us-east-1",
+		// S3AccessKeyID / S3SecretAccessKey / S3SessionToken are filled from env below
+		// DateCreated left as zero so the server uses its current time
+	}
 
 	// Add credentials if available
 	if accessKey := os.Getenv("SCALEODM_S3_ACCESS_KEY"); accessKey != "" {
@@ -152,13 +159,12 @@ func main() {
 func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
 	// Marshal request to JSON
 	// Use a map to ensure all fields are included even if empty
-	// Note: Options and Outputs must be JSON strings (not arrays)
+	// Note: Options must be a JSON string (not array)
 	jsonMap := map[string]interface{}{
 		"name":               taskReq.Name,
 		"options":            taskReq.Options, // This is already a JSON string
 		"webhook":            taskReq.Webhook,
 		"skipPostProcessing": taskReq.SkipPostProcessing,
-		"outputs":            taskReq.Outputs, // This is already a JSON string
 		"zipurl":             taskReq.ZipURL,
 		"readS3Path":         taskReq.ReadS3Path,
 		"writeS3Path":        taskReq.WriteS3Path,

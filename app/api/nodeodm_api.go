@@ -103,46 +103,34 @@ type TaskNewRequest struct {
 	// Skip point cloud tiles generation. Defaults to false.
 	SkipPostProcessing bool `json:"skipPostProcessing,omitempty" form:"skipPostProcessing" default:"false" doc:"Skip point cloud tiles generation (default: false)"`
 
+	// NOTE that NodeODM has an 'outputs' param to override default output directory all.zip creation
+	// NOTE we do not implement this intentionally, to keep things simple
 	// JSON array of output paths to include. Defaults to an empty array.
-	Outputs string `json:"outputs,omitempty" form:"outputs" default:"[]" doc:"JSON array of output paths to include (default: [])"`
+	// Outputs string `json:"outputs,omitempty" form:"outputs" default:"[]" doc:"JSON array of output paths to include (default: [])"`
 
 	// URL of zip file containing images (legacy). Prefer readS3Path.
 	ZipURL string `json:"zipurl,omitempty" form:"zipurl" doc:"URL of zip file containing images (deprecated, use readS3Path)"`
 
 	// S3 path to read imagery from. Required for new API usage (unless using legacy zipurl).
 	ReadS3Path string `json:"readS3Path" form:"readS3Path" doc:"S3 path (s3://bucket/path) to read imagery from"`
-
 	// S3 path to write final products to. If omitted, defaults to an 'output/' subdirectory
 	// under the readS3Path.
 	WriteS3Path string `json:"writeS3Path,omitempty" form:"writeS3Path" doc:"S3 path (s3://bucket/path) to write final products to (default: readS3Path + 'output/')"`
 
+	// Optional S3-compatible endpoint override (e.g. for MinIO or non-AWS providers).
+	// If omitted, the server uses its configured default endpoint.
+	S3Endpoint string `json:"s3Endpoint,omitempty" form:"s3Endpoint" doc:"Custom S3 endpoint (optional, for non-AWS S3 providers)"`
 	// S3 credentials. Optional; if omitted, credentials will be resolved from environment
 	// variables (e.g. SCALEODM_S3_ACCESS_KEY / SCALEODM_S3_SECRET_KEY).
 	S3AccessKeyID     string `json:"s3AccessKeyID,omitempty" form:"s3AccessKeyID" doc:"S3 access key ID (optional, for authenticated buckets)"`
 	S3SecretAccessKey string `json:"s3SecretAccessKey,omitempty" form:"s3SecretAccessKey" doc:"S3 secret access key (optional, for authenticated buckets)"`
 	S3SessionToken    string `json:"s3SessionToken,omitempty" form:"s3SessionToken" doc:"S3 session token (optional, for STS credentials)"`
-
 	// S3 region. Defaults to us-east-1 if omitted or empty.
 	S3Region string `json:"s3Region,omitempty" form:"s3Region" default:"us-east-1" doc:"S3 region (default: us-east-1)"`
 
 	// Optional override for creation timestamp. If omitted, the server uses the current
 	// time when the job is created.
 	DateCreated int64 `json:"dateCreated,omitempty" form:"dateCreated" doc:"Override creation timestamp (optional; defaults to current time when omitted)"`
-}
-
-// NewTaskNewRequest creates a new TaskNewRequest with default values
-func NewTaskNewRequest() *TaskNewRequest {
-	return &TaskNewRequest{
-		SkipPostProcessing: false,
-		Outputs:            "[]",
-		Webhook:            "",
-		ZipURL:             "",
-		S3Region:           "us-east-1",
-		S3AccessKeyID:      "",
-		S3SecretAccessKey:  "",
-		S3SessionToken:     "",
-		DateCreated:        time.Now().Unix(),
-	}
 }
 
 type Response struct {
@@ -263,15 +251,15 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Log incoming task creation request (avoid logging secrets directly)
 		log.Printf(
-			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t outputs=%q webhook_set=%t s3Region=%q s3AccessKeyID_set=%t s3SessionToken_set=%t dateCreated=%d token_provided=%t setUUID_set=%t",
+			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t webhook_set=%t s3Region=%q s3Endpoint=%q s3AccessKeyID_set=%t s3SessionToken_set=%t dateCreated=%d token_provided=%t setUUID_set=%t",
 			req.Name,
 			req.ReadS3Path,
 			req.WriteS3Path,
 			req.ZipURL,
 			req.SkipPostProcessing,
-			req.Outputs,
 			req.Webhook != "",
 			req.S3Region,
+			req.S3Endpoint,
 			req.S3AccessKeyID != "",
 			req.S3SessionToken != "",
 			req.DateCreated,
@@ -356,11 +344,12 @@ func (a *API) registerNodeODMRoutes() {
 			projectID = "odm-project"
 		}
 
-		// Determine S3 region
+		// Determine S3 region & optional endpoint
 		s3Region := req.S3Region
 		if s3Region == "" {
 			s3Region = "us-east-1"
 		}
+		s3Endpoint := req.S3Endpoint
 
 		// Handle S3 credentials - always required
 		// 1. API parameters (if provided)
@@ -400,6 +389,7 @@ func (a *API) registerNodeODMRoutes() {
 			odmFlags,
 		)
 		wfConfig.S3Region = s3Region
+		wfConfig.S3Endpoint = s3Endpoint
 		wfConfig.S3Credentials = s3Creds
 
 		// Submit workflow to Argo

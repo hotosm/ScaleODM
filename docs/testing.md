@@ -5,15 +5,15 @@ All tests require the full stack (DB, S3, K8s) running via Docker Compose. Tests
 ## Running Tests
 
 ```bash
-# Start services and run all tests
-docker compose up -d db s3
-docker compose run --rm api
+# Start services and run all tests using the test override
+docker compose -f compose.yaml -f compose.test.yaml up -d db s3
+docker compose -f compose.yaml -f compose.test.yaml run --rm api
 
 # Run specific test package
-docker compose run --rm api go test -v ./app/meta/...
+docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v ./app/meta/...
 
 # Run E2E tests (requires build tag)
-docker compose run --rm api go test -v -tags=e2e .
+docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
 ```
 
 ## Test Structure
@@ -50,7 +50,7 @@ func TestFeature(t *testing.T) {
 
 ```bash
 # Check services
-docker compose ps
+docker compose -f compose.yaml -f compose.test.yaml ps
 
 # Check database connection
 psql postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable

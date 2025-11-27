@@ -43,9 +43,14 @@ services:
       - ./e2e:/code/e2e:ro
       - $HOME/.kube/config:/root/.kube/config
     entrypoint: go
-    # command: run main.go
-    command: test -timeout=5m -v -tags=e2e ./...
-    restart: "no"
+    command: run main.go
+    restart: "unless-stopped"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:31100/health"]
+      interval: 5s
+      retries: 10
+      start_period: 20s
+      timeout: 5s
 
   db:
     image: "docker.io/postgres:18-alpine"

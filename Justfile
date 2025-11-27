@@ -134,7 +134,7 @@ test:
   #!/usr/bin/env bash
   set -e
   echo "Running tests..."
-  docker compose run --rm api
+  docker compose -f compose.yaml -f compose.test.yaml run --rm api
 
 # Run unit tests only (no external dependencies)
 test-unit:
@@ -145,22 +145,25 @@ test-integration:
   #!/usr/bin/env bash
   set -e
   echo "Running integration tests..."
-  docker compose run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
+  docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
 
 # Run E2E tests only (requires DB, S3, and K8s)
 test-e2e:
   #!/usr/bin/env bash
   set -e
   echo "Running E2E tests..."
-  docker compose run --rm api go test -v -tags=e2e .
+  docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
 
 # Test the API via Python script
 test-python:
   #!/usr/bin/env bash
   set -euo pipefail
 
-  echo "Starting API container with go run main.go..."
-  docker compose run --rm -d api run main.go
+  echo "Starting API..."
+  docker compose -f compose.yaml -f compose.test.yaml up -d api
+
+  echo "Waiting for API to become healthy..."
+  docker compose -f compose.yaml -f compose.test.yaml wait api
 
   echo "Running Python API test inside container..."
   docker run --rm \
@@ -168,6 +171,9 @@ test-python:
     --env-file .env \
     -v "$PWD/examples/python:/app" \
     --workdir /app \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -e PYTHONUNBUFFERED=1 \
+    -e PYTHONFAULTHANDLER=1 \
     docker.io/python:3.13-slim-trixie \
     bash -lc '
       set -euo pipefail
@@ -178,7 +184,7 @@ test-python:
     '
   
   echo "Shutting down containers..."
-  docker compose down --remove-orphans
+  docker compose -f compose.yaml -f compose.test.yaml down --remove-orphans
 
 # Start compose services (DB, S3, API)
 # Assumes Talos cluster is already running
@@ -186,11 +192,11 @@ start:
   #!/usr/bin/env bash
   set -e
   echo "Starting API..."
-  docker compose run --rm -d api run main.go
+  docker compose -f compose.yaml -f compose.test.yaml run --rm -d api run main.go
 
 # Stop compose services
 stop:
-  docker compose down --remove-orphans
+  docker compose -f compose.yaml -f compose.test.yaml down --remove-orphans
 
 # Setup Talos cluster and start all services for development
 dev: test-cluster-init start

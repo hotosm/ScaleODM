@@ -292,5 +292,5 @@ The test suite depends on a database and Kubernetes cluster:
 just test
 
 # Or manually
-docker compose run --rm api go test -timeout=2m -v ./...
+docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -timeout=2m -v ./...
 ```

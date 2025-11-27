@@ -21,12 +21,12 @@ jobs:
 
   tests:
     needs: prep
-    uses: hotosm/gh-workflows/.github/workflows/test_compose.yml@2.0.5
+    uses: hotosm/gh-workflows/.github/workflows/test_compose.yaml@2.0.5
     with:
       image_name: ghcr.io/${{ needs.prep.outputs.repo }}
       build_target: build
       tag_override: ci
-      compose_file: compose.yml
+      compose_file: compose.yaml
       compose_service: api
       compose_command: test -timeout=2m -v ./...
       cache_extra_imgs: |
