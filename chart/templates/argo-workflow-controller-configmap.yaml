@@ -1,4 +1,4 @@
-{{- if .Values.argo.enabled }}
+{{- if and (not .Values.argo.enabled) .Values.argo.controller.parallelism }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,9 +7,11 @@ metadata:
   labels:
     {{- include "scaleodm.labels" . | nindent 4 }}
     app.kubernetes.io/component: workflow-controller
+  annotations:
+    meta.helm.sh/release-name: {{ .Release.Name }}
+    meta.helm.sh/release-namespace: {{ .Release.Namespace }}
 data:
-  {{- if .Values.argo.controller.parallelism }}
   parallelism: {{ .Values.argo.controller.parallelism | quote }}
-  {{- end }}
 {{- end }}
+
 

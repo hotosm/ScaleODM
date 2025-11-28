@@ -1,0 +1,16 @@
+name: 🚀 Release Chart
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  packages: write
+
+jobs:
+  publish:
+    uses: hotosm/gh-workflows/.github/workflows/just.yml@3.3.2
+    with:
+      environment: "test"
+      command: "chart publish"
+    secrets: inherit

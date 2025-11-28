@@ -22,3 +22,7 @@ go.work.sum
 
 # env file
 .env
+
+# helm chart
+scaleodm-*.tgz
+ScaleODM-*.tgz

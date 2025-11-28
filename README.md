@@ -132,9 +132,31 @@ in this repo.
 - Multi-step project creation endpoints, with direct file upload.
 - Exposing all of the config options possible in ODM.
 
-## Usage
+## Deployment
 
-Details to come once API is stabilised.
+### Helm chart (OCI)
+
+ScaleODM is distributed as an **OCI Helm chart** in the GitHub Container Registry:
+
+- `oci://ghcr.io/hotosm/charts/scaleodm`
+
+You can install it directly from the registry:
+
+```bash
+# (Optional) authenticate to GHCR if required by your environment
+# echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+
+helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
+  --version <chart-version> \
+  --set database.external.enabled=true \
+  --set database.external.secret.name="scaleodm-db-vars" \
+  --set database.external.secret.key="SCALEODM_DATABASE_URL" \
+  --set s3.external.secret.name="scaleodm-s3-vars" \
+  --set argo.enabled=true
+```
+
+Replace `<chart-version>` with the desired chart version (e.g. the latest release tag).  
+See `chart/README.md` for full configuration options and additional deployment scenarios.
 
 ### S3 Usage
 

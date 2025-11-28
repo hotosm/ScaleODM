@@ -83,6 +83,61 @@ _install-kubectl:
       fi
   fi
 
+# Install Helm if missing
+[private]
+_install-helm:
+  #!/usr/bin/env bash
+  set -e
+
+  if command -v helm &> /dev/null; then
+      exit 0
+  fi
+
+  echo "📦 Installing Helm..."
+
+  # Only Linux / amd64 automated install for now; otherwise instruct user
+  UNAME_S="$(uname -s || echo unknown)"
+  UNAME_M="$(uname -m || echo unknown)"
+
+  if [ "$UNAME_S" != "Linux" ] || { [ "$UNAME_M" != "x86_64" ] && [ "$UNAME_M" != "amd64" ]; }; then
+      echo "❌ Automatic Helm install only supported on Linux amd64."
+      echo "   Please install Helm manually: https://helm.sh/docs/intro/install/"
+      exit 1
+  fi
+
+  TMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_DIR"' EXIT
+
+  # Get latest Helm release tag
+  HELM_TAG="$(curl -sSL https://api.github.com/repos/helm/helm/releases/latest | grep -oE '\"tag_name\":\s*\"v[0-9.]+\"' | head -1 | sed -E 's/\"tag_name\":\s*\"(v[0-9.]+)\"/\1/')"
+  if [ -z "$HELM_TAG" ]; then
+      echo "❌ Failed to determine latest Helm version."
+      exit 1
+  fi
+
+  ARCHIVE="helm-${HELM_TAG}-linux-amd64.tar.gz"
+  URL="https://get.helm.sh/${ARCHIVE}"
+
+  echo "⬇️  Downloading ${URL}..."
+  curl -sSL "$URL" -o "$TMP_DIR/helm.tar.gz"
+  tar -xzf "$TMP_DIR/helm.tar.gz" -C "$TMP_DIR"
+
+  if sudo mv "$TMP_DIR/linux-amd64/helm" /usr/local/bin/helm 2>/dev/null; then
+      chmod +x /usr/local/bin/helm
+      echo "✓ Helm installed to /usr/local/bin/helm"
+  else
+      mkdir -p "$HOME/.local/bin"
+      mv "$TMP_DIR/linux-amd64/helm" "$HOME/.local/bin/helm"
+      chmod +x "$HOME/.local/bin/helm"
+      export PATH="$HOME/.local/bin:$PATH"
+      echo "✓ Helm installed to ~/.local/bin/helm"
+  fi
+
+  if ! command -v helm &> /dev/null; then
+      echo "❌ Error: Failed to install Helm"
+      exit 1
+  fi
+
 # Start compose services (DB, S3, API)
 # Assumes Talos cluster is already running
 start:

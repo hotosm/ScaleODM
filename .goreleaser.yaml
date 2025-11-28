@@ -30,8 +30,6 @@ archives:
 
 checksum:
   name_template: 'checksums.txt'
-gitlab_urls:
-  use_package_registry: true
 snapshot:
   version_template: '{{ .Tag }}-next'
 changelog:
@@ -40,3 +38,8 @@ changelog:
     exclude:
       - '^docs:'
       - '^test:'
+
+release:
+  github:
+    owner: hotosm
+    name: ScaleODM

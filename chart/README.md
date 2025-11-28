@@ -10,14 +10,34 @@ Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
 
 ## Installation
 
-### Quick Start
+### Quick Start (OCI registry)
+
+The ScaleODM chart is published as an **OCI Helm chart** at:
+
+- `oci://ghcr.io/hotosm/charts/scaleodm`
+
+You do **not** need to add a classic HTTP Helm repo; you can install directly from the OCI registry:
 
 ```bash
-# Add the repository (if publishing to a Helm repo)
-helm repo add scaleodm https://charts.example.com/scaleodm
-helm repo update
+# (Optional) authenticate to GHCR if your environment requires it
+# echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
 
-# Install with external database and S3 using existing Secrets
+# Install the chart from OCI
+helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
+  --version <chart-version> \
+  --set database.external.enabled=true \
+  --set database.external.secret.name="scaleodm-db-vars" \
+  --set database.external.secret.key="SCALEODM_DATABASE_URL" \
+  --set s3.external.secret.name="scaleodm-s3-vars" \
+  --set argo.enabled=true
+```
+
+Replace `<chart-version>` with the desired chart version (e.g. the latest release).
+
+### Local Chart Development Install
+
+```bash
+# Install from the local `./chart` directory
 helm install scaleodm ./chart \
   --set database.external.enabled=true \
   --set database.external.secret.name="scaleodm-db-vars" \

@@ -1,6 +1,6 @@
 apiVersion: v2
 type: application
-name: ScaleODM
+name: scaleodm
 description: Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
 version: "0.1.0"
 appVersion: "0.1.0"

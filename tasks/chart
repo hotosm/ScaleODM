@@ -3,33 +3,131 @@
 default:
   just --justfile {{justfile()}} --list chart
 
+# Publish the packaged chart to an OCI registry.
+# Registry URL is resolved in the script from env, not from Justfile interpolation.
+# Defaults to ghcr.io/<owner>/charts, which results in charts at ghcr.io/<owner>/charts/<chartname>
+publish registry="":
+  #!/usr/bin/env bash
+  set -e
+
+  cd {{justfile_directory()}}
+
+  echo "🔐 Logging in to Helm registry..."
+  # Resolve full registry path:
+  # 1. CLI arg: `just chart publish registry="ghcr.io/org/charts"`
+  # 2. Env: HELM_REGISTRY (e.g. "ghcr.io/hotosm/charts")
+  # 3. Default: ghcr.io/<owner>/charts
+  REGISTRY="{{ registry }}"
+  if [ -z "$REGISTRY" ]; then
+      if [ -n "${HELM_REGISTRY:-}" ]; then
+          REGISTRY="${HELM_REGISTRY}"
+      else
+          OWNER="${HELM_REGISTRY_OWNER:-${GITHUB_REPOSITORY_OWNER:-}}"
+          if [ -z "$OWNER" ]; then
+              echo "❌ Unable to determine chart registry owner."
+              echo "   Provide one of:"
+              echo "     - just chart publish registry=\"ghcr.io/<owner>/charts\""
+              echo "     - HELM_REGISTRY=\"ghcr.io/<owner>/charts\""
+              echo "     - HELM_REGISTRY_OWNER or GITHUB_REPOSITORY_OWNER"
+              exit 1
+          fi
+          REGISTRY="ghcr.io/${OWNER}/charts"
+      fi
+  fi
+
+  REGISTRY_HOST="$(printf '%s\n' "$REGISTRY" | cut -d/ -f1)"
+  echo "REGISTRY: ${REGISTRY}"
+  echo "REGISTRY_HOST: ${REGISTRY_HOST}"
+
+  # Prefer explicit Helm registry creds, fall back to GitHub defaults in CI
+  USERNAME="${HELM_REGISTRY_USERNAME:-${GITHUB_ACTOR:-}}"
+  PASSWORD="${HELM_REGISTRY_PASSWORD:-${GITHUB_TOKEN:-}}"
+
+  if [ -z "$USERNAME" ] || [ -z "$PASSWORD" ]; then
+      echo "❌ Missing registry credentials."
+      echo "   Set HELM_REGISTRY_USERNAME / HELM_REGISTRY_PASSWORD"
+      echo "   or rely on GITHUB_ACTOR / GITHUB_TOKEN in GitHub Actions."
+      exit 1
+  fi
+
+  echo "$PASSWORD" | helm registry login "$REGISTRY_HOST" \
+    --username "$USERNAME" \
+    --password-stdin
+
+  just chart build
+
+  CHART_FILE=$(ls -t scaleodm-*.tgz | head -1)
+  if [ -z "$CHART_FILE" ]; then
+      echo "❌ No chart file found. Run build first"
+      exit 1
+  fi
+
+  echo "🚀 Publishing chart to OCI registry..."
+  echo "📦 Chart file: $CHART_FILE"
+  echo "📤 Pushing to: oci://$REGISTRY"
+
+  helm push "$CHART_FILE" "oci://$REGISTRY"
+
+  echo "✅ Chart published!"
+
 # Build the Helm chart: lint, update deps, test, and package
 build:
   #!/usr/bin/env bash
   set -e
   
+  # Ensure Helm is available (works locally and in CI)
+  just _install-helm
+
   cd {{justfile_directory()}}
 
   echo "🔨 Building Helm chart..."
   echo ""
   
+  just chart lint
+  just chart dependencies
+  just chart validate
+  just chart package
+
+# Lint the Helm chart
+lint:
+  #!/usr/bin/env sh
+  set -e
+
+  cd {{justfile_directory()}}
   echo "🔍 Linting chart..."
   helm lint ./chart
   echo "✓ Lint passed"
   echo ""
-  
+
+# Update chart dependences
+dependencies:
+  #!/usr/bin/env sh
+  set -e
+
+  cd {{justfile_directory()}}/chart
   echo "📥 Updating dependencies..."
-  cd chart
   helm dependency update
   cd ..
   echo "✓ Dependencies updated"
   echo ""
-  
+
+# Validate chart templates
+validate:
+  #!/usr/bin/env sh
+  set -e
+
+  cd {{justfile_directory()}}
   echo "🧪 Testing chart (dry-run)..."
-  helm install scaleodm-test ./chart --dry-run --debug > /dev/null
+  helm install scaleodm-test ./chart --dry-run=client --take-ownership --debug > /dev/null
   echo "✓ Test passed"
   echo ""
-  
+
+# Package the Helm chart
+package:
+  #!/usr/bin/env bash
+  set -e
+
+  cd {{justfile_directory()}}
   echo "📦 Packaging chart..."
   helm package ./chart
   PACKAGE=$(ls -t scaleodm-*.tgz | head -1)
@@ -37,35 +135,18 @@ build:
   echo ""
   echo "✅ Build complete!"
 
-# Lint the Helm chart
-lint:
-  helm lint ./chart
-
-# Package the Helm chart
-package:
-  #!/usr/bin/env bash
-  set -e
-  
-  cd chart
-  helm dependency update
-  cd ..
-  helm package ./chart
-  echo "Package: $(ls -t scaleodm-*.tgz | head -1)"
-
 # Render chart templates
 template:
+  #!/usr/bin/env bash
+  set -e
+  cd {{justfile_directory()}}
   helm template scaleodm ./chart
-
-# Validate chart templates
-validate:
-  helm template scaleodm ./chart | kubectl --dry-run=client -f - validate
-
-# Test chart installation (dry-run)
-test:
-  helm install scaleodm-test ./chart --dry-run --debug
 
 # Show chart information
 show:
+  #!/usr/bin/env bash
+  set -e
+  cd {{justfile_directory()}}
   helm show all ./chart
 
 # Clean up packaged charts
@@ -73,6 +154,7 @@ clean:
   #!/usr/bin/env bash
   set -e
   
+  cd {{justfile_directory()}}
   rm -f scaleodm-*.tgz
   rm -rf chart/charts/
   echo "✓ Cleaned up chart artifacts"
