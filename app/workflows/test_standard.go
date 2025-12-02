@@ -42,30 +42,30 @@ func TestStandardWorkflow(ctx context.Context, client *Client) error {
 	if err != nil {
 		return fmt.Errorf("failed to create workflow: %w", err)
 	}
-	fmt.Printf("✅ Workflow created: %s\n", wf.Name)
+	fmt.Printf("Workflow created: %s\n", wf.Name)
 
 	// Watch workflow until completion
-	fmt.Println("\n⏳ Watching workflow until completion...")
+	fmt.Println("\nWatching workflow until completion...")
 	fmt.Println("   (This may take several minutes depending on image count and processing options)")
 	completedWf, err := client.WatchWorkflow(ctx, wf.Name)
 	if err != nil {
 		return fmt.Errorf("failed to watch workflow: %w", err)
 	}
-	fmt.Printf("\n✅ Workflow completed with phase: %s\n", completedWf.Status.Phase)
+	fmt.Printf("\nWorkflow completed with phase: %s\n", completedWf.Status.Phase)
 
 	// Get workflow status
 	phase, message, err := client.GetWorkflowStatus(ctx, wf.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get workflow status: %w", err)
 	}
-	fmt.Printf("📊 Workflow phase: %s", phase)
+	fmt.Printf("Workflow phase: %s", phase)
 	if message != "" {
 		fmt.Printf(", message: %s", message)
 	}
 	fmt.Println()
 
 	// Get workflow logs
-	fmt.Println("\n📋 Retrieving workflow logs...")
+	fmt.Println("\nRetrieving workflow logs...")
 	fmt.Println("==================================================================================")
 	err = client.GetWorkflowLogs(ctx, wf.Name, os.Stdout)
 	if err != nil {
@@ -78,11 +78,11 @@ func TestStandardWorkflow(ctx context.Context, client *Client) error {
 	if err != nil {
 		return fmt.Errorf("failed to check workflow completion: %w", err)
 	}
-	fmt.Printf("\n✓ Workflow complete: %v\n", isComplete)
+	fmt.Printf("\nWorkflow complete: %v\n", isComplete)
 
 	switch phase {
 	case "Succeeded":
-		fmt.Printf("\n🎉 Success! Final products should be available at:\n   %s\n", writeS3Path)
+		fmt.Printf("\nSuccess! Final products should be available at:\n   %s\n", writeS3Path)
 		return nil
 	case "Failed", "Error":
 		return fmt.Errorf("workflow failed with phase: %s", phase)

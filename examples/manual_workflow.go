@@ -91,7 +91,7 @@ func main() {
 		taskReq.S3SessionToken = sessionToken
 	}
 
-	fmt.Println("🚀 Creating ODM task via API...")
+	fmt.Println("Creating ODM task via API...")
 	fmt.Printf("   API URL: %s\n", apiURL)
 	fmt.Printf("   Read S3 Path: %s\n", readS3Path)
 	fmt.Printf("   Write S3 Path: %s\n", writeS3Path)
@@ -102,8 +102,8 @@ func main() {
 		log.Fatalf("Failed to create task: %v", err)
 	}
 
-	fmt.Printf("✅ Task created: %s\n", taskUUID)
-	fmt.Println("\n⏳ Polling for task completion...")
+	fmt.Printf("Task created: %s\n", taskUUID)
+	fmt.Println("\nPolling for task completion...")
 	fmt.Printf("   (This may take several minutes depending on image count and processing options)\n")
 	fmt.Printf("   Polling every %v, max wait time: %v\n", pollInterval, maxWaitTime)
 
@@ -133,22 +133,22 @@ func main() {
 
 			// Check if complete
 			if info.Status == 40 { // COMPLETED
-				fmt.Printf("\n✅ Task completed successfully!\n")
-				fmt.Printf("🎉 Final products should be available at:\n   %s\n", writeS3Path)
+				fmt.Printf("\nTask completed successfully!\n")
+				fmt.Printf("Final products should be available at:\n   %s\n", writeS3Path)
 				return
 			} else if info.Status == 30 { // FAILED
-				fmt.Printf("\n❌ Task failed!\n")
+				fmt.Printf("\nTask failed!\n")
 				// Try to get output/logs
 				output, err := getTaskOutput(apiURL, taskUUID)
 				if err == nil && output != "" {
-					fmt.Println("\n📋 Task output:")
+					fmt.Println("\nTask output:")
 					fmt.Println("==================================================================================")
 					fmt.Println(output)
 					fmt.Println("==================================================================================")
 				}
 				os.Exit(1)
 			} else if info.Status == 50 { // CANCELED
-				fmt.Printf("\n⚠️  Task was canceled\n")
+				fmt.Printf("\nTask was canceled\n")
 				os.Exit(1)
 			}
 			// Continue polling for status 10 (QUEUED) or 20 (RUNNING)

@@ -19,9 +19,6 @@ The ScaleODM chart is published as an **OCI Helm chart** at:
 You do **not** need to add a classic HTTP Helm repo; you can install directly from the OCI registry:
 
 ```bash
-# (Optional) authenticate to GHCR if your environment requires it
-# echo "$GITHUB_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
-
 # Install the chart from OCI
 helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
   --version <chart-version> \

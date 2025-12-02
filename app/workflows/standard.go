@@ -18,6 +18,7 @@ import (
 
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/s3"
+	"github.com/minio/minio-go/v7"
 )
 
 // Client wraps the Argo Workflows client and Kubernetes client
@@ -380,7 +381,6 @@ func (c *Client) getWorkflowLogsFromPods(ctx context.Context, wf *wfv1.Workflow,
 // This is used when the workflow has been cleaned up
 // writeS3Path is the S3 path where logs should be stored (e.g., s3://bucket/path/)
 // s3Client is the minio client to use for fetching logs
-// Note: This function is a placeholder - the API layer calls s3.GetWorkflowLogsFromS3 directly
 func (c *Client) getWorkflowLogsFromS3(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
 	fmt.Fprintf(writer, "Workflow %s not found (may have been cleaned up).\n", workflowName)
 	fmt.Fprintf(writer, "Attempting to fetch logs from S3...\n\n")
@@ -390,10 +390,25 @@ func (c *Client) getWorkflowLogsFromS3(ctx context.Context, workflowName, writeS
 		return fmt.Errorf("invalid S3 path: %s", writeS3Path)
 	}
 	
-	// The API layer should call s3.GetWorkflowLogsFromS3 directly
-	// This function signature is kept for compatibility but the actual
-	// S3 fetch is done in the API layer to avoid circular dependencies
-	return fmt.Errorf("S3 log retrieval should be handled by API layer using s3.GetWorkflowLogsFromS3")
+	// Type assert s3Client to *minio.Client
+	minioClient, ok := s3Client.(*minio.Client)
+	if !ok {
+		return fmt.Errorf("invalid s3Client type: expected *minio.Client")
+	}
+	
+	// Fetch logs from S3
+	logContent, err := s3.GetWorkflowLogsFromS3(ctx, minioClient, writeS3Path)
+	if err != nil {
+		return fmt.Errorf("failed to fetch logs from S3: %w", err)
+	}
+	
+	// Write log content to writer
+	_, err = writer.Write([]byte(logContent))
+	if err != nil {
+		return fmt.Errorf("failed to write logs: %w", err)
+	}
+	
+	return nil
 }
 
 // GetWorkflowLogsWithS3Path retrieves logs for a workflow, with fallback to S3
