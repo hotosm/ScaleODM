@@ -293,8 +293,8 @@ just start
 **Testing workflow:**
 
 ```bash
-just test cluster-init  # Setup cluster
-just test              # Run tests
+just test cluster-init     # Setup cluster
+just test all              # Run tests
 just test cluster-destroy  # Clean up
 ```
 
@@ -311,7 +311,7 @@ The test suite depends on a database and Kubernetes cluster:
 
 ```bash
 # With Talos cluster already running
-just test
+just test all
 
 # Or manually
 docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -timeout=2m -v ./...
