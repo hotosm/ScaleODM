@@ -32,7 +32,8 @@ cluster-available:
   set -e
 
   echo "Checking for Kubernetes cluster..."
-  if ! just _check-cluster; then
+  # Use the test module's private _check-cluster recipe explicitly
+  if ! just test _check-cluster; then
       echo "⚠️  Kubernetes cluster not available"
       echo "📦 Initializing test cluster (this may take a few minutes)..."
       # Non-interactive mode will be auto-detected (no TTY in CI)
@@ -79,7 +80,9 @@ cluster-init:
   just _install-kubectl
   
   # Check if the expected cluster exists and is accessible
-  CLUSTER_SHOW_OUTPUT=$(talosctl cluster show 2>/dev/null || echo "")
+  # Scope `talosctl cluster show` to the expected cluster name so we
+  # can correctly detect when that cluster already exists.
+  CLUSTER_SHOW_OUTPUT=$(talosctl cluster show --name "$CLUSTER_NAME" 2>/dev/null || echo "")
   if [ -n "$CLUSTER_SHOW_OUTPUT" ]; then
       CURRENT_CLUSTER=$(echo "$CLUSTER_SHOW_OUTPUT" | grep "^NAME" | awk '{print $2}' | head -1 | tr -d '\n\r' || echo "")
       NODE_COUNT=$(echo "$CLUSTER_SHOW_OUTPUT" | grep -E "^[a-z].*-.*(controlplane|worker)" | wc -l | tr -d '[:space:]')

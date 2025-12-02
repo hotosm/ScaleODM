@@ -184,7 +184,7 @@ example-python:
       python -V
       pip install --no-cache-dir uv
       uv sync
-      uv run python api_test.py
+      uv run python main.py
     '
   
   echo "Shutting down containers..."
