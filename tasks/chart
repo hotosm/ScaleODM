@@ -64,8 +64,16 @@ publish registry="":
 
   echo "🚀 Publishing chart to OCI registry..."
   echo "📦 Chart file: $CHART_FILE"
-  echo "📤 Pushing to: oci://$REGISTRY"
 
+  echo "🔎 Checking if chart version already exists in registry..."
+  CHART_VERSION=$(helm show chart "$CHART_FILE" | grep '^version:' | awk '{ print $2 }')
+  if helm show chart "oci://$REGISTRY/scaleodm" --version "$CHART_VERSION" >/dev/null 2>&1; then
+      echo "ℹ️ Chart version $CHART_VERSION already exists in OCI registry."
+      echo "   Skipping push."
+      exit 0
+  fi
+
+  echo "📤 Pushing to: oci://$REGISTRY"
   helm push "$CHART_FILE" "oci://$REGISTRY"
 
   echo "✅ Chart published!"
