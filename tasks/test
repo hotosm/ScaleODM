@@ -229,6 +229,8 @@ all:
   #!/usr/bin/env bash
   set -e
 
+  cd {{justfile_directory()}}
+
   just test cluster-available
 
   echo "Running tests..."
@@ -242,6 +244,9 @@ unit:
 integration:
   #!/usr/bin/env bash
   set -e
+  
+  cd {{justfile_directory()}}
+  
   echo "Running integration tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
 
@@ -249,6 +254,9 @@ integration:
 e2e:
   #!/usr/bin/env bash
   set -e
+  
+  cd {{justfile_directory()}}
+  
   just test cluster-available
   echo "Running E2E tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
