@@ -1,5 +1,3 @@
-# ScaleODM
-
 <!-- markdownlint-disable -->
 <div align="center">
     <h1>ScaleODM</h1>

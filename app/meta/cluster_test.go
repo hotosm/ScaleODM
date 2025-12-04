@@ -159,7 +159,8 @@ func TestGetClusterCapacity(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		require.NoError(t, err)
+		// If we get here, either it's a non-retryable error or we've exhausted retries
+		break
 	}
 	require.NoError(t, err)
 
@@ -185,7 +186,8 @@ func TestGetClusterCapacity(t *testing.T) {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		require.NoError(t, err)
+		// If we get here, either it's a non-retryable error or we've exhausted retries
+		break
 	}
 	require.NoError(t, err)
 
@@ -214,11 +216,14 @@ func TestGetClusterCapacity(t *testing.T) {
 		if err == nil {
 			break
 		}
+		// Only retry on "not found" errors, and only if we have retries left
 		if i < 4 && strings.Contains(err.Error(), "not found") {
 			time.Sleep(10 * time.Millisecond)
 			continue
 		}
-		require.NoError(t, err)
+		// If we get here, either it's a non-retryable error or we've exhausted retries
+		// Break and let the final require.NoError handle it
+		break
 	}
 	require.NoError(t, err)
 
