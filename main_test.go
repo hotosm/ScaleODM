@@ -142,10 +142,11 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
 	// Create job
+	workflowName := "e2e-lifecycle-workflow"
 	job, err := store.CreateJob(
 		ctx,
 		"http://localhost:31100",
-		"e2e-lifecycle-workflow",
+		workflowName,
 		"e2e-project",
 		"s3://test-bucket/images/",
 		"s3://test-bucket/output/",
@@ -153,33 +154,50 @@ func TestE2E_JobLifecycle(t *testing.T) {
 		"us-east-1",
 	)
 	require.NoError(t, err)
-	assert.Equal(t, "pending", job.JobStatus)
+	require.NotNil(t, job, "Job should be created successfully")
+	// The default status for new jobs in the metadata store is 'queued'
+	assert.Equal(t, "queued", job.JobStatus)
+
+	// Verify job exists before updating - use a small retry in case of timing issues
+	var retrievedJob *meta.JobMetadata
+	for i := 0; i < 5; i++ {
+		retrievedJob, err = store.GetJob(ctx, workflowName)
+		if err == nil && retrievedJob != nil {
+			break
+		}
+		if i < 4 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	require.NoError(t, err)
+	require.NotNil(t, retrievedJob, "Job should exist before status update")
+	job = retrievedJob
 
 	// Update to running
-	err = store.UpdateJobStatus(ctx, "e2e-lifecycle-workflow", "running", nil)
+	err = store.UpdateJobStatus(ctx, workflowName, "running", nil)
 	require.NoError(t, err)
 
-	job, err = store.GetJob(ctx, "e2e-lifecycle-workflow")
+	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist after status update")
 	assert.Equal(t, "running", job.JobStatus)
 	assert.NotNil(t, job.StartedAt)
 
 	// Update to completed
-	err = store.UpdateJobStatus(ctx, "e2e-lifecycle-workflow", "completed", nil)
+	err = store.UpdateJobStatus(ctx, workflowName, "completed", nil)
 	require.NoError(t, err)
 
-	job, err = store.GetJob(ctx, "e2e-lifecycle-workflow")
+	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist after status update")
 	assert.Equal(t, "completed", job.JobStatus)
 	assert.NotNil(t, job.CompletedAt)
 
 	// Delete job
-	err = store.DeleteJob(ctx, "e2e-lifecycle-workflow")
+	err = store.DeleteJob(ctx, workflowName)
 	require.NoError(t, err)
 
-	job, err = store.GetJob(ctx, "e2e-lifecycle-workflow")
+	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	assert.Nil(t, job)
 }
@@ -191,12 +209,18 @@ func TestE2E_ClusterOperations(t *testing.T) {
 	store := meta.NewStore(db)
 	ctx := context.Background()
 
-	// Ensure cluster exists first (UpdateClusterDetails will create it if needed)
-	err := store.UpdateClusterDetails(ctx, "http://localhost:31100", 20, 50)
+	clusterURL := "http://localhost:31100"
+	
+	// Initialize cluster first (required for GetClusterCapacity)
+	err := db.InitLocalClusterRecord(ctx, clusterURL)
+	require.NoError(t, err)
+
+	// Update cluster details
+	err = store.UpdateClusterDetails(ctx, clusterURL, 20, 50)
 	require.NoError(t, err)
 
 	// Get cluster capacity
-	maxJobs, activeJobs, err := store.GetClusterCapacity(ctx, "http://localhost:31100")
+	maxJobs, activeJobs, err := store.GetClusterCapacity(ctx, clusterURL)
 	require.NoError(t, err)
 	assert.Equal(t, 20, maxJobs)
 	// Note: activeJobs might be > 0 if there are leftover jobs from previous tests
@@ -204,12 +228,12 @@ func TestE2E_ClusterOperations(t *testing.T) {
 	assert.GreaterOrEqual(t, activeJobs, 0)
 
 	// Update heartbeat
-	err = store.UpdateClusterHeartbeat(ctx, "http://localhost:31100")
+	err = store.UpdateClusterHeartbeat(ctx, clusterURL)
 	require.NoError(t, err)
 
 	// List clusters
 	clusters, err := store.ListClusters(ctx)
 	require.NoError(t, err)
 	assert.Len(t, clusters, 1)
-	assert.Equal(t, "http://localhost:31100", clusters[0].ClusterURL)
+	assert.Equal(t, clusterURL, clusters[0].ClusterURL)
 }

@@ -67,19 +67,8 @@ func (s *Store) UpdateClusterDetails(ctx context.Context, clusterID string, maxJ
 
 // Find the number of jobs running currently, with max jobs that can run
 func (s *Store) GetClusterCapacity(ctx context.Context, clusterID string) (maxJobs, activeJobs int, err error) {
-	// First check if cluster exists
-	var exists bool
-	err = s.db.Pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM scaleodm_clusters WHERE cluster_url = $1)
-	`, clusterID).Scan(&exists)
-	if err != nil {
-		return 0, 0, fmt.Errorf("failed to check cluster existence: %w", err)
-	}
-	if !exists {
-		return 0, 0, fmt.Errorf("cluster not found: %s", clusterID)
-	}
-
-	// Get capacity - use COALESCE to handle case when no jobs exist
+	// Get capacity - use a single query that handles the case when no jobs exist
+	// The LEFT JOIN ensures we always get a row if the cluster exists
 	query := `
 		SELECT 
 			c.max_concurrent_jobs, 
@@ -87,11 +76,11 @@ func (s *Store) GetClusterCapacity(ctx context.Context, clusterID string) (maxJo
 		FROM scaleodm_clusters c
 		LEFT JOIN scaleodm_job_metadata j ON j.cluster_url = c.cluster_url AND j.job_status IN ('claimed', 'running')
 		WHERE c.cluster_url = $1
-		GROUP BY c.max_concurrent_jobs
+		GROUP BY c.cluster_url, c.max_concurrent_jobs
 	`
 	err = s.db.Pool.QueryRow(ctx, query, clusterID).Scan(&maxJobs, &activeJobs)
 	if err != nil {
-		// This should not happen if cluster exists, but handle it anyway
+		// If no rows returned, cluster doesn't exist
 		if err == pgx.ErrNoRows {
 			return 0, 0, fmt.Errorf("cluster not found: %s", clusterID)
 		}

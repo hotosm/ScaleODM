@@ -101,6 +101,7 @@ func TestTaskNewEndpoint(t *testing.T) {
 		WriteS3Path: "s3://test-bucket/output/",
 		Options:      `[{"name": "fast-orthophoto", "value": true}]`,
 		S3Region:    "us-east-1",
+		S3Endpoint:  "http://" + testutil.TestS3Endpoint(), // Use MinIO for tests
 		S3AccessKeyID: testutil.TestS3AccessKey(),
 		S3SecretAccessKey: testutil.TestS3SecretKey(),
 	}
@@ -180,9 +181,15 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	)
 	require.NoError(t, err)
 	
+	// Verify job was created before calling API handler
+	job, err := metadataStore.GetJob(ctx, workflowName)
+	require.NoError(t, err)
+	require.NotNil(t, job, "Job should exist before API call")
+	
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/info", nil)
+	req = req.WithContext(ctx) // Use the same context as the test
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
