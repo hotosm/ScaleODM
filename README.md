@@ -1,12 +1,22 @@
 # ScaleODM
 
 <!-- markdownlint-disable -->
+<div align="center">
+    <h1>ScaleODM</h1>
+    <p>Kubernetes-native auto-scaling and load balancing for OpenDroneMap.</p>
+    <a href="https://github.com/hotosm/ScaleODM/releases">
+        <img src="https://img.shields.io/github/v/release/hotosm/ScaleODM?logo=github" alt="Release Version" />
+    </a>
+</div>
 <p align="center">
-  <em>Kubernetes-native auto-scaling and load balancing for OpenDroneMap.</em>
-</p>
-<p align="center">
-  <a href="https://github.com/hotosm/ScaleODM/actions/workflows/release.yml" target="_blank">
-      <img src="https://github.com/hotosm/ScaleODM/actions/workflows/release.yml/badge.svg" alt="Build & Release">
+  <a href="https://github.com/hotosm/ScaleODM/actions/workflows/release_binary.yml" target="_blank">
+      <img src="https://github.com/hotosm/ScaleODM/actions/workflows/release_binary.yml/badge.svg" alt="Binary">
+  </a>
+  <a href="https://github.com/hotosm/ScaleODM/actions/workflows/release_image.yml" target="_blank">
+      <img src="https://github.com/hotosm/ScaleODM/actions/workflows/release_image.yml/badge.svg" alt="Image">
+  </a>
+  <a href="https://github.com/hotosm/ScaleODM/actions/workflows/release_chart.yml" target="_blank">
+      <img src="https://github.com/hotosm/ScaleODM/actions/workflows/release_chart.yml/badge.svg" alt="Chart">
   </a>
   <a href="https://github.com/hotosm/ScaleODM/actions/workflows/test.yml" target="_blank">
       <img src="https://github.com/hotosm/ScaleODM/actions/workflows/test.yml/badge.svg" alt="Test">
