@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -87,14 +88,20 @@ func main() {
 	metadataStore := meta.NewStore(database)
 	log.Printf("Metadata store initialized (took %v)", time.Since(metaStart))
 
-	// Initialize Argo Workflows client
-	log.Println("Initializing Argo Workflows client...")
-	k8sStart := time.Now()
-	wfClient, err := workflows.NewClient(config.KUBECONFIG_PATH, config.K8S_NAMESPACE)
-	if err != nil {
-		log.Fatalf("Failed to initialize Argo Workflows client: %v", err)
+	docsOnly := strings.EqualFold(os.Getenv("SCALEODM_DOCS_ONLY"), "true")
+	var wfClient workflows.WorkflowClient
+	if docsOnly {
+		log.Println("SCALEODM_DOCS_ONLY=true, skipping Argo Workflows client initialization")
+	} else {
+		// Initialize Argo Workflows client
+		log.Println("Initializing Argo Workflows client...")
+		k8sStart := time.Now()
+		wfClient, err = workflows.NewClient(config.KUBECONFIG_PATH, config.K8S_NAMESPACE)
+		if err != nil {
+			log.Fatalf("Failed to initialize Argo Workflows client: %v", err)
+		}
+		log.Printf("Argo Workflows client ready (took %v)", time.Since(k8sStart))
 	}
-	log.Printf("Argo Workflows client ready (took %v)", time.Since(k8sStart))
 
 	// === HUMA CLI ===
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {

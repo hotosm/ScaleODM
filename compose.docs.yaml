@@ -1,0 +1,8 @@
+# Compose override for docs generation.
+# Usage:
+#   docker compose -f compose.yaml -f compose.test.yaml -f compose.docs.yaml up -d
+services:
+  api:
+    command: run main.go
+    environment:
+      SCALEODM_DOCS_ONLY: "true"

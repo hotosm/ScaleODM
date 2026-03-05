@@ -22,12 +22,13 @@ generate-openapi:
   fi
   
   echo "📦 Starting services..."
+  COMPOSE_DOCS_ARGS="-f compose.yaml -f compose.test.yaml -f compose.docs.yaml"
   cleanup() {
-    just stop || true
+    docker compose $COMPOSE_DOCS_ARGS down --remove-orphans || true
   }
   trap cleanup EXIT
 
-  just start
+  docker compose $COMPOSE_DOCS_ARGS up -d db s3 s3-init api
 
   # Wait for API to be ready
   echo "⏳ Waiting for API to be ready..."
@@ -41,9 +42,9 @@ generate-openapi:
     if [ "$ELAPSED" -ge "$API_HEALTH_TIMEOUT_SECONDS" ]; then
       echo "❌ API did not become healthy within ${API_HEALTH_TIMEOUT_SECONDS}s."
       echo "📊 docker compose status:"
-      docker compose ps || true
+      docker compose $COMPOSE_DOCS_ARGS ps || true
       echo "📜 Recent container logs:"
-      docker compose logs --no-color --tail=120 api db s3 s3-init || true
+      docker compose $COMPOSE_DOCS_ARGS logs --no-color --tail=120 api db s3 s3-init || true
       exit 1
     fi
 
