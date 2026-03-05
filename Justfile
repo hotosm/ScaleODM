@@ -2,6 +2,7 @@ set dotenv-load
 
 mod test 'tasks/test'
 mod chart 'tasks/chart'
+mod docs 'tasks/docs'
 
 # List available commands
 [private]

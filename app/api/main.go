@@ -5,12 +5,14 @@ package api
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
 
+	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
@@ -25,24 +27,60 @@ type API struct {
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
 func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) (*API, http.Handler) {
-	config := huma.DefaultConfig("ScaleODM API", "0.1.0")
-	config.DocsPath = "/"
-	config.OpenAPIPath = "/openapi.json"
-	config.Servers = []*huma.Server{
-		{URL: "http://localhost:31100", Description: "ScaleODM"},
+	apiConfig := huma.DefaultConfig("ScaleODM API", "0.1.0")
+	apiConfig.DocsPath = "/"
+	apiConfig.OpenAPIPath = "/openapi.json"
+	apiConfig.Servers = []*huma.Server{
+		{URL: config.SCALEODM_CLUSTER_URL, Description: "ScaleODM"},
 	}
-	config.Info.Description = "Kubernetes-native auto-scaling and load balancing for OpenDroneMap."
-	config.Info.Contact = &huma.Contact{
+	apiConfig.Info.Description = "Kubernetes-native auto-scaling and load balancing for OpenDroneMap."
+	apiConfig.Info.Contact = &huma.Contact{
 		Name: "HOTOSM",
 		URL:  "https://slack.hotosm.org",
 	}
-	config.Info.License = &huma.License{
+	apiConfig.Info.License = &huma.License{
 		Name: "AGPL-3.0-only",
 		URL:  "https://opensource.org/licenses/agpl-v3",
 	}
+	apiConfig.Components.SecuritySchemes = map[string]*huma.SecurityScheme{
+		"tokenAuth": {
+			Type: "apiKey",
+			In:   "query",
+			Name: "token",
+		},
+	}
+	apiConfig.Security = []map[string][]string{
+		{"tokenAuth": {}},
+		{}, // token is optional for compatibility with existing NodeODM behavior
+	}
+	if apiConfig.Components.Responses == nil {
+		apiConfig.Components.Responses = map[string]*huma.Response{}
+	}
+	apiConfig.Components.Responses["BadRequest"] = &huma.Response{
+		Description: "Bad Request",
+		Content: map[string]*huma.MediaType{
+			"application/problem+json": {
+				Schema: &huma.Schema{
+					Ref: "#/components/schemas/ErrorModel",
+				},
+			},
+		},
+	}
+	apiConfig.OnAddOperation = append(apiConfig.OnAddOperation, func(_ *huma.OpenAPI, op *huma.Operation) {
+		if op == nil {
+			return
+		}
+		if op.Responses == nil {
+			op.Responses = map[string]*huma.Response{}
+		}
+		if has4xxResponse(op.Responses) {
+			return
+		}
+		op.Responses["400"] = &huma.Response{Ref: "#/components/responses/BadRequest"}
+	})
 
 	router := http.NewServeMux()
-	humaAPI := humago.New(router, config)
+	humaAPI := humago.New(router, apiConfig)
 	apiObj := &API{
 		metadataStore:  metadataStore,
 		workflowClient: workflowClient,
@@ -54,6 +92,19 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	// apiObj.registerScaleODMRoutes()
 
 	return apiObj, router
+}
+
+func has4xxResponse(responses map[string]*huma.Response) bool {
+	for statusCode := range responses {
+		normalized := strings.ToUpper(strings.TrimSpace(statusCode))
+		if len(normalized) == 3 && normalized[0] == '4' {
+			return true
+		}
+		if normalized == "4XX" {
+			return true
+		}
+	}
+	return false
 }
 
 func (a *API) registerGlobalMRoutes() {

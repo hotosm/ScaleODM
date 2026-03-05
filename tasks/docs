@@ -1,0 +1,168 @@
+# List available commands
+[private]
+default:
+  just --justfile {{justfile()}} --list docs
+
+# Generate OpenAPI spec from running API
+generate-openapi:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  
+  cd {{justfile_directory()}}
+
+  # Prefer local .env; fall back to .env.example for CI/non-local runs.
+  if [ -f .env ]; then
+    set -a
+    . ./.env
+    set +a
+  elif [ -f .env.example ]; then
+    set -a
+    . ./.env.example
+    set +a
+  fi
+  
+  echo "📦 Starting services..."
+  just start
+
+  # Wait for API to be ready
+  echo "⏳ Waiting for API to be ready..."
+  timeout 30 bash -c 'until curl -s http://localhost:31100/health > /dev/null; do sleep 1; done' || {
+    exit 1
+  }
+  
+  echo "📥 Fetching OpenAPI spec..."
+  curl -fsS http://localhost:31100/openapi.json.yaml -o openapi.yaml
+  
+  echo "✓ OpenAPI spec generated: openapi.yaml"
+
+# Generate HTML documentation from OpenAPI spec
+generate-html:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  
+  cd {{justfile_directory()}}
+  
+  if [ ! -f openapi.yaml ]; then
+    echo "❌ openapi.yaml not found. Run 'just docs generate-openapi' first."
+    exit 1
+  fi
+  
+  echo "🔎 Linting OpenAPI spec with Redocly..."
+  docker run --rm \
+    -v "$PWD:/spec" \
+    -w /spec \
+    redocly/cli:2.20.4 lint openapi.yaml || {
+      echo "⚠️ Redocly lint reported issues (continuing)"
+    }
+
+  echo "📚 Generating HTML documentation with Redocly..."
+  mkdir -p docs/api
+  docker run --rm \
+    -v "$PWD:/spec" \
+    -w /spec \
+    docker.io/redocly/cli:2.20.4 build-docs openapi.yaml --output docs/api/index.html
+  
+  echo "✓ HTML documentation generated: docs/api/index.html"
+
+# Generate both OpenAPI spec and HTML docs
+generate:
+  just docs generate-openapi
+  just docs generate-html
+
+# Build a static site directory for GitHub Pages
+build-site output="site":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  cd {{justfile_directory()}}
+
+  OUTPUT_DIR="{{ output }}"
+
+  just docs generate
+
+  echo "🧱 Building static site in ${OUTPUT_DIR}/ ..."
+  rm -rf "$OUTPUT_DIR"
+  mkdir -p "$OUTPUT_DIR"
+
+  if [ -d docs/api ]; then
+    cp -R docs/api "$OUTPUT_DIR/api"
+  fi
+
+  DOC_LINKS=""
+  for md in docs/*.md; do
+    [ -f "$md" ] || continue
+    base="$(basename "$md")"
+    cp "$md" "$OUTPUT_DIR/$base"
+    DOC_LINKS="${DOC_LINKS}<li><a href=\"./${base}\">${base}</a></li>"
+  done
+
+  cat > "$OUTPUT_DIR/index.html" << EOF
+  <!doctype html>
+  <html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>ScaleODM Docs</title>
+    <style>
+      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 48rem; line-height: 1.5; }
+    </style>
+  </head>
+  <body>
+    <h1>ScaleODM Documentation</h1>
+    <p><a href="./api/">Interactive API Documentation</a></p>
+    <h2>Markdown Docs</h2>
+    <ul>${DOC_LINKS}</ul>
+  </body>
+  </html>
+  EOF
+
+  # Disable Jekyll processing to serve directories/files exactly as generated.
+  touch "$OUTPUT_DIR/.nojekyll"
+
+  echo "✓ Static site prepared: ${OUTPUT_DIR}/"
+
+# Publish static site to gh-pages branch
+deploy-site output="site" branch="gh-pages":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  cd {{justfile_directory()}}
+
+  OUTPUT_DIR="{{ output }}"
+  PUBLISH_BRANCH="{{ branch }}"
+
+  if [ ! -d "$OUTPUT_DIR" ]; then
+    echo "❌ Site directory not found: $OUTPUT_DIR"
+    echo "   Run 'just docs build-site' first."
+    exit 1
+  fi
+
+  REMOTE_URL=""
+  if [ -n "${GITHUB_TOKEN:-}" ] && [ -n "${GITHUB_REPOSITORY:-}" ]; then
+    REMOTE_URL="https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+  else
+    REMOTE_URL="$(git remote get-url origin)"
+  fi
+
+  TMP_DIR="$(mktemp -d)"
+  trap 'rm -rf "$TMP_DIR"' EXIT
+
+  cp -R "$OUTPUT_DIR/." "$TMP_DIR/"
+  touch "$TMP_DIR/.nojekyll"
+
+  pushd "$TMP_DIR" > /dev/null
+  git init -q
+  git checkout -b "$PUBLISH_BRANCH" > /dev/null
+  git config user.name "${GIT_USER_NAME:-github-actions[bot]}"
+  git config user.email "${GIT_USER_EMAIL:-41898282+github-actions[bot]@users.noreply.github.com}"
+  git add .
+  git commit -m "docs: publish $(date -u +'%Y-%m-%dT%H:%M:%SZ')" > /dev/null
+  git push --force "$REMOTE_URL" "$PUBLISH_BRANCH"
+  popd > /dev/null
+
+  echo "✅ Published docs to branch: $PUBLISH_BRANCH"
+
+# Build and publish docs (local + CI entrypoint)
+publish output="site" branch="gh-pages":
+  just docs build-site output="{{ output }}"
+  just docs deploy-site output="{{ output }}" branch="{{ branch }}"

@@ -26,3 +26,7 @@ go.work.sum
 # helm chart
 scaleodm-*.tgz
 ScaleODM-*.tgz
+
+# openapi spec + gen
+openapi.yaml
+docs/api

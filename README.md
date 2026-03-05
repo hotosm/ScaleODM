@@ -171,6 +171,28 @@ helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
 Replace `<chart-version>` with the desired chart version (e.g. the latest release tag).  
 See `chart/README.md` for full configuration options and additional deployment scenarios.
 
+## API Usage
+
+ScaleODM implements a NodeODM-compatible API, making it a drop-in replacement for NodeODM.
+
+- **[Interactive API Documentation](https://hotosm.github.io/ScaleODM/api/)** - Browse endpoints, try requests, and view schemas
+- **[NodeODM Compatibility Guide](./docs/node-odm-compatibility.md)** - Detailed endpoint documentation, examples, and migration guide
+
+**Quick Example:**
+```bash
+# Get API info
+curl http://localhost:31100/info
+
+# Create a new task
+curl -X POST http://localhost:31100/task/new \
+  -F "name=my-project" \
+  -F "zipurl=s3://mybucket/images/" \
+  -F 'options=[{"name":"fast-orthophoto","value":true}]'
+
+# Check task status
+curl http://localhost:31100/task/{uuid}/info
+```
+
 ### S3 Usage
 
 ScaleODM supports two modes for S3 access:
@@ -291,7 +313,7 @@ just dev
 This will:
 1. Create a local Talos Kubernetes cluster
 2. Install Argo Workflows
-3. Start PostgreSQL, MinIO, and the ScaleODM API
+3. Start PostgreSQL, Garage S3, and the ScaleODM API
 
 **Manual setup:**
 
