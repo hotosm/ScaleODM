@@ -30,4 +30,3 @@ ScaleODM-*.tgz
 # openapi spec + gen
 openapi.yaml
 docs/api
-output=site

@@ -185,5 +185,5 @@ deploy-site output="site" branch="gh-pages":
 
 # Build and publish docs (local + CI entrypoint)
 publish output="site" branch="gh-pages":
-  just docs build-site output="{{ output }}"
-  just docs deploy-site output="{{ output }}" branch="{{ branch }}"
+  just docs build-site "{{ output }}"
+  just docs deploy-site "{{ output }}" "{{ branch }}"
