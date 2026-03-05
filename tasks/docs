@@ -22,19 +22,38 @@ generate-openapi:
   fi
   
   echo "📦 Starting services..."
+  cleanup() {
+    just stop || true
+  }
+  trap cleanup EXIT
+
   just start
 
   # Wait for API to be ready
   echo "⏳ Waiting for API to be ready..."
-  timeout 30 bash -c 'until curl -s http://localhost:31100/health > /dev/null; do sleep 1; done' || {
-    exit 1
-  }
+  API_HEALTH_TIMEOUT_SECONDS="${API_HEALTH_TIMEOUT_SECONDS:-180}"
+  API_HEALTH_POLL_INTERVAL_SECONDS="${API_HEALTH_POLL_INTERVAL_SECONDS:-2}"
+  WAIT_STARTED_AT="$(date +%s)"
+
+  until curl -fsS http://localhost:31100/health > /dev/null 2>&1; do
+    NOW="$(date +%s)"
+    ELAPSED="$((NOW - WAIT_STARTED_AT))"
+    if [ "$ELAPSED" -ge "$API_HEALTH_TIMEOUT_SECONDS" ]; then
+      echo "❌ API did not become healthy within ${API_HEALTH_TIMEOUT_SECONDS}s."
+      echo "📊 docker compose status:"
+      docker compose ps || true
+      echo "📜 Recent container logs:"
+      docker compose logs --no-color --tail=120 api db s3 s3-init || true
+      exit 1
+    fi
+
+    sleep "$API_HEALTH_POLL_INTERVAL_SECONDS"
+  done
   
   echo "📥 Fetching OpenAPI spec..."
   curl -fsS http://localhost:31100/openapi.json.yaml -o openapi.yaml
   
   echo "✓ OpenAPI spec generated: openapi.yaml"
-  just stop
 
 # Generate HTML documentation from OpenAPI spec
 generate-html:
