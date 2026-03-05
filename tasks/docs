@@ -34,6 +34,7 @@ generate-openapi:
   curl -fsS http://localhost:31100/openapi.json.yaml -o openapi.yaml
   
   echo "✓ OpenAPI spec generated: openapi.yaml"
+  just stop
 
 # Generate HTML documentation from OpenAPI spec
 generate-html:
