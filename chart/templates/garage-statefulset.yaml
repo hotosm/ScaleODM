@@ -1,0 +1,74 @@
+{{- if and (not .Values.s3.external.enabled) .Values.s3.garage.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "scaleodm.fullname" . }}-garage
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  serviceName: {{ include "scaleodm.fullname" . }}-garage-internal
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: {{ include "scaleodm.name" . }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
+      app.kubernetes.io/component: garage
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: {{ include "scaleodm.name" . }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
+        app.kubernetes.io/component: garage
+    spec:
+      containers:
+        - name: garage
+          image: "{{ .Values.s3.garage.image.repository }}:{{ .Values.s3.garage.image.tag }}"
+          imagePullPolicy: {{ .Values.s3.garage.image.pullPolicy }}
+          args:
+            - -c
+            - /etc/garage/garage.toml
+            - server
+          ports:
+            - name: s3
+              containerPort: 3900
+            - name: rpc
+              containerPort: 3901
+            - name: admin
+              containerPort: 3903
+          readinessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            tcpSocket:
+              port: s3
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          volumeMounts:
+            - name: garage-data
+              mountPath: /var/lib/garage
+            - name: garage-config
+              mountPath: /etc/garage
+      volumes:
+        {{- if not .Values.s3.garage.persistence.enabled }}
+        - name: garage-data
+          emptyDir: {}
+        {{- end }}
+        - name: garage-config
+          secret:
+            secretName: {{ include "scaleodm.fullname" . }}-garage-config
+  {{- if .Values.s3.garage.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: garage-data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- if .Values.s3.garage.persistence.storageClass }}
+        storageClassName: {{ .Values.s3.garage.persistence.storageClass | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.s3.garage.persistence.size | quote }}
+  {{- end }}
+{{- end }}

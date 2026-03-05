@@ -87,16 +87,28 @@ s3:
         stsEndpoint: "SCALEODM_S3_STS_ENDPOINT"
         stsRoleArn: "SCALEODM_S3_STS_ROLE_ARN"
   
-  # Optional: Deploy MinIO as a subchart when external.enabled is false.
-  minio:
+  # Optional: Deploy Garage S3 in-cluster when external.enabled is false.
+  garage:
     enabled: false
-    # MinIO subchart values (if enabled)
+    image:
+      repository: docker.io/dxflrs/garage
+      tag: v1.3.1
+      pullPolicy: IfNotPresent
     auth:
-      rootUser: ""
-      rootPassword: ""
+      accessKey: ""
+      secretKey: ""
+    bucket:
+      name: scaleodm
+      keyName: scaleodm
+    admin:
+      token: ""
+    rpc:
+      secret: ""
+      replicationFactor: 1
     persistence:
       enabled: true
       size: 100Gi
+      storageClass: ""
 
 # Kubernetes configuration
 kubernetes:
@@ -161,4 +173,3 @@ ingress:
         - path: /
           pathType: Prefix
   tls: []
-

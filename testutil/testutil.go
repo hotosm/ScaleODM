@@ -60,20 +60,20 @@ func TestS3Endpoint() string {
 }
 
 // TestS3AccessKey returns the S3 access key for tests.
-// This is hard-coded to match the MinIO test instance credentials.
+// This is hard-coded to match the local Garage test instance credentials.
 func TestS3AccessKey() string {
 	return "odm"
 }
 
 // TestS3SecretKey returns the S3 secret key for tests.
-// This is hard-coded to match the MinIO test instance credentials.
+// This is hard-coded to match the local Garage test instance credentials.
 func TestS3SecretKey() string {
 	return "somelongpassword"
 }
 
-// SetupTestS3Bucket creates a test bucket in MinIO if it doesn't exist
+// SetupTestS3Bucket creates a test bucket in local S3 if it doesn't exist
 // This should be called before tests that use S3 buckets
-// Tries both HTTP and HTTPS to handle different MinIO configurations
+// Tries both HTTP and HTTPS to handle different S3 endpoint configurations
 func SetupTestS3Bucket(ctx context.Context, bucketName string) error {
 	endpoint := TestS3Endpoint()
 	accessKey := TestS3AccessKey()
@@ -101,7 +101,7 @@ func SetupTestS3Bucket(ctx context.Context, bucketName string) error {
 	// Remove trailing slash if present
 	endpoint = strings.TrimSuffix(endpoint, "/")
 
-	// Try HTTP first (typical for local MinIO), then HTTPS
+	// Try HTTP first (typical for local test S3), then HTTPS
 	for _, secure := range []bool{false, true} {
 		client, err := minio.New(endpoint, &minio.Options{
 			Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
@@ -158,4 +158,3 @@ func SetupTestS3Bucket(ctx context.Context, bucketName string) error {
 
 	return fmt.Errorf("failed to set up bucket %q: all connection attempts failed", bucketName)
 }
-

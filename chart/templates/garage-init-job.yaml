@@ -1,0 +1,58 @@
+{{- if and (not .Values.s3.external.enabled) .Values.s3.garage.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "scaleodm.fullname" . }}-garage-init
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 3
+  template:
+    metadata:
+      labels:
+        {{- include "scaleodm.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: init
+          image: "{{ .Values.s3.garage.image.repository }}:{{ .Values.s3.garage.image.tag }}"
+          imagePullPolicy: {{ .Values.s3.garage.image.pullPolicy }}
+          command:
+            - /bin/sh
+            - -eu
+            - -c
+            - |
+              G="/garage -c /etc/garage/garage.toml"
+
+              for i in $(seq 1 60); do
+                if $G node id -q >/dev/null 2>&1; then
+                  break
+                fi
+                echo "Waiting for Garage admin API... ($i/60)"
+                sleep 2
+              done
+
+              $G node id -q >/dev/null
+              NODE_ID="$($G node id -q | cut -c1-16)"
+
+              if $G status 2>&1 | grep -q "NO ROLE ASSIGNED"; then
+                $G layout assign "$NODE_ID" -z local -c 1G
+                $G layout apply --version 1
+              fi
+
+              $G key import --yes -n {{ .Values.s3.garage.bucket.keyName | quote }} \
+                {{ required "s3.garage.auth.accessKey is required when s3.garage.enabled=true" .Values.s3.garage.auth.accessKey | quote }} \
+                {{ required "s3.garage.auth.secretKey is required when s3.garage.enabled=true" .Values.s3.garage.auth.secretKey | quote }} || true
+              $G bucket create {{ .Values.s3.garage.bucket.name | quote }} || true
+              $G bucket allow {{ .Values.s3.garage.bucket.name | quote }} --key {{ .Values.s3.garage.bucket.keyName | quote }} --read --write --owner || true
+          volumeMounts:
+            - name: garage-config
+              mountPath: /etc/garage
+      volumes:
+        - name: garage-config
+          secret:
+            secretName: {{ include "scaleodm.fullname" . }}-garage-config
+{{- end }}

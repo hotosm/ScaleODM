@@ -45,36 +45,54 @@ spec:
                   key: database-url
             {{- end }}
 
+            {{- if .Values.s3.external.enabled }}
             - name: SCALEODM_S3_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required" .Values.s3.external.secret.name }}
+                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
                   key: {{ .Values.s3.external.secret.keys.endpoint | default "SCALEODM_S3_ENDPOINT" }}
                   optional: true
             - name: SCALEODM_S3_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required" .Values.s3.external.secret.name }}
+                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
                   key: {{ .Values.s3.external.secret.keys.accessKey | default "SCALEODM_S3_ACCESS_KEY" }}
                   optional: true
             - name: SCALEODM_S3_SECRET_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required" .Values.s3.external.secret.name }}
+                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
                   key: {{ .Values.s3.external.secret.keys.secretKey | default "SCALEODM_S3_SECRET_KEY" }}
                   optional: true
             - name: SCALEODM_S3_STS_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required" .Values.s3.external.secret.name }}
+                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
                   key: {{ .Values.s3.external.secret.keys.stsEndpoint | default "SCALEODM_S3_STS_ENDPOINT" }}
                   optional: true
             - name: SCALEODM_S3_STS_ROLE_ARN
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required" .Values.s3.external.secret.name }}
+                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
                   key: {{ .Values.s3.external.secret.keys.stsRoleArn | default "SCALEODM_S3_STS_ROLE_ARN" }}
                   optional: true
+            {{- else }}
+            - name: SCALEODM_S3_ENDPOINT
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "scaleodm.fullname" . }}-secret
+                  key: s3-endpoint
+            - name: SCALEODM_S3_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "scaleodm.fullname" . }}-secret
+                  key: s3-access-key
+            - name: SCALEODM_S3_SECRET_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "scaleodm.fullname" . }}-secret
+                  key: s3-secret-key
+            {{- end }}
             - name: K8S_NAMESPACE
               value: {{ .Values.kubernetes.namespace | quote }}
             - name: SCALEODM_ODM_IMAGE

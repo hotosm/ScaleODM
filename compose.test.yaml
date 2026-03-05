@@ -4,18 +4,12 @@ services:
   api:
     build:
       target: build
-    # Use .test.env instead of .env to ensure tests use MinIO configuration
+    # Use .test.env to force local Garage S3 settings for test runs.
     env_file: .test.env
     command: test -timeout=5m -v -tags=e2e ./...
     restart: "no"
     healthcheck:
       test: []
-  
-  s3:
-    # Ensure MinIO service uses test credentials (matching .test.env)
-    environment:
-      MINIO_ROOT_USER: odm
-      MINIO_ROOT_PASSWORD: somelongpassword
 
 volumes:
   test-cache:

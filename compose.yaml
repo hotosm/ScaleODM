@@ -13,6 +13,7 @@ networks:
 
 volumes:
   db_data:
+  garage_data:
 
 services:
   api:
@@ -23,8 +24,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-      s3:
-        condition: service_healthy
+      s3-init:
+        condition: service_completed_successfully
     # Use host networking to access localhost Kubernetes API (Talos cluster)
     # This also allows direct access to DB and S3 via localhost ports
     network_mode: "host"
@@ -32,7 +33,7 @@ services:
     environment:
       KUBECONFIG_PATH: /root/.kube/config
       SCALEODM_DATABASE_URL: ${SCALEODM_DATABASE_URL:-postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable}
-      SCALEODM_S3_ENDPOINT: ${SCALEODM_S3_ENDPOINT:-localhost:31102}
+      SCALEODM_S3_ENDPOINT: ${SCALEODM_S3_ENDPOINT:-http://localhost:31102}
       SCALEODM_S3_ACCESS_KEY: ${SCALEODM_S3_ACCESS_KEY:-odm}
       SCALEODM_S3_SECRET_KEY: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
     volumes:
@@ -77,23 +78,65 @@ services:
       retries: 3
 
   s3:
-    image: "docker.io/minio/minio:RELEASE.2025-01-20T14-49-07Z"
-    environment:
-      MINIO_ROOT_USER: ${SCALEODM_S3_ACCESS_KEY:-odm}
-      MINIO_ROOT_PASSWORD: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
-      MINIO_VOLUMES: "/mnt/data"
-      MINIO_BROWSER: "off"
-    # volumes:
-    #   - s3_data:/mnt/data
+    image: docker.io/dxflrs/garage:v1.3.1
+    volumes:
+      - ./garage.toml:/etc/garage.toml:ro
+      - garage_data:/var/lib/garage
     ports:
-      - "31102:9000"
+      - "31102:3900"
     networks:
       - net
-    command: minio server
-    restart: "unless-stopped"
-    healthcheck:
-      test: timeout 5s bash -c ':> /dev/tcp/127.0.0.1/9000' || exit 1
-      interval: 5s
-      retries: 3
-      start_period: 5s
-      timeout: 5s
+    restart: unless-stopped
+    # https://git.deuxfleurs.fr/Deuxfleurs/garage/issues/1354
+    # healthcheck:
+    #   test: ["CMD-SHELL", "/garage node health-check"]
+    #   start_period: 5s
+    #   interval: 5s
+    #   timeout: 5s
+    #   retries: 10
+
+  s3-init:
+    image: docker.io/alpine:3.23
+    depends_on:
+      s3:
+        condition: service_started
+    network_mode: service:s3
+    pid: service:s3
+    environment:
+      GARAGE_ADMIN_TOKEN: garage-admin-token
+      SCALEODM_S3_ACCESS_KEY: ${SCALEODM_S3_ACCESS_KEY:-odm}
+      SCALEODM_S3_SECRET_KEY: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
+    restart: "on-failure:2"
+    entrypoint:
+      - /bin/sh
+      - -eu
+      - -c
+      - |
+        # chroot into the s3 container's filesystem so the garage binary runs
+        # with its own libs/linker, while the shared network namespace keeps
+        # 127.0.0.1:3901 pointing at the live Garage server
+        G="chroot /proc/1/root /garage -c /etc/garage.toml"
+
+        # Wait for server
+        for i in $$(seq 1 20); do
+          if $$G node id -q 2>/dev/null; then break; fi
+          echo "Waiting for Garage RPC... ($$i/20)"
+          sleep 3
+        done
+        $$G node id -q || { echo "Garage RPC not ready"; exit 1; }
+
+        # Init garage nodes
+        if $$G status 2>&1 | grep -q 'NO ROLE ASSIGNED'; then
+          NODE_ID=$$($$G node id -q | cut -c1-16)
+          $$G layout assign "$$NODE_ID" -z local -c 1G
+          $$G layout apply --version 1
+        fi
+
+        # Create S3 bucket
+        $$G key import --yes -n scaleodm \
+          "$${SCALEODM_S3_ACCESS_KEY}" \
+          "$${SCALEODM_S3_SECRET_KEY}" || true
+        $$G bucket create scaleodm-test || true
+        $$G bucket allow scaleodm-test --key scaleodm --read --write --owner || true
+
+        echo "Garage initialized."

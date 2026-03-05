@@ -53,8 +53,11 @@
 
 {{- if not .Values.s3.external.enabled }}
 6. S3 Storage:
-   MinIO has been deployed as a subchart.
+   {{- if .Values.s3.garage.enabled }}
+   Garage S3 has been deployed in-cluster.
    Access details are in the secret: {{ include "scaleodm.fullname" . }}-secret
+   {{- else }}
+   External S3 is disabled, but bundled Garage is also disabled.
+   Set s3.garage.enabled=true or provide an external S3 secret.
+   {{- end }}
 {{- end }}
-
-

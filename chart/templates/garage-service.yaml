@@ -1,0 +1,38 @@
+{{- if and (not .Values.s3.external.enabled) .Values.s3.garage.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scaleodm.fullname" . }}-garage
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: {{ include "scaleodm.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: garage
+  ports:
+    - name: s3
+      port: 3900
+      targetPort: s3
+    - name: admin
+      port: 3903
+      targetPort: admin
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "scaleodm.fullname" . }}-garage-internal
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+spec:
+  clusterIP: None
+  selector:
+    app.kubernetes.io/name: {{ include "scaleodm.name" . }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/component: garage
+  ports:
+    - name: rpc
+      port: 3901
+      targetPort: rpc
+{{- end }}

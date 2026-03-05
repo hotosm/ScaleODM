@@ -43,7 +43,7 @@ func TestFeature(t *testing.T) {
 ## Test Data
 
 - **Database**: Uses `SCALEODM_DATABASE_URL` (same as production). Tests automatically clean up after themselves.
-- **S3**: Uses `SCALEODM_S3_ENDPOINT` (MinIO in compose stack).
+- **S3**: Uses `SCALEODM_S3_ENDPOINT` (Garage S3 in compose stack).
 - **Kubernetes**: Requires real cluster (Talos) with Argo Workflows installed.
 
 ## Troubleshooting

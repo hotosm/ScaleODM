@@ -19,7 +19,3 @@ dependencies:
     version: 15.5.17
     repository: https://charts.bitnami.com/bitnami
     condition: database.postgres.enabled
-  - name: minio
-    version: 14.6.17
-    repository: https://charts.bitnami.com/bitnami
-    condition: s3.minio.enabled

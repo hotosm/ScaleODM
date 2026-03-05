@@ -121,7 +121,7 @@ Then install:
 
 ### External S3
 
-The chart supports external S3-compatible storage (AWS S3, external MinIO, etc.) via an existing Secret:
+The chart supports external S3-compatible storage (AWS S3, Garage, etc.) via an existing Secret:
 
 ```bash
 kubectl create secret generic scaleodm-s3-vars \
@@ -146,13 +146,17 @@ To deploy a Postgres instance via the bundled Bitnami subchart:
 --set database.postgres.auth.password="your-password"
 ```
 
-### Bundled MinIO
+### Bundled Garage
 
-To deploy MinIO via the bundled Bitnami subchart:
+To deploy Garage in-cluster:
 
 ```bash
 --set s3.external.enabled=false \
---set s3.minio.enabled=true
+--set s3.garage.enabled=true \
+--set s3.garage.admin.token="<garage-admin-token>" \
+--set s3.garage.rpc.secret="<garage-rpc-secret>" \
+--set s3.garage.auth.accessKey="<s3-access-key>" \
+--set s3.garage.auth.secretKey="<s3-secret-key>"
 ```
 
 ## Argo Workflows Configuration
@@ -272,7 +276,7 @@ kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `s3.external.secret.keys.stsEndpoint` | Key in the Secret for the STS endpoint | `"SCALEODM_S3_STS_ENDPOINT"` |
 | `s3.external.secret.keys.stsRoleArn` | Key in the Secret for the STS role ARN | `"SCALEODM_S3_STS_ROLE_ARN"` |
 | `s3.external.enabled` | Use external S3 endpoint | `true` |
-| `s3.minio.enabled` | Deploy bundled MinIO subchart | `false` |
+| `s3.garage.enabled` | Deploy bundled Garage in-cluster | `false` |
 | `argo.enabled` | Deploy Argo Workflows subchart | `true` |
 | `argo.controller.parallelism` | Max concurrent workflows (0 = unlimited) | `10` |
 | `kubernetes.namespace` | Namespace for Argo Workflows | `argo` |
@@ -280,5 +284,4 @@ kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `kubernetes.rbac.create` | Create RBAC resources | `true` |
 
 See [values.yaml](values.yaml) for the complete list of configurable parameters.
-
 
