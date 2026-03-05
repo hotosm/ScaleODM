@@ -105,37 +105,14 @@ build-site output="site":
   rm -rf "$OUTPUT_DIR"
   mkdir -p "$OUTPUT_DIR"
 
-  if [ -d docs/api ]; then
-    cp -R docs/api "$OUTPUT_DIR/api"
+  if [ ! -f docs/api/index.html ]; then
+    echo "❌ ReDoc HTML not found at docs/api/index.html"
+    echo "   Run 'just docs generate-html' first."
+    exit 1
   fi
 
-  DOC_LINKS=""
-  for md in docs/*.md; do
-    [ -f "$md" ] || continue
-    base="$(basename "$md")"
-    cp "$md" "$OUTPUT_DIR/$base"
-    DOC_LINKS="${DOC_LINKS}<li><a href=\"./${base}\">${base}</a></li>"
-  done
-
-  cat > "$OUTPUT_DIR/index.html" << EOF
-  <!doctype html>
-  <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>ScaleODM Docs</title>
-    <style>
-      body { font-family: system-ui, sans-serif; margin: 2rem; max-width: 48rem; line-height: 1.5; }
-    </style>
-  </head>
-  <body>
-    <h1>ScaleODM Documentation</h1>
-    <p><a href="./api/">Interactive API Documentation</a></p>
-    <h2>Markdown Docs</h2>
-    <ul>${DOC_LINKS}</ul>
-  </body>
-  </html>
-  EOF
+  # Serve ReDoc as the docs site root.
+  cp docs/api/index.html "$OUTPUT_DIR/index.html"
 
   # Disable Jekyll processing to serve directories/files exactly as generated.
   touch "$OUTPUT_DIR/.nojekyll"
