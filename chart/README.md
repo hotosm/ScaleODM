@@ -8,6 +8,20 @@ Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
 - Helm 3.0+
 - Argo Workflows (can be installed via this chart or pre-installed)
 
+## Architecture
+
+ScaleODM deploys into its own namespace (the Helm release namespace). All resources
+live in this namespace: the API server, workflow pods, secrets, and service accounts.
+
+The Argo Workflows controller runs in a separate namespace (default: `argo`) and
+watches **all namespaces** for Workflow CRDs. When ScaleODM creates a workflow in
+the release namespace, the Argo controller picks it up automatically.
+
+This means:
+- **One S3 secret** in the release namespace serves both the API server and workflow pods
+- No cross-namespace secret replication needed
+- RBAC is scoped to the release namespace
+
 ## Installation
 
 ### Quick Start (OCI registry)
@@ -21,6 +35,7 @@ You do **not** need to add a classic HTTP Helm repo; you can install directly fr
 ```bash
 # Install the chart from OCI
 helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
+  --namespace scaleodm --create-namespace \
   --version <chart-version> \
   --set database.external.enabled=true \
   --set database.external.secret.name="scaleodm-db-vars" \
@@ -36,6 +51,7 @@ Replace `<chart-version>` with the desired chart version (e.g. the latest releas
 ```bash
 # Install from the local `./chart` directory
 helm install scaleodm ./chart \
+  --namespace scaleodm --create-namespace \
   --set database.external.enabled=true \
   --set database.external.secret.name="scaleodm-db-vars" \
   --set database.external.secret.key="SCALEODM_DATABASE_URL" \
@@ -45,10 +61,11 @@ helm install scaleodm ./chart \
 
 ### Install with Argo Workflows Subchart
 
-By default, Argo Workflows is installed as a subchart:
+By default, Argo Workflows is installed as a subchart in the `argo` namespace:
 
 ```bash
 helm install scaleodm ./chart \
+  --namespace scaleodm --create-namespace \
   --set database.external.enabled=true \
   --set database.external.secret.name="scaleodm-db-vars" \
   --set database.external.secret.key="SCALEODM_DATABASE_URL" \
@@ -62,12 +79,12 @@ If Argo Workflows is already installed in your cluster:
 
 ```bash
 helm install scaleodm ./chart \
+  --namespace scaleodm --create-namespace \
   --set database.external.enabled=true \
   --set database.external.secret.name="scaleodm-db-vars" \
   --set database.external.secret.key="SCALEODM_DATABASE_URL" \
   --set s3.external.secret.name="scaleodm-s3-vars" \
-  --set argo.enabled=false \
-  --set kubernetes.namespace="your-argo-namespace"
+  --set argo.enabled=false
 ```
 
 ## Configuration
@@ -80,27 +97,15 @@ At least one database and one S3 configuration path must be provided:
   - `database.external.enabled=true` with `database.external.secret.*` pointing at a Secret key that contains the full PostgreSQL URI (by default key `SCALEODM_DATABASE_URL`), or
   - `database.postgres.enabled=true` and corresponding `database.postgres.auth.*` for the bundled Postgres subchart.
 
-- **S3**:
-  - `s3.external.secret.name` must reference a Secret in the release namespace that contains at least an endpoint key (by default `SCALEODM_S3_ENDPOINT`) and optionally access/secret key and STS fields (`SCALEODM_S3_ACCESS_KEY`, `SCALEODM_S3_SECRET_KEY`, `SCALEODM_S3_STS_ENDPOINT`, `SCALEODM_S3_STS_ROLE_ARN`).
+- **S3** (two secrets required in the release namespace):
+  - `s3.external.secret.name` — Secret containing `SCALEODM_S3_ENDPOINT`, `SCALEODM_S3_ACCESS_KEY`, and `SCALEODM_S3_SECRET_KEY` (used by the API server).
+  - `s3.workflowSecret.name` — Secret containing `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` (used by workflow pods via `secretKeyRef`).
+
+Both secrets live in the release namespace. If you use the same credentials for both, you can point them at the same secret (provided the key names match).
 
 ### Optional Values
 
 See [values.yaml](values.yaml) for all available configuration options.
-
-### Using AWS STS for S3
-
-For better security, use AWS STS temporary credentials by placing the STS configuration in the same S3 Secret used above:
-
-```bash
-kubectl create secret generic s3-secret \
-  --from-literal=SCALEODM_S3_ENDPOINT="s3.amazonaws.com" \
-  --from-literal=SCALEODM_S3_ACCESS_KEY="your-iam-user-access-key" \
-  --from-literal=SCALEODM_S3_SECRET_KEY="your-iam-user-secret-key" \
-  --from-literal=SCALEODM_S3_STS_ROLE_ARN="arn:aws:iam::ACCOUNT_ID:role/scaleodm-workflow-role" \
-  --from-literal=SCALEODM_S3_STS_ENDPOINT="https://sts.us-east-1.amazonaws.com"
-```
-
-See the main [README.md](../README.md) for detailed STS setup instructions.
 
 ### External Database
 
@@ -108,6 +113,7 @@ The chart supports external PostgreSQL databases via an existing Secret that con
 
 ```bash
 kubectl create secret generic scaleodm-db-vars \
+  -n scaleodm \
   --from-literal=SCALEODM_DATABASE_URL="postgres://user:password@host:5432/scaleodm?sslmode=require"
 ```
 
@@ -121,20 +127,31 @@ Then install:
 
 ### External S3
 
-The chart supports external S3-compatible storage (AWS S3, Garage, etc.) via an existing Secret:
+The chart supports external S3-compatible storage (AWS S3, MinIO, Garage, etc.).
+Create two secrets in the release namespace:
 
 ```bash
+# API server credentials
 kubectl create secret generic scaleodm-s3-vars \
+  -n scaleodm \
   --from-literal=SCALEODM_S3_ENDPOINT="s3.amazonaws.com" \
   --from-literal=SCALEODM_S3_ACCESS_KEY="your-access-key" \
   --from-literal=SCALEODM_S3_SECRET_KEY="your-secret-key"
+
+# Workflow pod credentials (referenced via secretKeyRef in workflow specs)
+kubectl create secret generic scaleodm-s3-creds \
+  -n scaleodm \
+  --from-literal=AWS_ACCESS_KEY_ID="your-access-key" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="your-secret-key" \
+  --from-literal=AWS_DEFAULT_REGION="us-east-1"
 ```
 
 Then install:
 
 ```bash
 --set s3.external.enabled=true \
---set s3.external.secret.name="scaleodm-s3-vars"
+--set s3.external.secret.name="scaleodm-s3-vars" \
+--set s3.workflowSecret.name="scaleodm-s3-creds"
 ```
 
 ### Bundled Postgres
@@ -163,12 +180,13 @@ To deploy Garage in-cluster:
 
 ### Deploy Argo Workflows via Subchart
 
-When `argo.enabled=true` (default), Argo Workflows is deployed as a subchart:
+When `argo.enabled=true` (default), Argo Workflows is deployed as a subchart
+in the `argo` namespace. The controller watches all namespaces for workflow CRDs:
 
 ```yaml
 argo:
   enabled: true
-  namespace: argo
+  namespaceOverride: argo
   server:
     enabled: true
   controller:
@@ -185,10 +203,10 @@ The `argo.controller.parallelism` setting limits the total number of workflows t
 
 **Recommendations:**
 - **Small clusters (1-2 worker nodes)**: 4-6 concurrent workflows
-- **Medium clusters (3-5 worker nodes)**: 6-15 concurrent workflows  
+- **Medium clusters (3-5 worker nodes)**: 6-15 concurrent workflows
 - **Large clusters (6+ worker nodes)**: 12-30+ concurrent workflows
 
-**Formula:** `parallelism = (number of worker nodes) × 2-3`
+**Formula:** `parallelism = (number of worker nodes) * 2-3`
 
 This accounts for:
 - Each ODM workflow can be CPU/memory intensive
@@ -199,17 +217,14 @@ This accounts for:
 
 ### Use Existing Argo Workflows
 
-If Argo Workflows is already installed:
+If Argo Workflows is already installed and its controller watches all namespaces:
 
 ```yaml
 argo:
   enabled: false
-
-kubernetes:
-  namespace: argo  # Namespace where Argo Workflows is installed
 ```
 
-**Important:** If using an existing Argo Workflows installation, you'll need to manually configure parallelism by creating/updating the `workflow-controller-configmap` ConfigMap in the Argo namespace:
+**Important:** If using an existing Argo Workflows installation, you may need to manually configure parallelism by creating/updating the `workflow-controller-configmap` ConfigMap in the Argo namespace:
 
 ```bash
 kubectl create configmap workflow-controller-configmap \
@@ -220,7 +235,7 @@ kubectl create configmap workflow-controller-configmap \
 ## Uninstallation
 
 ```bash
-helm uninstall scaleodm
+helm uninstall scaleodm -n scaleodm
 ```
 
 ## Troubleshooting
@@ -228,32 +243,32 @@ helm uninstall scaleodm
 ### Check Pod Status
 
 ```bash
-kubectl get pods -l app.kubernetes.io/name=scaleodm
+kubectl get pods -n scaleodm -l app.kubernetes.io/name=scaleodm
 ```
 
 ### Check Logs
 
 ```bash
-kubectl logs -l app.kubernetes.io/name=scaleodm
+kubectl logs -n scaleodm -l app.kubernetes.io/name=scaleodm
 ```
 
 ### Check Argo Workflows
 
 ```bash
 kubectl get pods -n argo
-kubectl get workflows -n argo
+kubectl get workflows -n scaleodm
 ```
 
 ### Verify Database Connection
 
 ```bash
-kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_DATABASE_URL
+kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_DATABASE_URL
 ```
 
 ### Verify S3 Configuration
 
 ```bash
-kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_S3
+kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 ```
 
 ## Values Reference
@@ -273,15 +288,14 @@ kubectl exec -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `s3.external.secret.keys.endpoint` | Key in the Secret for the S3 endpoint | `"SCALEODM_S3_ENDPOINT"` |
 | `s3.external.secret.keys.accessKey` | Key in the Secret for the S3 access key | `"SCALEODM_S3_ACCESS_KEY"` |
 | `s3.external.secret.keys.secretKey` | Key in the Secret for the S3 secret key | `"SCALEODM_S3_SECRET_KEY"` |
-| `s3.external.secret.keys.stsEndpoint` | Key in the Secret for the STS endpoint | `"SCALEODM_S3_STS_ENDPOINT"` |
-| `s3.external.secret.keys.stsRoleArn` | Key in the Secret for the STS role ARN | `"SCALEODM_S3_STS_ROLE_ARN"` |
 | `s3.external.enabled` | Use external S3 endpoint | `true` |
+| `s3.workflowSecret.name` | Workflow pod S3 secret name (in release namespace) | `"scaleodm-s3-creds"` |
+| `s3.workflowSecret.region` | Default AWS region stored in workflow secret (Garage mode) | `"us-east-1"` |
 | `s3.garage.enabled` | Deploy bundled Garage in-cluster | `false` |
 | `argo.enabled` | Deploy Argo Workflows subchart | `true` |
 | `argo.controller.parallelism` | Max concurrent workflows (0 = unlimited) | `10` |
-| `kubernetes.namespace` | Namespace for Argo Workflows | `argo` |
+| `argo.namespaceOverride` | Namespace for Argo controller (subchart mode) | `argo` |
 | `kubernetes.serviceAccount.create` | Create service account | `true` |
 | `kubernetes.rbac.create` | Create RBAC resources | `true` |
 
 See [values.yaml](values.yaml) for the complete list of configurable parameters.
-

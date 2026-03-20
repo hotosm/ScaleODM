@@ -45,8 +45,7 @@ func testDB(t *testing.T) (*db.DB, func()) {
 
 		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_clusters CASCADE")
-		
+
 		database.Close()
 	}
 
@@ -76,19 +75,14 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 	store := meta.NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Set up test S3 bucket
-	err = testutil.SetupTestS3Bucket(ctx, "test-bucket")
+	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
 	// Create multiple jobs
 	for i := 0; i < 3; i++ {
 		_, createErr := store.CreateJob(
 			ctx,
-			"http://localhost:31100",
 			fmt.Sprintf("e2e-workflow-%d", i),
 			"e2e-project",
 			"s3://test-bucket/images/",
@@ -106,11 +100,11 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 }
 
 func TestE2E_WorkflowClient_WithK8s(t *testing.T) {
-	
+
 	kubeconfig := os.Getenv("KUBECONFIG_PATH")
 	namespace := os.Getenv("K8S_NAMESPACE")
 	if namespace == "" {
-		namespace = "argo"
+		namespace = "default"
 	}
 
 	client, err := workflows.NewClient(kubeconfig, namespace)
@@ -133,19 +127,14 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	store := meta.NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Set up test S3 bucket
-	err = testutil.SetupTestS3Bucket(ctx, "test-bucket")
+	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
 	// Create job
 	workflowName := "e2e-lifecycle-workflow"
 	job, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		workflowName,
 		"e2e-project",
 		"s3://test-bucket/images/",
@@ -200,40 +189,4 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	assert.Nil(t, job)
-}
-
-func TestE2E_ClusterOperations(t *testing.T) {
-	db, cleanup := testDB(t)
-	defer cleanup()
-
-	store := meta.NewStore(db)
-	ctx := context.Background()
-
-	clusterURL := "http://localhost:31100"
-	
-	// Initialize cluster first (required for GetClusterCapacity)
-	err := db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
-
-	// Update cluster details
-	err = store.UpdateClusterDetails(ctx, clusterURL, 20, 50)
-	require.NoError(t, err)
-
-	// Get cluster capacity
-	maxJobs, activeJobs, err := store.GetClusterCapacity(ctx, clusterURL)
-	require.NoError(t, err)
-	assert.Equal(t, 20, maxJobs)
-	// Note: activeJobs might be > 0 if there are leftover jobs from previous tests
-	// The cleanup should handle this, but we'll just check it's a valid number
-	assert.GreaterOrEqual(t, activeJobs, 0)
-
-	// Update heartbeat
-	err = store.UpdateClusterHeartbeat(ctx, clusterURL)
-	require.NoError(t, err)
-
-	// List clusters
-	clusters, err := store.ListClusters(ctx)
-	require.NoError(t, err)
-	assert.Len(t, clusters, 1)
-	assert.Equal(t, clusterURL, clusters[0].ClusterURL)
 }

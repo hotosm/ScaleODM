@@ -4,7 +4,7 @@ package s3
 // These functions generate shell scripts for use in Argo workflow containers
 
 // GenerateDownloadScript generates a shell script for downloading and processing imagery from S3
-// Credentials are always required and configured via AWS environment variables
+// Credentials are injected via Kubernetes Secret references in the workflow spec
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
 func GenerateDownloadScript(jobID, srcPath string) string {
 	return `set -e
@@ -62,24 +62,50 @@ rclone copy "$S3_REMOTE" "$DEST_DIR" \
 
 cd "$DEST_DIR"
 
+# Safety limits for archive extraction
+MAX_EXTRACT_SIZE_MB=50000  # 50GB max total extracted size
+MAX_FILES=500000           # Max number of extracted files
+
+check_extract_limits() {
+  local dir="$1"
+  local total_size_kb
+  total_size_kb=$(du -sk "$dir" 2>/dev/null | cut -f1)
+  local total_size_mb=$((total_size_kb / 1024))
+  if [ "$total_size_mb" -gt "$MAX_EXTRACT_SIZE_MB" ]; then
+    echo "ERROR: Extracted data exceeds ${MAX_EXTRACT_SIZE_MB}MB limit (${total_size_mb}MB). Aborting."
+    exit 1
+  fi
+  local file_count
+  file_count=$(find "$dir" -type f | wc -l)
+  if [ "$file_count" -gt "$MAX_FILES" ]; then
+    echo "ERROR: Extracted file count exceeds ${MAX_FILES} limit (${file_count}). Aborting."
+    exit 1
+  fi
+}
+
 extract_and_clean() {
   local dir="$1"
   local found_archive=false
-  
+
   find "$dir" -type f \( -name "*.zip" -o -name "*.ZIP" \) | while read zipfile; do
     found_archive=true
     echo "Extracting $zipfile..."
-    unzip -q "$zipfile" -d "$(dirname "$zipfile")" || true
+    # Use -j to junk (flatten) paths within the zip, preventing path traversal
+    unzip -q -o -j "$zipfile" -d "$(dirname "$zipfile")" || true
     rm -f "$zipfile"
+    check_extract_limits "$dir"
   done
-  
+
   find "$dir" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.TAR.GZ" -o -name "*.TAR" \) | while read tarfile; do
     found_archive=true
     echo "Extracting $tarfile..."
-    tar -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || tar -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || true
+    # Use --no-same-owner and strip leading path components to prevent path traversal
+    tar --no-same-owner --no-same-permissions -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || \
+    tar --no-same-owner --no-same-permissions -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || true
     rm -f "$tarfile"
+    check_extract_limits "$dir"
   done
-  
+
   if [ "$found_archive" = true ]; then
     extract_and_clean "$dir"
   fi
@@ -110,7 +136,7 @@ while IFS= read -r imgfile; do
   if echo "$imgfile" | grep -q "/output/"; then
     continue
   fi
-  
+
   filename=$(basename "$imgfile")
   if [ "$(dirname "$imgfile")" != "$FLAT_DIR" ]; then
     counter=1
@@ -135,7 +161,7 @@ find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff"
 }
 
 // GenerateUploadScript generates a shell script for uploading ODM results to S3
-// Credentials are always required and configured via AWS environment variables
+// Credentials are injected via Kubernetes Secret references in the workflow spec
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
 func GenerateUploadScript(destPath string) string {
 	return `set -e
@@ -171,17 +197,12 @@ echo "Destination Path: $DEST_PATH"
 if [ -n "$AWS_ACCESS_KEY_ID" ]; then
   echo "AWS_ACCESS_KEY_ID is set (length: ${#AWS_ACCESS_KEY_ID})"
 else
-  echo "⚠️  Warning: AWS_ACCESS_KEY_ID is not set"
+  echo "Warning: AWS_ACCESS_KEY_ID is not set"
 fi
 if [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
   echo "AWS_SECRET_ACCESS_KEY is set (length: ${#AWS_SECRET_ACCESS_KEY})"
 else
-  echo "⚠️  Warning: AWS_SECRET_ACCESS_KEY is not set"
-fi
-if [ -n "$AWS_SESSION_TOKEN" ]; then
-  echo "AWS_SESSION_TOKEN is set (using STS credentials)"
-else
-  echo "AWS_SESSION_TOKEN is not set (using static credentials)"
+  echo "Warning: AWS_SECRET_ACCESS_KEY is not set"
 fi
 echo "AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-not set}"
 
@@ -190,24 +211,21 @@ echo "s3 write test $(date)" > "$TEST_FILE"
 TEST_OBJECT="$S3_REMOTE/.s3-write-test-$(date +%s)"
 
 echo "Testing write to: $TEST_OBJECT"
-# Try to upload test file (without metadata flag which might cause issues)
-# Capture both stdout and stderr for debugging
 TEST_OUTPUT=$(rclone copyto "$TEST_FILE" "$TEST_OBJECT" 2>&1)
 TEST_EXIT_CODE=$?
 
 if [ $TEST_EXIT_CODE -ne 0 ]; then
   echo ""
-  echo "⚠️  Warning: Test write failed (exit code: $TEST_EXIT_CODE)"
+  echo "Warning: Test write failed (exit code: $TEST_EXIT_CODE)"
   echo "Test output: $TEST_OUTPUT"
   echo ""
   echo "This might be a false positive. Continuing with actual upload..."
   echo "The upload will fail if there are real permission issues."
   echo ""
-  # Don't exit - let the actual upload try and fail if needed
 else
   echo "Test write successful, cleaning up test object..."
   rclone deletefile "$TEST_OBJECT" 2>&1 || echo "Warning: Failed to delete test object (non-fatal)"
-  echo "✅ S3 write access confirmed."
+  echo "S3 write access confirmed."
 fi
 
 rm -f "$TEST_FILE"
@@ -226,11 +244,11 @@ ls -lh "$SRC_DIR"
 
 echo "Uploading to S3..."
 if ! rclone copy "$SRC_DIR" "$S3_REMOTE" --progress; then
-  echo "❌ Upload failed."
+  echo "Upload failed."
   exit 1
 fi
 
-echo "✅ Upload complete."`
+echo "Upload complete."`
 }
 
 // GenerateLogUploadScript generates a script to collect workflow logs and upload to S3
@@ -319,9 +337,9 @@ LOG_OBJECT="$S3_REMOTE/.workflow-logs.txt"
 
 echo "Uploading workflow logs to S3..."
 if rclone copyto "$LOG_FILE" "$LOG_OBJECT" --progress; then
-  echo "✅ Workflow logs uploaded to: s3://$(echo "$LOG_OBJECT" | sed 's|^s3:||')"
+  echo "Workflow logs uploaded to: s3://$(echo "$LOG_OBJECT" | sed 's|^s3:||')"
 else
-  echo "⚠️  Warning: Failed to upload workflow logs to S3"
+  echo "Warning: Failed to upload workflow logs to S3"
   # Don't fail the workflow if log upload fails
 fi
 

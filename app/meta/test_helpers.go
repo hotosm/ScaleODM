@@ -36,7 +36,6 @@ func testDB(t *testing.T) (*db.DB, func()) {
 
 		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_clusters CASCADE")
 		
 		database.Close()
 	}

@@ -13,13 +13,8 @@
 // Environment variables (required):
 //
 //	SCALEODM_API_URL - API base URL (default: http://localhost:31100)
-//	SCALEODM_S3_ACCESS_KEY - S3 access key (required)
-//	SCALEODM_S3_SECRET_KEY - S3 secret key (required)
-//	SCALEODM_S3_STS_ROLE_ARN - STS role ARN (optional, for temporary credentials)
-//	SCALEODM_S3_STS_ENDPOINT - STS endpoint (optional, defaults to https://sts.us-east-1.amazonaws.com)
 //
-// If SCALEODM_S3_STS_ROLE_ARN is set, temporary STS credentials will be generated
-// from the provided credentials. Otherwise, the provided credentials are used directly.
+// S3 credentials are configured at the server level, not per-request.
 package main
 
 import (
@@ -66,29 +61,14 @@ func main() {
 		log.Fatalf("Failed to marshal options: %v", err)
 	}
 
-	// Create task request using the shared struct from API package
+	// Create task request
 	taskReq := &api.TaskNewRequest{
-		Name:              "test-fast-orthophoto",
-		ReadS3Path:        readS3Path,
-		WriteS3Path:       writeS3Path,
-		Options:           string(optionsJSON), // JSON string, e.g., "[{\"name\":\"fast-orthophoto\",\"value\":true}]"
+		Name:               "test-fast-orthophoto",
+		ReadS3Path:         readS3Path,
+		WriteS3Path:        writeS3Path,
+		Options:            string(optionsJSON),
 		SkipPostProcessing: false,
-		Webhook:           "",
-		ZipURL:            "",
-		S3Region:          "us-east-1",
-		// S3AccessKeyID / S3SecretAccessKey / S3SessionToken are filled from env below
-		// DateCreated left as zero so the server uses its current time
-	}
-
-	// Add credentials if available
-	if accessKey := os.Getenv("SCALEODM_S3_ACCESS_KEY"); accessKey != "" {
-		taskReq.S3AccessKeyID = accessKey
-	}
-	if secretKey := os.Getenv("SCALEODM_S3_SECRET_KEY"); secretKey != "" {
-		taskReq.S3SecretAccessKey = secretKey
-	}
-	if sessionToken := os.Getenv("SCALEODM_S3_SESSION_TOKEN"); sessionToken != "" {
-		taskReq.S3SessionToken = sessionToken
+		S3Region:           "us-east-1",
 	}
 
 	fmt.Println("Creating ODM task via API...")
@@ -157,20 +137,14 @@ func main() {
 }
 
 func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
-	// Marshal request to JSON
-	// Use a map to ensure all fields are included even if empty
-	// Note: Options must be a JSON string (not array)
 	jsonMap := map[string]interface{}{
 		"name":               taskReq.Name,
-		"options":            taskReq.Options, // This is already a JSON string
+		"options":            taskReq.Options,
 		"webhook":            taskReq.Webhook,
 		"skipPostProcessing": taskReq.SkipPostProcessing,
 		"zipurl":             taskReq.ZipURL,
 		"readS3Path":         taskReq.ReadS3Path,
 		"writeS3Path":        taskReq.WriteS3Path,
-		"s3AccessKeyID":      taskReq.S3AccessKeyID,
-		"s3SecretAccessKey":  taskReq.S3SecretAccessKey,
-		"s3SessionToken":     taskReq.S3SessionToken,
 		"s3Region":           taskReq.S3Region,
 		"dateCreated":        taskReq.DateCreated,
 	}
@@ -179,7 +153,6 @@ func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
 		return "", fmt.Errorf("failed to marshal request: %w", err)
 	}
 
-	// Debug: log the request being sent
 	log.Printf("Sending request: %s", string(jsonData))
 
 	req, err := http.NewRequest("POST", apiURL+"/task/new", bytes.NewBuffer(jsonData))
@@ -200,7 +173,6 @@ func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
 		return "", fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	// Debug: print response body
 	if len(bodyBytes) > 0 {
 		log.Printf("Task creation response: %s", string(bodyBytes))
 	}
@@ -236,7 +208,6 @@ func getTaskInfo(apiURL, uuid string) (*api.TaskInfo, error) {
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
-		// Check if response is HTML (likely a 404 page)
 		bodyStr := string(bodyBytes)
 		if len(bodyStr) > 0 && bodyStr[0] == '<' {
 			return nil, fmt.Errorf("API returned status %d with HTML response (endpoint may not exist): %s", resp.StatusCode, bodyStr[:min(200, len(bodyStr))])
@@ -244,7 +215,6 @@ func getTaskInfo(apiURL, uuid string) (*api.TaskInfo, error) {
 		return nil, fmt.Errorf("API returned status %d: %s", resp.StatusCode, bodyStr)
 	}
 
-	// Check if response is JSON
 	if len(bodyBytes) == 0 || bodyBytes[0] != '{' {
 		return nil, fmt.Errorf("API returned non-JSON response: %s", string(bodyBytes[:min(200, len(bodyBytes))]))
 	}
@@ -255,13 +225,6 @@ func getTaskInfo(apiURL, uuid string) (*api.TaskInfo, error) {
 	}
 
 	return &result, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func getTaskOutput(apiURL, uuid string) (string, error) {

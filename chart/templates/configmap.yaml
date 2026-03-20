@@ -6,5 +6,4 @@ metadata:
     {{- include "scaleodm.labels" . | nindent 4 }}
 data:
   ODM_IMAGE: {{ .Values.config.odmImage | quote }}
-  CLUSTER_URL: {{ .Values.config.clusterUrl | default (printf "http://%s.%s.svc.cluster.local:%d" (include "scaleodm.fullname" .) .Release.Namespace .Values.api.service.port) | quote }}
-  K8S_NAMESPACE: {{ .Values.kubernetes.namespace | quote }}
+  K8S_NAMESPACE: {{ .Release.Namespace | quote }}

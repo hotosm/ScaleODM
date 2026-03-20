@@ -12,7 +12,6 @@ import (
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
 
-	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
@@ -31,7 +30,7 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	apiConfig.DocsPath = "/"
 	apiConfig.OpenAPIPath = "/openapi.json"
 	apiConfig.Servers = []*huma.Server{
-		{URL: config.SCALEODM_CLUSTER_URL, Description: "ScaleODM"},
+		{URL: "/", Description: "ScaleODM"},
 	}
 	apiConfig.Info.Description = "Kubernetes-native auto-scaling and load balancing for OpenDroneMap."
 	apiConfig.Info.Contact = &huma.Contact{

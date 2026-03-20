@@ -100,16 +100,6 @@ func (db *DB) InitSchema(ctx context.Context) error {
 	return nil
 }
 
-// InitLocalClusterRecord creates the local cluster record if it doesn't exist
-func (db *DB) InitLocalClusterRecord(ctx context.Context, clusterURL string) error {
-	_, err := db.Pool.Exec(ctx, `
-		INSERT INTO scaleodm_clusters (cluster_url, max_concurrent_jobs, priority_weighting, last_heartbeat)
-		VALUES ($1, 10, 10, NOW())
-		ON CONFLICT (cluster_url) DO NOTHING
-	`, clusterURL)
-	return err
-}
-
 // Ping the db to check its available
 func (db *DB) HealthCheck(ctx context.Context) error {
 	return db.Pool.Ping(ctx)

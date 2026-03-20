@@ -37,8 +37,7 @@ func testDB(t *testing.T) (*DB, func()) {
 
 		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_clusters CASCADE")
-		
+
 		database.Close()
 	}
 
@@ -79,37 +78,13 @@ func TestInitSchema(t *testing.T) {
 
 	var count int
 	err = db.Pool.QueryRow(ctx2, `
-		SELECT COUNT(*) 
-		FROM information_schema.tables 
-		WHERE table_schema = 'public' 
-		AND table_name IN ('scaleodm_clusters', 'scaleodm_job_metadata')
+		SELECT COUNT(*)
+		FROM information_schema.tables
+		WHERE table_schema = 'public'
+		AND table_name IN ('scaleodm_job_metadata')
 	`).Scan(&count)
 	require.NoError(t, err)
-	assert.Equal(t, 2, count)
-}
-
-func TestInitLocalClusterRecord(t *testing.T) {
-	db, cleanup := testDB(t)
-	defer cleanup()
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	clusterURL := "http://localhost:31100"
-	err := db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
-
-	// Verify cluster was created
-	var exists bool
-	err = db.Pool.QueryRow(ctx, `
-		SELECT EXISTS(SELECT 1 FROM scaleodm_clusters WHERE cluster_url = $1)
-	`, clusterURL).Scan(&exists)
-	require.NoError(t, err)
-	assert.True(t, exists)
-
-	// Call again - should not error (ON CONFLICT DO NOTHING)
-	err = db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
+	assert.Equal(t, 1, count)
 }
 
 func TestHealthCheck(t *testing.T) {
@@ -132,4 +107,3 @@ func TestClose(t *testing.T) {
 		cleanup()
 	})
 }
-

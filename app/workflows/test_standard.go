@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-
-	"github.com/hotosm/scaleodm/app/s3"
 )
 
 // TestStandardWorkflow creates and monitors a standard ODM workflow
@@ -19,20 +17,10 @@ func TestStandardWorkflow(ctx context.Context, client *Client) error {
 	s3Region := "us-east-1"
 
 	// Create workflow config
+	// S3 credentials are injected into workflow pods via Kubernetes Secret
+	// references (secretKeyRef), not passed inline
 	config := NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path, odmFlags)
 	config.S3Region = s3Region
-
-	// Handle S3 credentials - always required
-	// Get credentials from environment variables (SCALEODM_S3_ACCESS_KEY, etc.)
-	envCreds, err := s3.GetS3JobCreds(s3Region)
-	if err != nil {
-		return fmt.Errorf("failed to get credentials from environment: %w", err)
-	}
-	if envCreds == nil {
-		return fmt.Errorf("S3 credentials are required. Configure SCALEODM_S3_ACCESS_KEY and SCALEODM_S3_SECRET_KEY environment variables")
-	}
-	config.S3Credentials = envCreds
-	fmt.Println("Using S3 credentials from environment variables")
 
 	fmt.Printf("Read S3 Path: %s\n", readS3Path)
 	fmt.Printf("Write S3 Path: %s\n", writeS3Path)

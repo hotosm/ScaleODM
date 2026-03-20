@@ -23,26 +23,29 @@
 
 2. API Documentation:
    {{- if .Values.ingress.enabled }}
-   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/docs
+   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/
    {{- else }}
-   Use port-forward to access: http://localhost:8080/docs
+   Use port-forward to access: http://localhost:8080/
    {{- end }}
 
 3. Health Check:
    {{- if .Values.ingress.enabled }}
-   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/api/v1/health
+   http{{ if .Values.ingress.tls }}s{{ end }}://{{ (index .Values.ingress.hosts 0).host }}/health
    {{- else }}
-   Use port-forward to access: http://localhost:8080/api/v1/health
+   Use port-forward to access: http://localhost:8080/health
    {{- end }}
 
 {{- if .Values.argo.enabled }}
 4. Argo Workflows:
-   Argo Workflows has been deployed as a subchart.
-   Check status: kubectl get pods -n {{ .Values.kubernetes.namespace }}
+   Argo Workflows has been deployed as a subchart in namespace: {{ .Values.argo.namespaceOverride | default "argo" }}
+   The controller watches all namespaces for workflow CRDs.
+   ScaleODM workflows run in the release namespace: {{ .Release.Namespace }}
+   Check status: kubectl get pods -n {{ .Values.argo.namespaceOverride | default "argo" }}
 {{- else }}
 4. Argo Workflows:
    Argo Workflows is not deployed by this chart.
-   Ensure Argo Workflows is already installed in namespace: {{ .Values.kubernetes.namespace }}
+   Ensure Argo Workflows is already installed and its controller watches all namespaces.
+   ScaleODM workflows will run in namespace: {{ .Release.Namespace }}
 {{- end }}
 
 {{- if not .Values.database.external.enabled }}
@@ -56,8 +59,16 @@
    {{- if .Values.s3.garage.enabled }}
    Garage S3 has been deployed in-cluster.
    Access details are in the secret: {{ include "scaleodm.fullname" . }}-secret
+   Workflow credential secret created in namespace {{ .Release.Namespace }}:
+   {{ .Values.s3.workflowSecret.name | default "scaleodm-s3-creds" }}
    {{- else }}
    External S3 is disabled, but bundled Garage is also disabled.
    Set s3.garage.enabled=true or provide an external S3 secret.
    {{- end }}
+{{- else }}
+6. S3 Storage:
+   External S3 is enabled.
+   IMPORTANT: Create workflow credential secret '{{ .Values.s3.workflowSecret.name | default "scaleodm-s3-creds" }}'
+   in namespace '{{ .Release.Namespace }}' (same namespace as ScaleODM).
+   Required keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION.
 {{- end }}

@@ -3,7 +3,6 @@ package workflows
 import (
 	"testing"
 
-	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -23,29 +22,21 @@ func TestNewDefaultODMConfig(t *testing.T) {
 	assert.Equal(t, "us-east-1", config.S3Region)
 	assert.Equal(t, "argo-odm", config.ServiceAccount)
 	assert.Equal(t, "docker.io/rclone/rclone:1", config.RcloneImage)
-	assert.Nil(t, config.S3Credentials) // Should be nil initially
 }
 
 func TestBuildODMWorkflow(t *testing.T) {
-	config := NewDefaultODMConfig(
+	cfg := NewDefaultODMConfig(
 		"test-project",
 		"s3://bucket/images/",
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 	)
-	config.S3Credentials = &s3.S3Credentials{
-		AccessKeyID:     "test-key",
-		SecretAccessKey: "test-secret",
-		SessionToken:    "",
-	}
 
-	// Create a mock client (we can't actually create workflows without k8s)
-	// But we can test the buildODMWorkflow logic
 	client := &Client{
 		namespace: "test-namespace",
 	}
 
-	wf := client.buildODMWorkflow(config)
+	wf := client.buildODMWorkflow(cfg)
 
 	require.NotNil(t, wf)
 	assert.Equal(t, "test-namespace", wf.Namespace)
@@ -54,63 +45,45 @@ func TestBuildODMWorkflow(t *testing.T) {
 	assert.NotEmpty(t, wf.Spec.Templates)
 }
 
-func TestBuildODMWorkflow_PanicsWithoutCredentials(t *testing.T) {
-	config := NewDefaultODMConfig(
+func TestBuildODMWorkflow_UsesSecretKeyRef(t *testing.T) {
+	cfg := NewDefaultODMConfig(
 		"test-project",
 		"s3://bucket/images/",
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 	)
-	// S3Credentials is nil
 
 	client := &Client{
 		namespace: "test-namespace",
 	}
 
-	// Should panic if credentials are not provided
-	assert.Panics(t, func() {
-		client.buildODMWorkflow(config)
-	})
-}
-
-func TestBuildODMWorkflow_WithSTSCredentials(t *testing.T) {
-	config := NewDefaultODMConfig(
-		"test-project",
-		"s3://bucket/images/",
-		"s3://bucket/output/",
-		[]string{"--fast-orthophoto"},
-	)
-	config.S3Credentials = &s3.S3Credentials{
-		AccessKeyID:     "test-key",
-		SecretAccessKey: "test-secret",
-		SessionToken:    "test-session-token",
-	}
-
-	client := &Client{
-		namespace: "test-namespace",
-	}
-
-	wf := client.buildODMWorkflow(config)
+	wf := client.buildODMWorkflow(cfg)
 
 	require.NotNil(t, wf)
-	// Verify that session token is included in environment variables
-	// This is checked in the download/upload containers
 	mainTemplate := wf.Spec.Templates[0]
 	require.NotNil(t, mainTemplate.ContainerSet)
-	
-	// Check that containers have AWS environment variables
+
+	// Check that containers use secretKeyRef for AWS credentials
 	containers := mainTemplate.ContainerSet.Containers
 	require.Greater(t, len(containers), 0)
-	
-	// Download container should have AWS env vars
+
 	downloadContainer := containers[0]
-	hasSessionToken := false
+	hasAccessKey := false
+	hasSecretKey := false
 	for _, env := range downloadContainer.Env {
-		if env.Name == "AWS_SESSION_TOKEN" {
-			hasSessionToken = true
-			assert.Equal(t, "test-session-token", env.Value)
+		if env.Name == "AWS_ACCESS_KEY_ID" {
+			hasAccessKey = true
+			require.NotNil(t, env.ValueFrom, "AWS_ACCESS_KEY_ID should use ValueFrom")
+			require.NotNil(t, env.ValueFrom.SecretKeyRef, "AWS_ACCESS_KEY_ID should use secretKeyRef")
+			assert.Equal(t, "AWS_ACCESS_KEY_ID", env.ValueFrom.SecretKeyRef.Key)
+		}
+		if env.Name == "AWS_SECRET_ACCESS_KEY" {
+			hasSecretKey = true
+			require.NotNil(t, env.ValueFrom, "AWS_SECRET_ACCESS_KEY should use ValueFrom")
+			require.NotNil(t, env.ValueFrom.SecretKeyRef, "AWS_SECRET_ACCESS_KEY should use secretKeyRef")
+			assert.Equal(t, "AWS_SECRET_ACCESS_KEY", env.ValueFrom.SecretKeyRef.Key)
 		}
 	}
-	assert.True(t, hasSessionToken, "AWS_SESSION_TOKEN should be set")
+	assert.True(t, hasAccessKey, "AWS_ACCESS_KEY_ID should be present")
+	assert.True(t, hasSecretKey, "AWS_SECRET_ACCESS_KEY should be present")
 }
-

@@ -22,13 +22,14 @@ var KUBECONFIG_PATH = cmp.Or(
 	os.Getenv("KUBECONFIG_PATH"),
 	"", // leave empty if in-cluster
 )
+
+// K8S_NAMESPACE is the namespace where ScaleODM and its workflows run.
+// Defaults to "default". In Helm deployments this is set to the release namespace.
 var K8S_NAMESPACE = cmp.Or(
 	os.Getenv("K8S_NAMESPACE"),
-	"argo",
+	"default",
 )
 
-// Note this S3 user must have permissions
-// to create temporary credentials for STS
 var SCALEODM_S3_ENDPOINT = cmp.Or(
 	os.Getenv("SCALEODM_S3_ENDPOINT"),
 	"s3.amazonaws.com",
@@ -41,23 +42,22 @@ var SCALEODM_S3_SECRET_KEY = cmp.Or(
 	os.Getenv("SCALEODM_S3_SECRET_KEY"),
 	"",
 )
-var SCALEODM_S3_STS_ENDPOINT = cmp.Or(
-	os.Getenv("SCALEODM_S3_STS_ENDPOINT"),
-	"",
-)
-var SCALEODM_S3_STS_ROLE_ARN = cmp.Or(
-	os.Getenv("SCALEODM_S3_STS_ROLE_ARN"),
-	"",
+
+// SCALEODM_S3_SECRET_NAME is the name of the Kubernetes Secret (in the same
+// namespace as ScaleODM) that contains the S3 credentials. Workflow containers
+// reference this secret via secretKeyRef so that credentials are never inlined
+// in the Argo Workflow spec. The secret must contain the keys:
+//   - AWS_ACCESS_KEY_ID
+//   - AWS_SECRET_ACCESS_KEY
+//   - AWS_DEFAULT_REGION
+var SCALEODM_S3_SECRET_NAME = cmp.Or(
+	os.Getenv("SCALEODM_S3_SECRET_NAME"),
+	"scaleodm-s3-creds",
 )
 
 var ENQUEUE_TEST_JOBS = cmp.Or(
 	os.Getenv("ENQUEUE_TEST_JOBS"),
 	"false",
-)
-
-var SCALEODM_CLUSTER_URL = cmp.Or(
-	os.Getenv("SCALEODM_CLUSTER_URL"),
-	"http://localhost:31100",
 )
 
 func ValidateEnv() {
@@ -67,16 +67,13 @@ func ValidateEnv() {
 	}{
 		{SCALEODM_DATABASE_URL, "SCALEODM_DATABASE_URL"},
 		{SCALEODM_S3_ENDPOINT, "SCALEODM_S3_ENDPOINT"},
+		{SCALEODM_S3_ACCESS_KEY, "SCALEODM_S3_ACCESS_KEY"},
+		{SCALEODM_S3_SECRET_KEY, "SCALEODM_S3_SECRET_KEY"},
 	}
 
 	for _, envVar := range required {
 		if envVar.val == "" {
 			log.Fatalf("%s is required", envVar.name)
 		}
-	}
-
-	// S3 credentials are optional - can use public buckets or provide via API
-	if SCALEODM_S3_ACCESS_KEY == "" || SCALEODM_S3_SECRET_KEY == "" {
-		log.Println("Warning: SCALEODM_S3_ACCESS_KEY and SCALEODM_S3_SECRET_KEY not set. Public bucket access will be attempted if no credentials provided via API.")
 	}
 }

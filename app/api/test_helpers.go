@@ -38,8 +38,7 @@ func testDB(t *testing.T) (*db.DB, func()) {
 
 		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_clusters CASCADE")
-		
+
 		database.Close()
 	}
 
@@ -53,7 +52,7 @@ func testWorkflowClient(t *testing.T) workflows.WorkflowClient {
 	kubeconfig := os.Getenv("KUBECONFIG_PATH")
 	namespace := os.Getenv("K8S_NAMESPACE")
 	if namespace == "" {
-		namespace = "argo"
+		namespace = "default"
 	}
 
 	client, err := workflows.NewClient(kubeconfig, namespace)
@@ -63,4 +62,3 @@ func testWorkflowClient(t *testing.T) workflows.WorkflowClient {
 
 	return client
 }
-

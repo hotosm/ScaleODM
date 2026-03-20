@@ -21,15 +21,13 @@ type ODMPipelineConfig struct {
 	WriteS3Path    string   // S3 path where final ODM outputs will be written
 	ODMFlags       []string // ODM command line flags
 	S3Region       string
-	S3Endpoint     string            // Optional custom S3 endpoint for non-AWS providers
-	S3Credentials  *s3.S3Credentials // S3 credentials for the workflow
+	S3Endpoint     string // Optional custom S3 endpoint for non-AWS providers
 	ServiceAccount string
 	RcloneImage    string
 	ODMImage       string
 }
 
 // NewDefaultODMConfig returns default configuration
-// Note: S3Credentials must be set separately before creating the workflow (always required)
 func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags []string) *ODMPipelineConfig {
 	return &ODMPipelineConfig{
 		ODMProjectID:   odmProjectID,
@@ -38,7 +36,6 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 		ODMFlags:       odmFlags,
 		S3Region:       "us-east-1",
 		S3Endpoint:     "",
-		S3Credentials:  nil, // Must be set before creating workflow (always required)
 		ServiceAccount: "argo-odm",
 		RcloneImage:    "docker.io/rclone/rclone:1",
 		ODMImage:       config.SCALEODM_ODM_IMAGE,
@@ -61,37 +58,59 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, config *ODMPipelineConfi
 	return created, nil
 }
 
-// buildODMWorkflow constructs the workflow specification
-func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
-	// Credentials are always required
-	if config.S3Credentials == nil {
-		panic("S3Credentials must be provided - credentials are required for all S3 operations")
-	}
+// s3SecretEnvVars returns env vars that reference the S3 credentials Kubernetes
+// Secret via secretKeyRef. This ensures credentials are never inlined in the
+// Argo Workflow spec and are only resolved at pod runtime.
+func s3SecretEnvVars(cfg *ODMPipelineConfig) []apiv1.EnvVar {
+	secretName := config.SCALEODM_S3_SECRET_NAME
 
-	// Configure AWS/S3 credentials via environment variables
-	// Note: We don't use RCLONE_CONFIG_* env vars because ContainerSet filters them
-	// Instead, we create rclone config on-the-fly in the scripts using AWS/S3 env vars
-	awsEnv := []apiv1.EnvVar{
-		// Credentials for S3-compatible access (these are NOT filtered by ContainerSet)
-		{Name: "AWS_ACCESS_KEY_ID", Value: config.S3Credentials.AccessKeyID},
-		{Name: "AWS_SECRET_ACCESS_KEY", Value: config.S3Credentials.SecretAccessKey},
-		{Name: "AWS_DEFAULT_REGION", Value: config.S3Region},
-	}
-	// Add session token if using STS credentials
-	if config.S3Credentials.SessionToken != "" {
-		awsEnv = append(awsEnv, apiv1.EnvVar{
-			Name:  "AWS_SESSION_TOKEN",
-			Value: config.S3Credentials.SessionToken,
-		})
+	envVars := []apiv1.EnvVar{
+		{
+			Name: "AWS_ACCESS_KEY_ID",
+			ValueFrom: &apiv1.EnvVarSource{
+				SecretKeyRef: &apiv1.SecretKeySelector{
+					LocalObjectReference: apiv1.LocalObjectReference{Name: secretName},
+					Key:                  "AWS_ACCESS_KEY_ID",
+				},
+			},
+		},
+		{
+			Name: "AWS_SECRET_ACCESS_KEY",
+			ValueFrom: &apiv1.EnvVarSource{
+				SecretKeyRef: &apiv1.SecretKeySelector{
+					LocalObjectReference: apiv1.LocalObjectReference{Name: secretName},
+					Key:                  "AWS_SECRET_ACCESS_KEY",
+				},
+			},
+		},
+		{
+			Name: "AWS_DEFAULT_REGION",
+			ValueFrom: &apiv1.EnvVarSource{
+				SecretKeyRef: &apiv1.SecretKeySelector{
+					LocalObjectReference: apiv1.LocalObjectReference{Name: secretName},
+					Key:                  "AWS_DEFAULT_REGION",
+					Optional:             boolPtr(true),
+				},
+			},
+		},
 	}
 
 	// If a custom S3 endpoint is specified (e.g., for MinIO), expose it as an env var
-	if config.S3Endpoint != "" {
-		awsEnv = append(awsEnv, apiv1.EnvVar{
+	if cfg.S3Endpoint != "" {
+		envVars = append(envVars, apiv1.EnvVar{
 			Name:  "AWS_S3_ENDPOINT",
-			Value: config.S3Endpoint,
+			Value: cfg.S3Endpoint,
 		})
 	}
+
+	return envVars
+}
+
+func boolPtr(b bool) *bool { return &b }
+
+// buildODMWorkflow constructs the workflow specification
+func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
+	awsEnv := s3SecretEnvVars(cfg)
 
 	// Generate unique job ID for this workflow instance
 	jobID := "{{workflow.name}}"
@@ -102,12 +121,11 @@ func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "download",
-			Image:   config.RcloneImage,
+			Image:   cfg.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{
 				// Redirect output to log file in workspace for later collection
-				// Use workflow name template directly in tee path since it's templated by Argo
-				s3.GenerateDownloadScript(jobID, config.ReadS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.download.log",
+				s3.GenerateDownloadScript(jobID, cfg.ReadS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.download.log",
 			},
 			Env: awsEnv,
 		},
@@ -115,11 +133,11 @@ func (c *Client) buildODMWorkflow(config *ODMPipelineConfig) *wfv1.Workflow {
 
 	// ODM processing container
 	// Logs are written to shared workspace for later collection
-	odmFlagsStr := strings.Join(config.ODMFlags, " ")
+	odmFlagsStr := strings.Join(cfg.ODMFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "process",
-			Image:   config.ODMImage,
+			Image:   cfg.ODMImage,
 			Command: []string{"/bin/bash", "-c"},
 			Args: []string{
 				fmt.Sprintf(`
@@ -133,7 +151,7 @@ odm_args="%s --project-path /workspace $JOB_ID"
 echo "Executing: python3 run.py $odm_args" | tee -a "$LOG_FILE"
 python3 run.py $odm_args 2>&1 | tee -a "$LOG_FILE"
 echo "ODM processing complete" | tee -a "$LOG_FILE"
-				`, config.ODMProjectID, odmFlagsStr),
+				`, cfg.ODMProjectID, odmFlagsStr),
 			},
 		},
 		Dependencies: []string{"download"},
@@ -144,12 +162,10 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "upload",
-			Image:   config.RcloneImage,
+			Image:   cfg.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{
-				// Redirect output to log file in workspace for later collection
-				// Use workflow name template directly in tee path since it's templated by Argo
-				s3.GenerateUploadScript(config.WriteS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.upload.log",
+				s3.GenerateUploadScript(cfg.WriteS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.upload.log",
 			},
 			Env: awsEnv,
 		},
@@ -161,10 +177,10 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 	cleanupContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "cleanup",
-			Image:   config.RcloneImage,
+			Image:   cfg.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{
-				s3.GenerateLogUploadScript(config.WriteS3Path),
+				s3.GenerateLogUploadScript(cfg.WriteS3Path),
 			},
 			Env: append(awsEnv,
 				// Add namespace for log collection
@@ -185,7 +201,7 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 		},
 		Spec: wfv1.WorkflowSpec{
 			Entrypoint:         "main",
-			ServiceAccountName: config.ServiceAccount,
+			ServiceAccountName: cfg.ServiceAccount,
 			Templates: []wfv1.Template{
 				{
 					Name: "main",
@@ -218,4 +234,3 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 
 	return wf
 }
-

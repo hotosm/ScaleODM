@@ -16,13 +16,8 @@ func TestCreateJob(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	job, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-1",
 		"test-project",
 		"s3://bucket/images/",
@@ -50,14 +45,9 @@ func TestGetJob(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create a job
 	created, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-2",
 		"test-project",
 		"s3://bucket/images/",
@@ -96,14 +86,9 @@ func TestUpdateJobStatus(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create a job
-	_, err = store.CreateJob(
+	_, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-3",
 		"test-project",
 		"s3://bucket/images/",
@@ -114,7 +99,7 @@ func TestUpdateJobStatus(t *testing.T) {
 	require.NoError(t, err)
 
 	workflowName := "test-workflow-3"
-	
+
 	// Update status to running
 	err = store.UpdateJobStatus(ctx, workflowName, "running", nil)
 	require.NoError(t, err)
@@ -147,14 +132,9 @@ func TestUpdateJobStatus_WithError(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create a job
-	_, err = store.CreateJob(
+	_, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-4",
 		"test-project",
 		"s3://bucket/images/",
@@ -206,14 +186,9 @@ func TestUpdateJobMetadata(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create a job
-	_, err = store.CreateJob(
+	_, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-5",
 		"test-project",
 		"s3://bucket/images/",
@@ -247,15 +222,10 @@ func TestListJobs(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create multiple jobs
 	for i := 0; i < 5; i++ {
 		_, createErr := store.CreateJob(
 			ctx,
-			"http://localhost:31100",
 			fmt.Sprintf("test-workflow-%d", i),
 			"test-project",
 			"s3://bucket/images/",
@@ -284,15 +254,9 @@ func TestListJobs_ByProjectID(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	clusterURL := "http://localhost:31100"
-	err := db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
-
 	// Create jobs with different project IDs
-	_, err = store.CreateJob(
+	_, err := store.CreateJob(
 		ctx,
-		clusterURL,
 		"test-workflow-project1-1",
 		"project-1",
 		"s3://bucket/images/",
@@ -304,7 +268,6 @@ func TestListJobs_ByProjectID(t *testing.T) {
 
 	_, err = store.CreateJob(
 		ctx,
-		clusterURL,
 		"test-workflow-project1-2",
 		"project-1",
 		"s3://bucket/images/",
@@ -316,7 +279,6 @@ func TestListJobs_ByProjectID(t *testing.T) {
 
 	_, err = store.CreateJob(
 		ctx,
-		clusterURL,
 		"test-workflow-project2-1",
 		"project-2",
 		"s3://bucket/images/",
@@ -342,14 +304,9 @@ func TestDeleteJob(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Initialize cluster first (required for foreign key constraint)
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
-
 	// Create a job
-	_, err = store.CreateJob(
+	_, err := store.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		"test-workflow-delete",
 		"test-project",
 		"s3://bucket/images/",
@@ -380,4 +337,3 @@ func TestDeleteJob_NotFound(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
 }
-

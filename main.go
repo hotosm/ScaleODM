@@ -74,14 +74,6 @@ func main() {
 	}
 	log.Printf("Schema initialization complete (took %v)", time.Since(schemaStart))
 
-	// Initialize local cluster record
-	log.Println("Initializing local cluster record...")
-	clusterStart := time.Now()
-	if err := database.InitLocalClusterRecord(ctx, config.SCALEODM_CLUSTER_URL); err != nil {
-		log.Fatalf("Failed to initialize local cluster record: %v", err)
-	}
-	log.Printf("Local cluster registered: %s (took %v)", config.SCALEODM_CLUSTER_URL, time.Since(clusterStart))
-
 	// Create metadata store
 	log.Println("Creating metadata store...")
 	metaStart := time.Now()
@@ -111,7 +103,7 @@ func main() {
 		// Start HTTP server
 		hooks.OnStart(func() {
 			log.Printf("API server starting on :%d", options.Port)
-			log.Printf("   Docs: http://localhost:%d/docs", options.Port)
+			log.Printf("   Docs: http://localhost:%d/", options.Port)
 			log.Printf("   OpenAPI: http://localhost:%d/openapi.json", options.Port)
 
 			if err := http.ListenAndServe(fmt.Sprintf(":%d", options.Port), handler); err != nil {

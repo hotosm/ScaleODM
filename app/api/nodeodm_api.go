@@ -120,11 +120,6 @@ type TaskNewRequest struct {
 	// Optional S3-compatible endpoint override (e.g. for MinIO or non-AWS providers).
 	// If omitted, the server uses its configured default endpoint.
 	S3Endpoint string `json:"s3Endpoint,omitempty" form:"s3Endpoint" doc:"Custom S3 endpoint (optional, for non-AWS S3 providers)"`
-	// S3 credentials. Optional; if omitted, credentials will be resolved from environment
-	// variables (e.g. SCALEODM_S3_ACCESS_KEY / SCALEODM_S3_SECRET_KEY).
-	S3AccessKeyID     string `json:"s3AccessKeyID,omitempty" form:"s3AccessKeyID" doc:"S3 access key ID (optional, for authenticated buckets)"`
-	S3SecretAccessKey string `json:"s3SecretAccessKey,omitempty" form:"s3SecretAccessKey" doc:"S3 secret access key (optional, for authenticated buckets)"`
-	S3SessionToken    string `json:"s3SessionToken,omitempty" form:"s3SessionToken" doc:"S3 session token (optional, for STS credentials)"`
 	// S3 region. Defaults to us-east-1 if omitted or empty.
 	S3Region string `json:"s3Region,omitempty" form:"s3Region" default:"us-east-1" doc:"S3 region (default: us-east-1)"`
 
@@ -249,9 +244,9 @@ func (a *API) registerNodeODMRoutes() {
 	}) (*TaskNewResponse, error) {
 		req := input.Body
 
-		// Log incoming task creation request (avoid logging secrets directly)
+		// Log incoming task creation request
 		log.Printf(
-			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t webhook_set=%t s3Region=%q s3Endpoint=%q s3AccessKeyID_set=%t s3SessionToken_set=%t dateCreated=%d token_provided=%t setUUID_set=%t",
+			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t webhook_set=%t s3Region=%q s3Endpoint=%q dateCreated=%d token_provided=%t setUUID_set=%t",
 			req.Name,
 			req.ReadS3Path,
 			req.WriteS3Path,
@@ -260,8 +255,6 @@ func (a *API) registerNodeODMRoutes() {
 			req.Webhook != "",
 			req.S3Region,
 			req.S3Endpoint,
-			req.S3AccessKeyID != "",
-			req.S3SessionToken != "",
 			req.DateCreated,
 			input.Token != "",
 			input.SetUUID != "",
@@ -351,36 +344,9 @@ func (a *API) registerNodeODMRoutes() {
 		}
 		s3Endpoint := req.S3Endpoint
 
-		// Handle S3 credentials - always required
-		// 1. API parameters (if provided)
-		// 2. Environment variables (fallback)
-		var providedCreds *s3.S3Credentials
-		if req.S3AccessKeyID != "" && req.S3SecretAccessKey != "" {
-			providedCreds = &s3.S3Credentials{
-				AccessKeyID:     req.S3AccessKeyID,
-				SecretAccessKey: req.S3SecretAccessKey,
-				SessionToken:    req.S3SessionToken,
-			}
-		}
-
-		// Resolve credentials - always required
-		// 1. API parameters (if provided)
-		// 2. Environment variables (SCALEODM_S3_ACCESS_KEY, etc.)
-		s3Creds, err := s3.ResolveCredentials(providedCreds, true, s3Region)
-		if err != nil {
-			log.Printf("Failed to resolve S3 credentials: %v", err)
-			return nil, huma.NewError(400, "S3 credentials are required. Provide s3AccessKeyID and s3SecretAccessKey, or configure SCALEODM_S3_ACCESS_KEY and SCALEODM_S3_SECRET_KEY environment variables", err)
-		}
-
-		if s3Creds == nil {
-			return nil, huma.NewError(400, "S3 credentials are required. Provide s3AccessKeyID and s3SecretAccessKey, or configure SCALEODM_S3_ACCESS_KEY and SCALEODM_S3_SECRET_KEY environment variables")
-		}
-
-		credSource := "environment variables"
-		if providedCreds != nil {
-			credSource = "API parameters"
-		}
-		log.Printf("Using S3 credentials for job (from %s)", credSource)
+		// S3 credentials are configured at the server level and injected into
+		// workflow pods via Kubernetes Secret references (secretKeyRef).
+		// No per-request credential handling needed.
 
 		wfConfig := workflows.NewDefaultODMConfig(
 			projectID,
@@ -390,7 +356,6 @@ func (a *API) registerNodeODMRoutes() {
 		)
 		wfConfig.S3Region = s3Region
 		wfConfig.S3Endpoint = s3Endpoint
-		wfConfig.S3Credentials = s3Creds
 
 		// Submit workflow to Argo
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
@@ -400,22 +365,18 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		log.Printf(
-			"POST /task/new: created workflow name=%q projectID=%q readPath=%q writePath=%q odmFlags=%v s3Region=%q credSource=%s",
+			"POST /task/new: created workflow name=%q projectID=%q readPath=%q writePath=%q odmFlags=%v s3Region=%q",
 			wf.Name,
 			projectID,
 			readPath,
 			writePath,
 			odmFlags,
 			s3Region,
-			credSource,
 		)
 
 		// Record metadata in database
-		// Use local cluster URL for jobs created on this instance
-		clusterURL := config.SCALEODM_CLUSTER_URL
 		_, err = a.metadataStore.CreateJob(
 			ctx,
-			clusterURL,
 			wf.Name,
 			projectID,
 			readPath,
@@ -746,15 +707,11 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		// Update metadata with new workflow name
-		// Get cluster URL from original metadata (would need to add it to JobMetadata struct)
-		// For now, use local cluster URL
-		clusterURL := config.SCALEODM_CLUSTER_URL
 		if err := a.metadataStore.DeleteJob(ctx, input.Body.UUID); err != nil {
 			log.Printf("POST /task/restart: failed to delete old job metadata for %q: %v", input.Body.UUID, err)
 		}
 		if _, err := a.metadataStore.CreateJob(
 			ctx,
-			clusterURL,
 			wf.Name,
 			metadata.ODMProjectID,
 			metadata.ReadS3Path,

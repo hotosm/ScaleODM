@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/testutil"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +20,7 @@ func TestInfoEndpoint(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/info", nil)
@@ -48,7 +47,7 @@ func TestOptionsEndpoint(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/options", nil)
@@ -81,17 +80,12 @@ func TestTaskNewEndpoint(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
-	// Initialize cluster with the same URL that the API will use
-	ctx := context.Background()
-	clusterURL := config.SCALEODM_CLUSTER_URL
-	err := db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
-
 	// Set up test S3 bucket
-	err = testutil.SetupTestS3Bucket(ctx, "test-bucket")
+	ctx := context.Background()
+	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
 	// Create task request
@@ -99,11 +93,9 @@ func TestTaskNewEndpoint(t *testing.T) {
 		Name:        "test-project",
 		ReadS3Path:  "s3://test-bucket/images/",
 		WriteS3Path: "s3://test-bucket/output/",
-		Options:      `[{"name": "fast-orthophoto", "value": true}]`,
+		Options:     `[{"name": "fast-orthophoto", "value": true}]`,
 		S3Region:    "us-east-1",
 		S3Endpoint:  "http://" + testutil.TestS3Endpoint(), // Use MinIO for tests
-		S3AccessKeyID: testutil.TestS3AccessKey(),
-		S3SecretAccessKey: testutil.TestS3SecretKey(),
 	}
 
 	body, err := json.Marshal(request)
@@ -126,7 +118,7 @@ func TestTaskListEndpoint(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/task/list", nil)
@@ -164,14 +156,10 @@ func TestTaskInfoEndpoint(t *testing.T) {
 
 	// Create job metadata (workflow may or may not exist in cluster)
 	ctx := context.Background()
-	clusterURL := config.SCALEODM_CLUSTER_URL
-	err := db.InitLocalClusterRecord(ctx, clusterURL)
-	require.NoError(t, err)
 
 	workflowName := "test-workflow-info"
-	_, err = metadataStore.CreateJob(
+	_, err := metadataStore.CreateJob(
 		ctx,
-		clusterURL,
 		workflowName,
 		"test-project",
 		"s3://bucket/images/",
@@ -180,12 +168,12 @@ func TestTaskInfoEndpoint(t *testing.T) {
 		"us-east-1",
 	)
 	require.NoError(t, err)
-	
+
 	// Verify job was created before calling API handler
 	job, err := metadataStore.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist before API call")
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/info", nil)
@@ -217,7 +205,7 @@ func TestTaskCancelEndpoint(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	workflowName := "test-workflow-cancel"
@@ -247,13 +235,10 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 
 	// Create job metadata
 	ctx := context.Background()
-	err := db.InitLocalClusterRecord(ctx, "http://localhost:31100")
-	require.NoError(t, err)
 
 	workflowName := "test-workflow-remove"
-	_, err = metadataStore.CreateJob(
+	_, err := metadataStore.CreateJob(
 		ctx,
-		"http://localhost:31100",
 		workflowName,
 		"test-project",
 		"s3://bucket/images/",
@@ -262,7 +247,7 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 		"us-east-1",
 	)
 	require.NoError(t, err)
-	
+
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	requestBody := map[string]string{
@@ -295,4 +280,3 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 	require.NoError(t, err)
 	assert.Nil(t, job)
 }
-

@@ -13,14 +13,14 @@ api:
     repository: ghcr.io/hotosm/scaleodm
     tag: ""
     pullPolicy: IfNotPresent
-  
+
   replicaCount: 1
-  
+
   service:
     type: ClusterIP
     port: 31100
     targetPort: 31100
-  
+
   resources:
     limits:
       cpu: 500m
@@ -28,14 +28,14 @@ api:
     requests:
       cpu: 100m
       memory: 128Mi
-  
+
   # Port configuration
   port: 31100
-  
+
   # Security context
   podSecurityContext: {}
   securityContext: {}
-  
+
   # Node selector, tolerations, and affinity
   nodeSelector: {}
   tolerations: []
@@ -51,7 +51,7 @@ database:
     secret:
       name: "scaleodm-db-vars"
       key: "SCALEODM_DATABASE_URL"
-  
+
   # Optional: Deploy PostgreSQL as a subchart when external.enabled is false.
   # NOTE: This path is mainly for development; for production, prefer an
   # operator-managed or externally provisioned database and external.secret.
@@ -69,13 +69,11 @@ database:
 # S3 configuration
 s3:
   # Use an existing Kubernetes Secret for S3 configuration. This secret
-  # should live in the same namespace as ScaleODM and contain some or all
-  # of the keys:
+  # must live in the same namespace as ScaleODM (the release namespace)
+  # and contain the keys:
   # - SCALEODM_S3_ENDPOINT
   # - SCALEODM_S3_ACCESS_KEY
   # - SCALEODM_S3_SECRET_KEY
-  # - SCALEODM_S3_STS_ENDPOINT
-  # - SCALEODM_S3_STS_ROLE_ARN
   external:
     enabled: true
     secret:
@@ -84,9 +82,17 @@ s3:
         endpoint: "SCALEODM_S3_ENDPOINT"
         accessKey: "SCALEODM_S3_ACCESS_KEY"
         secretKey: "SCALEODM_S3_SECRET_KEY"
-        stsEndpoint: "SCALEODM_S3_STS_ENDPOINT"
-        stsRoleArn: "SCALEODM_S3_STS_ROLE_ARN"
-  
+
+  # Kubernetes Secret in the release namespace that workflow pods use to
+  # access S3 via secretKeyRef. This secret must contain AWS_ACCESS_KEY_ID,
+  # AWS_SECRET_ACCESS_KEY, and AWS_DEFAULT_REGION.
+  # When s3.external.enabled=true, the operator must create this secret
+  # in the release namespace. When using in-cluster Garage, the Helm chart
+  # creates it automatically.
+  workflowSecret:
+    name: "scaleodm-s3-creds"
+    region: "us-east-1"
+
   # Optional: Deploy Garage S3 in-cluster when external.enabled is false.
   garage:
     enabled: false
@@ -112,15 +118,18 @@ s3:
 
 # Kubernetes configuration
 kubernetes:
-  # Namespace for Argo Workflows
-  namespace: argo
-  
   # ServiceAccount configuration
   serviceAccount:
     create: true
     name: ""
     annotations: {}
-  
+
+  # ServiceAccount used by workflow pods (argo-odm).
+  # Created in the release namespace alongside ScaleODM.
+  workflowServiceAccount:
+    create: true
+    name: "argo-odm"
+
   # RBAC configuration
   rbac:
     create: true
@@ -131,25 +140,24 @@ kubernetes:
 config:
   # ODM image to use in workflows
   odmImage: "docker.io/opendronemap/odm:3.5.6"
-  
-  # Cluster URL (used for federation)
-  clusterUrl: ""
-  
+
   # Enqueue test jobs (for testing)
   enqueueTestJobs: "false"
 
 # Argo Workflows subchart configuration
 argo:
   enabled: true
-  # Argo Workflows will be deployed as a subchart if enabled
-  # If disabled, ensure Argo Workflows is already installed in the cluster
-  
+  # Argo Workflows will be deployed as a subchart if enabled.
+  # If disabled, ensure Argo Workflows is already installed in the cluster.
+  # The Argo controller runs in its own namespace but scans all namespaces
+  # for workflow CRDs. ScaleODM workflows run in the release namespace.
+
   # Common Argo Workflows values
   server:
     enabled: true
     service:
       type: ClusterIP
-  
+
   controller:
     enabled: true
     # Parallelism configuration to prevent overwhelming worker nodes
@@ -158,9 +166,10 @@ argo:
     # For example: 3 worker nodes = 6-9 concurrent workflows
     # Set to 0 to disable the limit (not recommended for production)
     parallelism: 10
-  
-  # Namespace for Argo Workflows (should match kubernetes.namespace)
-  namespace: argo
+
+  # Argo controller namespace. Only used when argo.enabled=true.
+  # The controller watches all namespaces for workflows.
+  namespaceOverride: argo
 
 # Ingress configuration (optional)
 ingress:

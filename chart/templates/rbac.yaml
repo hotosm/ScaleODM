@@ -1,8 +1,12 @@
 {{- if .Values.kubernetes.rbac.create }}
+# Role in the release namespace so the ScaleODM API can manage workflows.
+# Argo controller watches all namespaces, so workflows created here are
+# picked up automatically.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
   name: {{ include "scaleodm.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "scaleodm.labels" . | nindent 4 }}
 rules:
@@ -41,10 +45,12 @@ rules:
       - list
       - watch
 ---
+# RoleBinding in the release namespace.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: {{ include "scaleodm.fullname" . }}
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "scaleodm.labels" . | nindent 4 }}
 roleRef:
@@ -56,5 +62,3 @@ subjects:
     name: {{ include "scaleodm.serviceAccountName" . }}
     namespace: {{ .Release.Namespace }}
 {{- end }}
-
-
