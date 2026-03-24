@@ -106,18 +106,21 @@ func main() {
 			elapsed := time.Since(startTime)
 			fmt.Printf("[%s] Status: %d, Progress: %d%%, Processing time: %dms\n",
 				elapsed.Round(time.Second),
-				info.Status,
+				info.Status.Code,
 				info.Progress,
 				info.ProcessingTime,
 			)
 
 			// Check if complete
-			if info.Status == 40 { // COMPLETED
+			if info.Status.Code == 40 { // COMPLETED
 				fmt.Printf("\nTask completed successfully!\n")
 				fmt.Printf("Final products should be available at:\n   %s\n", writeS3Path)
 				return
-			} else if info.Status == 30 { // FAILED
+			} else if info.Status.Code == 30 { // FAILED
 				fmt.Printf("\nTask failed!\n")
+				if info.Status.ErrorMessage != "" {
+					fmt.Printf("Error: %s\n", info.Status.ErrorMessage)
+				}
 				// Try to get output/logs
 				output, err := getTaskOutput(apiURL, taskUUID)
 				if err == nil && output != "" {
@@ -127,7 +130,7 @@ func main() {
 					fmt.Println("==================================================================================")
 				}
 				os.Exit(1)
-			} else if info.Status == 50 { // CANCELED
+			} else if info.Status.Code == 50 { // CANCELED
 				fmt.Printf("\nTask was canceled\n")
 				os.Exit(1)
 			}

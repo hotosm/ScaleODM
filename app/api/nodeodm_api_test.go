@@ -197,6 +197,8 @@ func TestTaskInfoEndpoint(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.Equal(t, workflowName, response.UUID)
+	// Status should be a nested object with code field (NodeODM compatibility)
+	assert.Equal(t, StatusCodeQueued, response.Status.Code)
 }
 
 func TestTaskCancelEndpoint(t *testing.T) {

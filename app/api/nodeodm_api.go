@@ -51,7 +51,7 @@ type TaskInfo struct {
 	Name           string       `json:"name" doc:"Name"`
 	DateCreated    int64        `json:"dateCreated" doc:"Timestamp"`
 	ProcessingTime int64        `json:"processingTime" doc:"Milliseconds elapsed since task started"`
-	Status         int          `json:"status" doc:"Status code (10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED)"`
+	Status         TaskStatus   `json:"status" doc:"Status object with code and optional error"`
 	Options        []TaskOption `json:"options" doc:"Processing options"`
 	ImagesCount    int          `json:"imagesCount" doc:"Number of images"`
 	Progress       int          `json:"progress" doc:"Progress from 0 to 100"`
@@ -59,7 +59,8 @@ type TaskInfo struct {
 }
 
 type TaskStatus struct {
-	Code int `json:"code" doc:"Status code (10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED)"`
+	Code         int    `json:"code" doc:"Status code (10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED)"`
+	ErrorMessage string `json:"errorMessage,omitempty" doc:"Error message (present when status code is 30/FAILED)"`
 }
 
 type TaskOption struct {
@@ -453,11 +454,18 @@ func (a *API) registerNodeODMRoutes() {
 		// Build task info response purely from metadata. This allows the
 		// endpoint to continue working even if the backing Argo workflow
 		// has been garbage-collected or is otherwise unavailable.
+		status := TaskStatus{
+			Code: jobStatusToStatusCode(job.JobStatus),
+		}
+		if job.ErrorMessage != nil {
+			status.ErrorMessage = *job.ErrorMessage
+		}
+
 		info := TaskInfo{
 			UUID:        job.WorkflowName,
 			Name:        job.ODMProjectID,
 			DateCreated: job.CreatedAt.Unix(),
-			Status:      jobStatusToStatusCode(job.JobStatus),
+			Status:      status,
 			ImagesCount: 0, // Not yet tracked
 			Progress:    jobStatusToProgress(job.JobStatus),
 		}
@@ -514,7 +522,7 @@ func (a *API) registerNodeODMRoutes() {
 			}
 		}
 
-		log.Printf("GET /task/%s/info: returning status=%d progress=%d", input.UUID, info.Status, info.Progress)
+		log.Printf("GET /task/%s/info: returning status=%d progress=%d", input.UUID, info.Status.Code, info.Progress)
 
 		return &TaskInfoResponse{Body: info}, nil
 	})
