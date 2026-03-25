@@ -18,15 +18,16 @@ import (
 
 // Make the API, JobQueue, and WorkflowClient available on each endpoint
 type API struct {
-	api            huma.API
-	workflowClient workflows.WorkflowClient
-	metadataStore  *meta.Store
+	api             huma.API
+	workflowClient  workflows.WorkflowClient
+	metadataStore   *meta.Store
+	downloadHandler http.Handler // raw handler for download redirect
 }
 
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
 func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) (*API, http.Handler) {
-	apiConfig := huma.DefaultConfig("ScaleODM API", "0.1.0")
+	apiConfig := huma.DefaultConfig("ScaleODM API", "0.2.0")
 	apiConfig.DocsPath = "/"
 	apiConfig.OpenAPIPath = "/openapi.json"
 	apiConfig.Servers = []*huma.Server{
@@ -89,6 +90,12 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	apiObj.registerGlobalMRoutes()
 	apiObj.registerNodeODMRoutes()
 	// apiObj.registerScaleODMRoutes()
+
+	// Register the download handler as a raw HTTP route (outside Huma)
+	// so we can issue proper HTTP redirects to pre-signed S3 URLs.
+	if apiObj.downloadHandler != nil {
+		router.Handle("GET /task/{uuid}/download/{asset}", apiObj.downloadHandler)
+	}
 
 	return apiObj, router
 }

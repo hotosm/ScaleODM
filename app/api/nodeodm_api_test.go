@@ -37,7 +37,7 @@ func TestInfoEndpoint(t *testing.T) {
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, "0.1.0", response.Version)
+	assert.Equal(t, "0.2.0", response.Version)
 	assert.Equal(t, "odm", response.Engine)
 }
 

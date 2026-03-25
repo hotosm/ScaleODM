@@ -49,15 +49,15 @@ cluster-init:
   set -e
   
   CLUSTER_NAME="${TALOS_CLUSTER_NAME:-scaleodm-test}"
-  WORKER_MEMORY="${TALOS_WORKER_MEMORY:-5142}"
-  CONTROL_PLANE_MEMORY="${TALOS_CONTROL_PLANE_MEMORY:-2048}"
+  WORKER_MEMORY="${TALOS_WORKER_MEMORY:-5.0GiB}"
+  CONTROL_PLANE_MEMORY="${TALOS_CONTROL_PLANE_MEMORY:-2.0GiB}"
   NAMESPACE="${K8S_NAMESPACE:-argo}"
   ARGO_VERSION="${ARGO_WORKFLOWS_VERSION:-v3.7.3}"
   
   echo "🚀 Setting up Talos cluster for ScaleODM testing..."
   echo "   Cluster name: $CLUSTER_NAME"
-  echo "   Worker memory: ${WORKER_MEMORY}MB"
-  echo "   Control plane memory: ${CONTROL_PLANE_MEMORY}MB"
+  echo "   Worker memory: ${WORKER_MEMORY}"
+  echo "   Control plane memory: ${CONTROL_PLANE_MEMORY}"
   echo ""
   
   # Ensure br_netfilter kernel module is loaded (required for Flannel networking in Docker)
@@ -145,15 +145,14 @@ cluster-init:
   fi
   
   echo "📦 Creating Talos cluster $CLUSTER_NAME..."
-  
-  talosctl cluster create \
-      --name "$CLUSTER_NAME" \
-      --workers 1 \
-      --memory "${CONTROL_PLANE_MEMORY}" \
-      --memory-workers "${WORKER_MEMORY}" \
-      --cpus 1 \
-      --cpus-workers 2 \
-      --wait
+
+  talosctl cluster create docker \
+    --name "$CLUSTER_NAME" \
+    --workers 1 \
+    --memory-controlplanes "${CONTROL_PLANE_MEMORY}" \
+    --memory-workers "${WORKER_MEMORY}" \
+    --cpus-controlplanes "1.0" \
+    --cpus-workers "2.0"
   
   echo ""
   echo "✓ Talos cluster created successfully!"

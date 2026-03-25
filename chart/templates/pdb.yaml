@@ -1,0 +1,13 @@
+{{- if gt (int .Values.api.replicaCount) 1 }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "scaleodm.fullname" . }}
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      {{- include "scaleodm.selectorLabels" . | nindent 6 }}
+{{- end }}

@@ -1,6 +1,6 @@
 // REST API for job queue management
 // @title           ScaleODM Job Queue API
-// @version         0.1.0
+// @version         0.2.0
 // @description     NodeODM-compatible API for managing distributed ODM jobs via Argo Workflows
 // @contact.name    Sam Woodcock
 // @contact.url     https://slack.hotosm.org
@@ -96,22 +96,31 @@ func main() {
 	}
 
 	// === HUMA CLI ===
+	// Channel to communicate the *http.Server back from the OnStart hook so
+	// we can shut it down gracefully when we receive a signal.
+	serverCh := make(chan *http.Server, 1)
+
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {
 		// Create API (register routes and get the HTTP handler)
 		apiObj, handler := api.NewAPI(metadataStore, wfClient)
+		_ = apiObj
 
-		// Start HTTP server
+		srv := &http.Server{
+			Addr:              fmt.Sprintf(":%d", options.Port),
+			Handler:           handler,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+
 		hooks.OnStart(func() {
 			log.Printf("API server starting on :%d", options.Port)
 			log.Printf("   Docs: http://localhost:%d/", options.Port)
 			log.Printf("   OpenAPI: http://localhost:%d/openapi.json", options.Port)
 
-			if err := http.ListenAndServe(fmt.Sprintf(":%d", options.Port), handler); err != nil {
+			serverCh <- srv
+
+			if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 				log.Fatalf("HTTP server failed: %v", err)
 			}
-
-			// Ensure apiObj is used
-			_ = apiObj
 		})
 
 		// Graceful shutdown
@@ -130,8 +139,18 @@ func main() {
 	// Cancel context
 	cancel()
 
-	// Give time to finish
-	time.Sleep(2 * time.Second)
+	// Gracefully shut down the HTTP server with a deadline
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer shutdownCancel()
+
+	select {
+	case srv := <-serverCh:
+		if err := srv.Shutdown(shutdownCtx); err != nil {
+			log.Printf("HTTP server shutdown error: %v", err)
+		}
+	default:
+		// Server never started
+	}
 
 	log.Println("Shutdown complete")
 }

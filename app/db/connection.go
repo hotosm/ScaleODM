@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"hash/crc32"
 	_ "embed"
 	"fmt"
 	"strings"
@@ -9,6 +10,11 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// schemaLockID is a PostgreSQL advisory lock ID used to serialise
+// concurrent schema initialisations. Derived from a CRC32 hash of a
+// well-known string so it won't collide with other applications.
+var schemaLockID = int64(crc32.ChecksumIEEE([]byte("scaleodm-schema-init")))
 
 //go:embed schema.sql
 var schemaSQL string
@@ -53,9 +59,7 @@ func (db *DB) Close() {
 
 // Create the required tables and indexes
 func (db *DB) InitSchema(ctx context.Context) error {
-	// Use advisory lock to prevent concurrent schema initialization
-	// Lock ID 123456 is arbitrary but consistent
-	lockID := int64(123456)
+	lockID := schemaLockID
 	
 	// Use a transaction to ensure we use the same connection for lock/unlock
 	tx, err := db.Pool.Begin(ctx)

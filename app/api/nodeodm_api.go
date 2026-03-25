@@ -6,17 +6,38 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/danielgtaylor/huma/v2"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
+
+// isNotFound checks whether an error (possibly wrapped) represents a
+// Kubernetes "not found" response.
+func isNotFound(err error) bool {
+	return k8serrors.IsNotFound(err)
+}
+
+// shellSafePattern matches strings that are safe to embed in shell scripts.
+// Allows alphanumerics, hyphens, underscores, dots, forward slashes, colons,
+// and the equals sign. This prevents shell injection via user-supplied values.
+var shellSafePattern = regexp.MustCompile(`^[a-zA-Z0-9\-_./=:@]+$`)
+
+// validateShellSafe checks that a string is safe to embed in a shell script.
+func validateShellSafe(value, fieldName string) error {
+	if !shellSafePattern.MatchString(value) {
+		return fmt.Errorf("%s contains invalid characters: only alphanumerics, hyphens, underscores, dots, slashes, colons, equals, and @ are allowed", fieldName)
+	}
+	return nil
+}
 
 // NodeODM status codes
 const (
@@ -167,7 +188,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		resp := &InfoResponse{}
-		resp.Body.Version = "0.1.0" // The ScaleODM version (normally the NodeODM version)
+		resp.Body.Version = "0.2.0" // The ScaleODM version (normally the NodeODM version)
 		resp.Body.TaskQueueCount = queueCount
 		resp.Body.MaxImages = nil // Unlimited
 		resp.Body.Engine = "odm"
@@ -338,6 +359,22 @@ func (a *API) registerNodeODMRoutes() {
 			projectID = "odm-project"
 		}
 
+		// Validate all values that will be embedded in shell scripts
+		if err := validateShellSafe(projectID, "name"); err != nil {
+			return nil, huma.NewError(400, err.Error())
+		}
+		for _, flag := range odmFlags {
+			if err := validateShellSafe(flag, "options flag"); err != nil {
+				return nil, huma.NewError(400, err.Error())
+			}
+		}
+		if err := validateShellSafe(readPath, "readS3Path"); err != nil {
+			return nil, huma.NewError(400, err.Error())
+		}
+		if err := validateShellSafe(writePath, "writeS3Path"); err != nil {
+			return nil, huma.NewError(400, err.Error())
+		}
+
 		// Determine S3 region & optional endpoint
 		s3Region := req.S3Region
 		if s3Region == "" {
@@ -375,7 +412,9 @@ func (a *API) registerNodeODMRoutes() {
 			s3Region,
 		)
 
-		// Record metadata in database
+		// Record metadata in database. If this fails, the workflow exists in
+		// Argo but won't be visible via the API - treat as a hard error so the
+		// caller knows to retry rather than losing track of the workflow.
 		_, err = a.metadataStore.CreateJob(
 			ctx,
 			wf.Name,
@@ -386,7 +425,8 @@ func (a *API) registerNodeODMRoutes() {
 			s3Region,
 		)
 		if err != nil {
-			log.Printf("Warning: Failed to record job metadata: %v", err)
+			log.Printf("ERROR: Failed to record job metadata for workflow %q: %v", wf.Name, err)
+			return nil, huma.NewError(500, "Workflow created but failed to record metadata - retry the request", err)
 		}
 
 		resp := &TaskNewResponse{}
@@ -601,7 +641,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID)
 		if err != nil {
-			if strings.Contains(err.Error(), "not found") {
+			if isNotFound(err) {
 				log.Printf("POST /task/cancel: task %q not found", input.Body.UUID)
 				return nil, huma.NewError(404, "Task not found")
 			}
@@ -636,7 +676,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Delete from Argo
 		err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID)
-		if err != nil && !strings.Contains(err.Error(), "not found") {
+		if err != nil && !isNotFound(err) {
 			log.Printf("POST /task/remove: failed to delete workflow for %q: %v", input.Body.UUID, err)
 			return nil, huma.NewError(500, "Failed to remove task", err)
 		}
@@ -696,7 +736,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		// Delete old workflow
-		if err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID); err != nil && !strings.Contains(err.Error(), "not found") {
+		if err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID); err != nil && !isNotFound(err) {
 			log.Printf("POST /task/restart: failed to delete old workflow for %q: %v", input.Body.UUID, err)
 		}
 
@@ -736,94 +776,41 @@ func (a *API) registerNodeODMRoutes() {
 	})
 
 	// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)
-	huma.Register(a.api, huma.Operation{
-		OperationID: "task-uuid-download-asset-get",
-		Method:      http.MethodGet,
-		Path:        "/task/{uuid}/download/{asset}",
-		Summary:     "Download task output asset",
-		Description: "Redirects to a pre-signed URL for downloading the asset directly from S3",
-		Tags:        []string{"task"},
-	}, func(ctx context.Context, input *struct {
-		UUID  string `path:"uuid" doc:"UUID of the task"`
-		Asset string `path:"asset" doc:"Asset type (all.zip, orthophoto.tif, etc)"`
-		Token string `query:"token" doc:"Authentication token (optional)"`
-	}) (*struct{ Body string }, error) {
-		log.Printf("GET /task/%s/download/%s: token_provided=%t", input.UUID, input.Asset, input.Token != "")
+	// Registered as a raw HTTP handler on the mux for reliable redirect support.
+	// Huma handlers return structured responses which can't express HTTP redirects,
+	// so we handle this endpoint outside Huma.
+	a.downloadHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uuid := r.PathValue("uuid")
+		asset := r.PathValue("asset")
+		log.Printf("GET /task/%s/download/%s", uuid, asset)
 
-		// Get job metadata to retrieve write path
-		metadata, err := a.metadataStore.GetJob(ctx, input.UUID)
+		metadata, err := a.metadataStore.GetJob(r.Context(), uuid)
 		if err != nil {
-			log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", input.UUID, input.Asset, err)
-			return nil, huma.NewError(500, "Failed to retrieve task metadata", err)
+			log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", uuid, asset, err)
+			http.Error(w, `{"error":"Failed to retrieve task metadata"}`, http.StatusInternalServerError)
+			return
 		}
-
 		if metadata == nil {
-			log.Printf("GET /task/%s/download/%s: task not found in metadata store", input.UUID, input.Asset)
-			return nil, huma.NewError(404, "Task not found")
+			log.Printf("GET /task/%s/download/%s: task not found", uuid, asset)
+			http.Error(w, `{"error":"Task not found"}`, http.StatusNotFound)
+			return
 		}
-
 		if metadata.WriteS3Path == "" {
-			log.Printf("GET /task/%s/download/%s: write S3 path not available", input.UUID, input.Asset)
-			return nil, huma.NewError(400, "Write S3 path not available for this task")
+			log.Printf("GET /task/%s/download/%s: write S3 path not available", uuid, asset)
+			http.Error(w, `{"error":"Write S3 path not available for this task"}`, http.StatusBadRequest)
+			return
 		}
 
-		// Get S3 client
 		s3Client := s3.GetS3Client()
-
-		// Generate pre-signed URL (valid for 1 hour)
-		presignedURL, err := s3.GeneratePresignedURL(ctx, s3Client, metadata.WriteS3Path, input.Asset, 1*time.Hour)
+		presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
 		if err != nil {
-			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", input.UUID, input.Asset, err)
-			return nil, huma.NewError(404, fmt.Sprintf("File not found: %s", input.Asset), err)
+			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, asset, err)
+			http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, asset), http.StatusNotFound)
+			return
 		}
 
-		log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL (expires in 1 hour)", input.UUID, input.Asset)
-
-		// Access response writer and request from humago adapter's context
-		// The humago adapter stores the response writer using a specific context key
-		// We need to access it through the adapter's internal context storage
-		type responseWriterKey struct{}
-		type requestKey struct{}
-		
-		var rw http.ResponseWriter
-		var req *http.Request
-		
-		// Try accessing through typed context keys
-		if val := ctx.Value(responseWriterKey{}); val != nil {
-			rw, _ = val.(http.ResponseWriter)
-		}
-		if val := ctx.Value(requestKey{}); val != nil {
-			req, _ = val.(*http.Request)
-		}
-		
-		// Try string-based keys (some adapters use these)
-		if rw == nil {
-			if val := ctx.Value("http.responseWriter"); val != nil {
-				rw, _ = val.(http.ResponseWriter)
-			}
-		}
-		if req == nil {
-			if val := ctx.Value("http.request"); val != nil {
-				req, _ = val.(*http.Request)
-			}
-		}
-		
-		// Try getting from http.ServerContextKey
-		if req == nil {
-			if httpReq, ok := ctx.Value(http.ServerContextKey).(*http.Request); ok && httpReq != nil {
-				req = httpReq
-			}
-		}
-		
-		if rw != nil && req != nil {
-			// Perform redirect
-			http.Redirect(rw, req, presignedURL, http.StatusFound)
-			return nil, nil
-		}
-		
-		// Fallback: Return the URL in response body if redirect not possible
-		// This provides graceful degradation - client can still get the URL
-		return &struct{ Body string }{Body: presignedURL}, nil
+		log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL (expires in 1 hour)", uuid, asset)
+		http.Redirect(w, r, presignedURL, http.StatusFound)
 	})
 }
 

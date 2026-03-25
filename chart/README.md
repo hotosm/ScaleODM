@@ -98,8 +98,8 @@ At least one database and one S3 configuration path must be provided:
   - `database.postgres.enabled=true` and corresponding `database.postgres.auth.*` for the bundled Postgres subchart.
 
 - **S3** (two secrets required in the release namespace):
-  - `s3.external.secret.name` — Secret containing `SCALEODM_S3_ENDPOINT`, `SCALEODM_S3_ACCESS_KEY`, and `SCALEODM_S3_SECRET_KEY` (used by the API server).
-  - `s3.workflowSecret.name` — Secret containing `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` (used by workflow pods via `secretKeyRef`).
+  - `s3.external.secret.name` - Secret containing `SCALEODM_S3_ENDPOINT`, `SCALEODM_S3_ACCESS_KEY`, and `SCALEODM_S3_SECRET_KEY` (used by the API server).
+  - `s3.workflowSecret.name` - Secret containing `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` (used by workflow pods via `secretKeyRef`).
 
 Both secrets live in the release namespace. If you use the same credentials for both, you can point them at the same secret (provided the key names match).
 

@@ -99,9 +99,12 @@ extract_and_clean() {
   find "$dir" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.TAR.GZ" -o -name "*.TAR" \) | while read tarfile; do
     found_archive=true
     echo "Extracting $tarfile..."
-    # Use --no-same-owner and strip leading path components to prevent path traversal
-    tar --no-same-owner --no-same-permissions -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || \
-    tar --no-same-owner --no-same-permissions -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || true
+    # --no-same-owner: don't try to preserve ownership
+    # --no-same-permissions: don't try to preserve permissions
+    # --no-absolute-filenames: strip leading / to prevent writing outside target
+    # --transform: strip leading directory component (like -j for zip)
+    tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || \
+    tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || true
     rm -f "$tarfile"
     check_extract_limits "$dir"
   done

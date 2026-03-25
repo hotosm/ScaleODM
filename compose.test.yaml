@@ -6,7 +6,7 @@ services:
       target: build
     # Use .test.env to force local Garage S3 settings for test runs.
     env_file: .test.env
-    command: test -timeout=5m -v -tags=e2e ./...
+    command: test -timeout=5m -v -p 1 -tags=e2e ./...
     restart: "no"
     healthcheck:
       disable: true

@@ -1,7 +1,7 @@
 [project]
 name = "python"
 version = "0.1.0"
-description = "Add your description here"
+description = "Test project for ScaleODM API"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

@@ -33,8 +33,14 @@ api:
   port: 31100
 
   # Security context
-  podSecurityContext: {}
-  securityContext: {}
+  podSecurityContext:
+    fsGroup: 1000
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
 
   # Node selector, tolerations, and affinity
   nodeSelector: {}

@@ -1,18 +1,188 @@
 # NodeODM API Compatibility
 
-ScaleODM implements the NodeODM API specification, making it a **drop-in replacement** for NodeODM with built-in scaling via Argo Workflows. Tools like **pyodm** and **WebODM** can connect to ScaleODM using the `zipurl` parameter for S3-based image processing.
+ScaleODM implements the NodeODM API specification with S3-native storage, making it a scalable replacement for NodeODM via Argo Workflows.
+
+## Quick Start: Deploy to Existing Cluster
+
+If you already have Argo Workflows installed in an `argo` namespace:
+
+```bash
+# 1. Create the namespace
+kubectl create namespace scaleodm
+
+# 2. Create the required secrets
+#    Database (external PostgreSQL):
+kubectl create secret generic scaleodm-db-vars \
+  --namespace scaleodm \
+  --from-literal=SCALEODM_DATABASE_URL="postgresql://user:pass@your-db:5432/scaleodm?sslmode=require"
+
+#    S3 credentials for the API server:
+kubectl create secret generic scaleodm-s3-vars \
+  --namespace scaleodm \
+  --from-literal=SCALEODM_S3_ENDPOINT="https://s3.amazonaws.com" \
+  --from-literal=SCALEODM_S3_ACCESS_KEY="YOUR_ACCESS_KEY" \
+  --from-literal=SCALEODM_S3_SECRET_KEY="YOUR_SECRET_KEY"
+
+#    S3 credentials for workflow pods (used by rclone inside Argo containers):
+kubectl create secret generic scaleodm-s3-creds \
+  --namespace scaleodm \
+  --from-literal=AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY" \
+  --from-literal=AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY" \
+  --from-literal=AWS_DEFAULT_REGION="us-east-1"
+
+# 3. Install the chart (skip Argo subchart since you already have it)
+helm install scaleodm ./chart \
+  --namespace scaleodm \
+  --set argo.enabled=false \
+  --set database.external.enabled=true \
+  --set s3.external.enabled=true
+
+# 4. Verify
+kubectl get pods -n scaleodm
+curl http://scaleodm.scaleodm.svc.cluster.local:31100/info
+```
+
+The API is now available at `scaleodm.scaleodm.svc.cluster.local:31100` from within the cluster.
+
+## How It Works
+
+The processing pipeline for each task:
+
+1. **Task creation** - `POST /task/new` with an S3 path (via `zipurl` or `readS3Path`)
+2. **Download stage** - Argo workflow pod uses rclone to copy images from S3 to local disk. Supports raw images (jpg/tif) and archives (zip/tar/tar.gz) which are auto-extracted and flattened.
+3. **Process stage** - ODM container processes the images
+4. **Upload stage** - rclone pushes results back to S3 (to `writeS3Path` or `{zipurl}-output/`)
+5. **Query results** - `GET /task/{uuid}/info` for status, `GET /task/{uuid}/download/{asset}` returns a 302 redirect to a pre-signed S3 URL
+
+## Using with pyodm
+
+pyodm's `create_task()` uses NodeODM's chunked upload flow (`/task/new/init` + `/task/new/upload` + `/task/new/commit`) which ScaleODM does not implement - ScaleODM processes images already in S3.
+
+However, pyodm works with ScaleODM for **task creation via `Node.post()`** and for **all monitoring/download operations** via the standard `Task` class. No custom wrapper package needed.
+
+### Create tasks with pyodm + S3
+
+```python
+import json
+from pyodm import Node
+from pyodm.api import Task
+
+node = Node("scaleodm.scaleodm.svc.cluster.local", 31100)
+
+# Create task - use Node.post() to send zipurl directly
+result = node.post("/task/new", data={
+    "name": "my-project",
+    "zipurl": "s3://mybucket/drone-images/",
+    "options": json.dumps([
+        {"name": "fast-orthophoto", "value": True},
+        {"name": "dsm", "value": True},
+    ]),
+})
+uuid = result.json()["uuid"]
+print(f"Task created: {uuid}")
+
+# Wrap in a pyodm Task for monitoring - all standard methods work
+task = Task(node, uuid)
+
+# Poll status
+info = task.info()
+print(f"Status: {info.status}")       # TaskStatus enum
+print(f"Progress: {info.progress}%")
+
+# Block until complete
+task.wait_for_completion()
+
+# Download results (follows redirect to pre-signed S3 URL)
+task.download_assets("/tmp/results/")
+```
+
+### Helper function for cleaner integration
+
+If you're replacing NodeODM in an existing app, add this helper:
+
+```python
+import json
+from pyodm import Node
+from pyodm.api import Task
+
+
+def create_s3_task(node, s3_path, name="odm-project", options=None):
+    """Create a ScaleODM task from an S3 path of images.
+
+    Args:
+        node: pyodm Node pointed at ScaleODM
+        s3_path: S3 path containing images (e.g. "s3://bucket/images/")
+        name: Project name
+        options: Dict of ODM options (e.g. {"dsm": True})
+
+    Returns:
+        pyodm Task object (supports .info(), .wait_for_completion(),
+        .download_assets(), etc.)
+    """
+    odm_options = []
+    if options:
+        for k, v in options.items():
+            odm_options.append({"name": k, "value": v})
+
+    data = {
+        "name": name,
+        "zipurl": s3_path,
+    }
+    if odm_options:
+        data["options"] = json.dumps(odm_options)
+
+    result = node.post("/task/new", data=data)
+    return Task(node, result.json()["uuid"])
+
+
+# Usage - almost identical to pyodm's create_task():
+node = Node("scaleodm-host", 31100)
+task = create_s3_task(
+    node,
+    "s3://mybucket/drone-images/",
+    name="my-project",
+    options={"fast-orthophoto": True, "dsm": True},
+)
+task.wait_for_completion()
+task.download_assets("/tmp/results/")
+```
+
+### Migration from NodeODM
+
+Replace your existing `create_task()` calls:
+
+```python
+# BEFORE (NodeODM - uploads files directly):
+task = node.create_task(
+    ["img1.jpg", "img2.jpg", ...],
+    options={"dsm": True},
+)
+
+# AFTER (ScaleODM - images pre-uploaded to S3):
+task = create_s3_task(
+    node,
+    "s3://mybucket/project/images/",
+    options={"dsm": True},
+)
+
+# Everything else stays the same:
+task.wait_for_completion()
+task.download_assets("/tmp/results/")
+info = task.info()
+task.cancel()
+task.remove()
+```
 
 ## Implemented Endpoints
 
 ### Server Information
 
 #### `GET /info`
-Returns information about the node including queue count and engine version.
+Returns node information including queue count and engine version.
 
-**Response:**
 ```json
 {
-  "version": "0.1.0",
+  "version": "0.2.0",
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
@@ -23,331 +193,164 @@ Returns information about the node including queue count and engine version.
 #### `GET /options`
 Returns available ODM processing options.
 
-**Response:**
-```json
-[
-  {
-    "name": "fast-orthophoto",
-    "type": "bool",
-    "value": "false",
-    "domain": "bool",
-    "help": "Skips dense reconstruction and 3D model generation"
-  },
-  ...
-]
-```
-
 ### Task Management
 
 #### `POST /task/new`
 Creates a new processing task.
 
-**Parameters (form or JSON body):**
-- `name` (optional) - Task name (defaults to `odm-project`)
-- `options` (optional) - JSON array of options: `[{"name": "fast-orthophoto", "value": true}]`
-- `zipurl` - S3 path to input images (e.g., `s3://bucket/images/`). This is the **NodeODM-compatible** parameter — use this when working with pyodm or WebODM.
-- `readS3Path` - S3 path to input images (preferred over `zipurl` for new integrations)
-- `writeS3Path` (optional) - S3 path for outputs (defaults to `readS3Path/output/`)
-- `s3Endpoint` (optional) - Custom S3-compatible endpoint (for MinIO, etc.)
-- `s3Region` (optional) - S3 region (defaults to `us-east-1`)
-- `webhook` (optional) - Callback URL when complete
-- `skipPostProcessing` (optional) - Skip point cloud tiles
-- `dateCreated` (optional) - Override creation timestamp
+**Parameters (form-encoded or JSON body):**
 
-Either `zipurl` or `readS3Path` must be provided. Both must be `s3://` paths. HTTP zip URLs are not supported.
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `zipurl` | * | S3 path to images (e.g. `s3://bucket/images/`). NodeODM-compatible. |
+| `readS3Path` | * | S3 path to images. Preferred for new integrations. |
+| `writeS3Path` | | S3 path for outputs. Defaults to `readS3Path/output/`. |
+| `name` | | Task name. Defaults to `odm-project`. |
+| `options` | | JSON array: `[{"name": "dsm", "value": true}]` |
+| `s3Endpoint` | | Custom S3 endpoint (MinIO, etc.) |
+| `s3Region` | | S3 region. Defaults to `us-east-1`. |
+| `webhook` | | Callback URL on completion. |
+| `skipPostProcessing` | | Skip point cloud tiles. |
 
-**Response:**
-```json
-{
-  "uuid": "odm-pipeline-abc123"
-}
-```
+\* One of `zipurl` or `readS3Path` is required. Both must be `s3://` paths.
 
-**Example (curl):**
-```bash
-curl -X POST http://localhost:31100/task/new \
-  -F "name=my-project" \
-  -F "zipurl=s3://mybucket/drone-images/" \
-  -F 'options=[{"name":"fast-orthophoto","value":true},{"name":"dsm","value":true}]'
-```
+When using `zipurl`, outputs are written to `{zipurl}-output/`.
+When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `writeS3Path`).
 
-#### `GET /task/list`
-Lists all tasks.
-
-**Response:**
-```json
-[
-  {"uuid": "odm-pipeline-abc123"},
-  {"uuid": "odm-pipeline-def456"}
-]
-```
+**Response:** `{"uuid": "odm-pipeline-abc123"}`
 
 #### `GET /task/{uuid}/info`
-Gets detailed task information.
+Returns task status. The `status` field is a nested object matching NodeODM spec:
 
-**Query Parameters:**
-- `with_output` (optional) - Line number to start console output from
-
-**Response:**
 ```json
 {
   "uuid": "odm-pipeline-abc123",
   "name": "my-project",
   "dateCreated": 1705334400,
   "processingTime": 120000,
-  "status": {
-    "code": 20
-  },
-  "options": [
-    {"name": "fast-orthophoto", "value": true}
-  ],
+  "status": {"code": 20},
+  "options": [{"name": "fast-orthophoto", "value": true}],
   "imagesCount": 0,
   "progress": 50,
-  "output": ["Starting ODM...", "Processing images..."]
+  "output": ["Processing images..."]
 }
 ```
 
-The `status` field is a **nested object** matching the NodeODM spec (compatible with pyodm's `task.info['status']['code']`). For failed tasks, the status object includes an `errorMessage` field:
+Failed tasks include an error message: `{"status": {"code": 30, "errorMessage": "..."}}`
 
-```json
-{
-  "status": {
-    "code": 30,
-    "errorMessage": "ODM processing failed: insufficient overlap between images"
-  }
-}
-```
-
-**Status Codes:**
-- `10` = QUEUED (Pending in Argo)
-- `20` = RUNNING (Running in Argo)
-- `30` = FAILED (Failed/Error in Argo)
-- `40` = COMPLETED (Succeeded in Argo)
-- `50` = CANCELED (Deleted from Argo)
+**Status codes:** 10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED
 
 #### `GET /task/{uuid}/output`
-Gets console output from the task.
-
-**Query Parameters:**
-- `line` (optional) - Line number to start from (default: 0)
-
-**Response:**
-```
-Starting ODM processing...
-Downloading images from S3...
-Processing 45 images...
-...
-```
-
-#### `POST /task/cancel`
-Cancels a running task.
-
-**Body:**
-```json
-{
-  "uuid": "odm-pipeline-abc123"
-}
-```
-
-**Response:**
-```json
-{
-  "success": true
-}
-```
-
-#### `POST /task/remove`
-Removes a task and all its assets.
-
-**Body:**
-```json
-{
-  "uuid": "odm-pipeline-abc123"
-}
-```
-
-#### `POST /task/restart`
-Restarts a failed or completed task.
-
-**Body:**
-```json
-{
-  "uuid": "odm-pipeline-abc123",
-  "options": "[{\"name\":\"dsm\",\"value\":true}]"
-}
-```
+Console output. Query param `line` to start from a specific line.
 
 #### `GET /task/{uuid}/download/{asset}`
-Downloads output assets. Redirects to a pre-signed S3 URL (valid for 1 hour).
+HTTP 302 redirect to a pre-signed S3 URL (1 hour expiry). Assets: `all.zip`, `orthophoto.tif`, `dsm.tif`, `dtm.tif`.
 
-**Assets:**
-- `all.zip` - All outputs
-- `orthophoto.tif` - Orthophoto
-- `dsm.tif` - Digital Surface Model
-- `dtm.tif` - Digital Terrain Model
+#### `POST /task/cancel`
+Body: `{"uuid": "..."}` → `{"success": true}`
 
-## Using zipurl for NodeODM Compatibility (pyodm / WebODM)
+#### `POST /task/remove`
+Body: `{"uuid": "..."}` → `{"success": true}`
 
-ScaleODM supports the `zipurl` parameter from the NodeODM API, allowing pyodm and WebODM to create tasks without code changes — provided images are pre-uploaded to S3.
+#### `POST /task/restart`
+Body: `{"uuid": "...", "options": "[...]"}` → `{"success": true}`
 
-### How zipurl works in ScaleODM
+## Key Differences from NodeODM
 
-When `POST /task/new` receives a `zipurl` parameter:
+| | NodeODM | ScaleODM |
+|---|---------|----------|
+| **Image input** | Upload via multipart form | S3 path via `zipurl` or `readS3Path` |
+| **Chunked upload** | `/task/new/init` + `/upload` + `/commit` | Not implemented (not needed) |
+| **Downloads** | Direct binary response | 302 redirect to pre-signed S3 URL |
+| **UUIDs** | Random UUID | Argo workflow name (`odm-pipeline-xxxxx`) |
+| **Scaling** | Single machine | Kubernetes + Argo Workflows |
+| **Image formats** | Upload any file | S3 dir with jpg/tif (or zip/tar archives) |
 
-1. **S3 paths** (`s3://bucket/path/`) are accepted and converted internally:
-   - `readS3Path` is set to the zipurl value
-   - `writeS3Path` is set to `{zipurl}-output/` (e.g., `s3://bucket/path/-output/`)
-2. **HTTP/HTTPS zip URLs** are **not supported** and return a `400` error. ScaleODM does not download and store images — it orchestrates processing of images already in S3.
+### Status Mapping
 
-### Using pyodm with ScaleODM
+| Argo Phase | NodeODM Code | Status |
+|-----------|--------------|--------|
+| Pending   | 10          | QUEUED |
+| Running   | 20          | RUNNING |
+| Succeeded | 40          | COMPLETED |
+| Failed    | 30          | FAILED |
+| Error     | 30          | FAILED |
 
-pyodm can connect to ScaleODM using the `zipurl` parameter. Upload images to S3 first, then pass the S3 path as `zipurl`:
+## Deployment Reference
 
-```python
-from pyodm import Node
+### Helm Values for External Argo + External DB + External S3
 
-node = Node("scaleodm-host", 31100)
+```yaml
+# values-production.yaml
+argo:
+  enabled: false  # Use your existing Argo Workflows installation
 
-# Images must already be in S3
-task = node.create_task(
-    [],  # No local files — images are in S3
-    options={"fast-orthophoto": True, "dsm": True},
-    zipurl="s3://mybucket/project/drone-images/"
-)
+database:
+  external:
+    enabled: true
+    secret:
+      name: "scaleodm-db-vars"
+      key: "SCALEODM_DATABASE_URL"
 
-# Poll for completion
-info = task.info()
-print(f"Status: {info.status.code}")  # 10=QUEUED, 20=RUNNING, 40=COMPLETED
-print(f"Progress: {info.progress}%")
+s3:
+  external:
+    enabled: true
+    secret:
+      name: "scaleodm-s3-vars"
+  workflowSecret:
+    name: "scaleodm-s3-creds"
+    region: "us-east-1"
 
-# Wait for completion
-task.wait_for_completion()
+api:
+  replicaCount: 2  # HA - also creates a PodDisruptionBudget
 
-# Download results (redirects to pre-signed S3 URL)
-task.download_assets("/tmp/results/")
+config:
+  odmImage: "docker.io/opendronemap/odm:3.5.6"
 ```
 
-### Using WebODM with ScaleODM
-
-WebODM can be configured to use ScaleODM as a processing node. Since WebODM normally uploads images directly, you need to:
-
-1. Configure WebODM to use `zipurl` mode pointing to S3 paths
-2. Upload images to S3 before creating the task
-3. Point WebODM's processing node to ScaleODM's address
-
-### Using readS3Path (preferred for new integrations)
-
-For new integrations that don't need NodeODM compatibility, use `readS3Path` and `writeS3Path` directly for more control:
-
-```python
-import requests, json
-
-response = requests.post(
-    "http://scaleodm:31100/task/new",
-    json={
-        "name": "my-project",
-        "readS3Path": "s3://mybucket/project/input/",
-        "writeS3Path": "s3://mybucket/project/output/",
-        "s3Region": "us-east-1",
-        "options": json.dumps([
-            {"name": "fast-orthophoto", "value": True},
-            {"name": "dsm", "value": True}
-        ])
-    }
-)
-task_uuid = response.json()["uuid"]
+```bash
+helm install scaleodm ./chart -n scaleodm -f values-production.yaml
 ```
 
-## Key Differences from Standard NodeODM
+### S3 Structure
 
-### 1. S3-Based Workflow
-Instead of uploading files via multipart/form-data:
-- Use `zipurl` (S3 path) or `readS3Path` parameter
-- Images must be pre-uploaded to S3
-- Outputs are written to S3 automatically
-- Download endpoint redirects to pre-signed S3 URLs
-
-**Example S3 structure:**
 ```
 s3://mybucket/
   └── project-123/
-      ├── input/          # Source images (zipurl/readS3Path points here)
-      │   ├── img1.jpg
-      │   ├── img2.jpg
+      ├── images/            ← zipurl/readS3Path points here
+      │   ├── DJI_0001.jpg
+      │   ├── DJI_0002.jpg
       │   └── ...
-      └── output/         # ODM outputs (auto-created)
-          ├── orthophoto.tif
-          ├── dsm.tif
+      └── images-output/     ← auto-created by ScaleODM (zipurl mode)
+          ├── odm_orthophoto/
+          │   └── odm_orthophoto.tif
+          ├── odm_dem/
+          │   ├── dsm.tif
+          │   └── dtm.tif
           └── ...
 ```
 
-### 2. UUID = Argo Workflow Name
-- NodeODM UUIDs map to Argo workflow names
-- Format: `odm-pipeline-abc123`
-- Trackable via `kubectl get workflows`
-
-### 3. Status Mapping
-
-| Argo Phase | NodeODM Code | NodeODM Status |
-|-----------|--------------|----------------|
-| Pending   | 10          | QUEUED         |
-| Running   | 20          | RUNNING        |
-| Succeeded | 40          | COMPLETED      |
-| Failed    | 30          | FAILED         |
-| Error     | 30          | FAILED         |
-
-### 4. Download Behavior
-The `/task/{uuid}/download/{asset}` endpoint returns an HTTP 302 redirect to a pre-signed S3 URL (valid for 1 hour). Most HTTP clients (including pyodm) follow redirects automatically.
-
-### 5. Authentication
-The `token` query parameter is accepted but not enforced. Add authentication via:
-- API Gateway in front of ScaleODM
-- Kubernetes Ingress with auth
-- Service mesh policies
-
-## Testing NodeODM Compatibility
+### Testing
 
 ```bash
-# Test /info endpoint
-curl http://localhost:31100/info
+# Verify API is up
+curl http://scaleodm:31100/info
 
-# Create a task using zipurl (NodeODM-compatible)
-curl -X POST http://localhost:31100/task/new \
-  -F "zipurl=s3://test-bucket/images/" \
+# Create a task
+curl -X POST http://scaleodm:31100/task/new \
+  -F "zipurl=s3://mybucket/images/" \
   -F 'options=[{"name":"fast-orthophoto","value":true}]'
 
-# Create a task using readS3Path (ScaleODM native)
-curl -X POST http://localhost:31100/task/new \
-  -H "Content-Type: application/json" \
-  -d '{
-    "readS3Path": "s3://test-bucket/images/",
-    "writeS3Path": "s3://test-bucket/output/",
-    "options": "[{\"name\":\"fast-orthophoto\",\"value\":true}]"
-  }'
+# Check status
+curl http://scaleodm:31100/task/odm-pipeline-xxxxx/info
 
-# Get task info (status is nested object: {"code": 20})
-curl http://localhost:31100/task/{uuid}/info
-
-# Get task output
-curl http://localhost:31100/task/{uuid}/output
-
-# List all tasks
-curl http://localhost:31100/task/list
-
-# Cancel a task
-curl -X POST http://localhost:31100/task/cancel \
-  -H "Content-Type: application/json" \
-  -d '{"uuid": "odm-pipeline-abc123"}'
-
-# Download an asset (follows redirect to S3)
-curl -L http://localhost:31100/task/{uuid}/download/orthophoto.tif -o orthophoto.tif
+# Download (follows redirect)
+curl -L http://scaleodm:31100/task/odm-pipeline-xxxxx/download/orthophoto.tif -o orthophoto.tif
 ```
 
-## Not Implemented (Yet)
+## Not Implemented
 
-- File uploads via `/task/new/init`, `/task/new/upload`, `/task/new/commit` (chunked upload flow)
-- HTTP zip URL downloads (only S3 paths are supported for `zipurl`)
-- Authentication endpoints (`/auth/login`, `/auth/register`, `/auth/info`)
-- Image count tracking (`imagesCount` always returns 0)
-
-These can be added if needed, but the core S3-based workflow is more efficient for production use.
+- File uploads via `/task/new/init`, `/task/new/upload`, `/task/new/commit` (chunked upload)
+- HTTP zip URL downloads (only `s3://` paths supported)
+- Auth endpoints (`/auth/login`, `/auth/info`)
+- `imagesCount` (always 0)
