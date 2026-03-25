@@ -1,7 +1,6 @@
 set dotenv-load
 
 mod test 'tasks/test'
-mod chart 'tasks/chart'
 mod docs 'tasks/docs'
 
 # List available commands
@@ -12,6 +11,18 @@ default:
 # List available commands
 help:
   just --justfile {{justfile()}} --list
+
+# Prep module from https://github.com/hotosm/justfiles
+prep *args:
+    @curl -sS https://raw.githubusercontent.com/hotosm/justfiles/main/prep.just \
+      -o {{justfile_directory()}}/tasks/prep.just;
+    @just --justfile {{justfile_directory()}}/tasks/prep.just {{args}}
+
+# Chart module from https://github.com/hotosm/justfiles
+chart *args:
+    @curl -sS https://raw.githubusercontent.com/hotosm/justfiles/main/chart.just \
+      -o {{justfile_directory()}}/tasks/chart.just;
+    @just --justfile {{justfile_directory()}}/tasks/chart.just --set chart_name "scaleodm" {{args}}
 
 # Install curl if missing
 [private]
@@ -188,6 +199,37 @@ example-python:
       uv run python main.py
     '
   
+  echo "Shutting down containers..."
+  docker compose down --remove-orphans
+
+# Example the API usage via pyodm SDK
+example-pyodm:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  just test cluster-available
+
+  echo "Starting API..."
+  docker compose up --wait --detach api
+
+  echo "Running pyodm example inside container..."
+  docker run --rm \
+    --network host \
+    --env-file .env \
+    -v "$PWD/examples/pyodm:/app" \
+    --workdir /app \
+    -e PYTHONDONTWRITEBYTECODE=1 \
+    -e PYTHONUNBUFFERED=1 \
+    -e PYTHONFAULTHANDLER=1 \
+    docker.io/python:3.13-slim-trixie \
+    bash -lc '
+      set -euo pipefail
+      python -V
+      pip install --no-cache-dir uv
+      uv sync
+      uv run python main.py
+    '
+
   echo "Shutting down containers..."
   docker compose down --remove-orphans
 
