@@ -3,6 +3,7 @@ name: 🚀 Release Chart
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 permissions:
   contents: read
