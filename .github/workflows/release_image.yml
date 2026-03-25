@@ -23,7 +23,7 @@ jobs:
           echo "repo=$repo" >> "$GITHUB_OUTPUT"
 
   container-img:
-    uses: hotosm/gh-workflows/.github/workflows/image_build.yml@2.0.5
+    uses: hotosm/gh-workflows/.github/workflows/image_build.yml@3.6.0
     needs: prep
     with:
       build_target: release
