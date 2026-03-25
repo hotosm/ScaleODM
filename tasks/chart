@@ -54,7 +54,9 @@ publish registry="":
     --username "$USERNAME" \
     --password-stdin
 
-  just chart build
+  just _install-helm
+  just chart dependencies
+  just chart package
 
   CHART_FILE=$(ls -t scaleodm-*.tgz | head -1)
   if [ -z "$CHART_FILE" ]; then
@@ -111,9 +113,6 @@ lint:
 dependencies:
   #!/usr/bin/env sh
   set -e
-
-  # Test k8s cluster required for this
-  just test cluster-available
 
   cd {{justfile_directory()}}/chart
   echo "📥 Updating dependencies..."
