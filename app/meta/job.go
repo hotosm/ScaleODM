@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hotosm/scaleodm/app/db"
+	"github.com/hotosm/scaleodm/app/observability"
 )
 
 type JobMetadata struct {
@@ -150,6 +151,11 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 // status should be one of: 'queued', 'claimed', 'running', 'failed', 'completed', 'canceled'
 // Note: 'claimed' is an internal state for job queue management (maps to QUEUED/10 in API)
 func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string, errorMsg *string) error {
+	started := time.Now()
+	reason := "none"
+	if errorMsg != nil && strings.TrimSpace(*errorMsg) != "" {
+		reason = "error_message_present"
+	}
 	query := `
 		UPDATE scaleodm_job_metadata
 		SET job_status = $2,
@@ -176,12 +182,15 @@ func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string
 
 	result, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue)
 	if err != nil {
+		observability.RecordJobStatusUpdate("failure", status, "db_exec_failed", time.Since(started))
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
+		observability.RecordJobStatusUpdate("failure", status, "job_not_found", time.Since(started))
 		return fmt.Errorf("job not found: %s", workflowName)
 	}
+	observability.RecordJobStatusUpdate("success", status, reason, time.Since(started))
 	return nil
 }
 
@@ -215,11 +224,158 @@ func (s *Store) UpdateJobMetadata(ctx context.Context, workflowName string, meta
 		WHERE workflow_name = $1
 	`
 
-	_, err = s.db.Pool.Exec(ctx, query, workflowName, metadataJSON)
+	result, err := s.db.Pool.Exec(ctx, query, workflowName, metadataJSON)
 	if err != nil {
 		return fmt.Errorf("failed to update job metadata: %w", err)
 	}
+	if result.RowsAffected() == 0 {
+		return fmt.Errorf("job not found: %s", workflowName)
+	}
 	return nil
+}
+
+// MergeJobMetadata applies a patch onto existing metadata JSON for a workflow.
+func (s *Store) MergeJobMetadata(ctx context.Context, workflowName string, patch map[string]interface{}) error {
+	if len(patch) == 0 {
+		return nil
+	}
+
+	return retryOnDeadlock(ctx, 3, func() error {
+		tx, err := s.db.Pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+
+		merged, err := s.mergeMetadataInTx(ctx, tx, workflowName, patch)
+		if err != nil {
+			return err
+		}
+		if !merged {
+			return fmt.Errorf("job not found: %s", workflowName)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
+}
+
+func (s *Store) mergeMetadataInTx(ctx context.Context, tx pgx.Tx, workflowName string, patch map[string]interface{}) (bool, error) {
+	current := map[string]interface{}{}
+	var metadataJSON []byte
+	query := `SELECT metadata FROM scaleodm_job_metadata WHERE workflow_name = $1 FOR UPDATE`
+	err := tx.QueryRow(ctx, query, workflowName).Scan(&metadataJSON)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+
+	if len(metadataJSON) > 0 {
+		if err := json.Unmarshal(metadataJSON, &current); err != nil {
+			return false, fmt.Errorf("failed to decode existing metadata: %w", err)
+		}
+	}
+
+	for key, value := range patch {
+		if value == nil {
+			delete(current, key)
+			continue
+		}
+		current[key] = value
+	}
+
+	updatedJSON, err := json.Marshal(current)
+	if err != nil {
+		return false, fmt.Errorf("failed to encode merged metadata: %w", err)
+	}
+
+	updateQuery := `UPDATE scaleodm_job_metadata SET metadata = $2 WHERE workflow_name = $1`
+	result, err := tx.Exec(ctx, updateQuery, workflowName, updatedJSON)
+	if err != nil {
+		return false, err
+	}
+	return result.RowsAffected() > 0, nil
+}
+
+// RestartJobMetadata atomically creates new metadata row, carries forward and patches
+// metadata, and removes the old row in a single transaction.
+func (s *Store) RestartJobMetadata(
+	ctx context.Context,
+	oldWorkflowName string,
+	newWorkflowName string,
+	projectID string,
+	readPath string,
+	writePath string,
+	odmFlags []string,
+	s3Region string,
+	metadataPatch map[string]interface{},
+) error {
+	flagsJSON, err := json.Marshal(odmFlags)
+	if err != nil {
+		return fmt.Errorf("failed to marshal odm_flags: %w", err)
+	}
+
+	return retryOnDeadlock(ctx, 3, func() error {
+		tx, err := s.db.Pool.Begin(ctx)
+		if err != nil {
+			return err
+		}
+		defer tx.Rollback(ctx)
+
+		mergedMetadata := map[string]interface{}{}
+		var oldMetadataJSON []byte
+		selectOldQuery := `SELECT metadata FROM scaleodm_job_metadata WHERE workflow_name = $1 FOR UPDATE`
+		err = tx.QueryRow(ctx, selectOldQuery, oldWorkflowName).Scan(&oldMetadataJSON)
+		if err == pgx.ErrNoRows {
+			return fmt.Errorf("job not found: %s", oldWorkflowName)
+		}
+		if err != nil {
+			return fmt.Errorf("failed to fetch old metadata: %w", err)
+		}
+		if len(oldMetadataJSON) > 0 {
+			if err := json.Unmarshal(oldMetadataJSON, &mergedMetadata); err != nil {
+				return fmt.Errorf("failed to decode old metadata: %w", err)
+			}
+		}
+		for key, value := range metadataPatch {
+			if value == nil {
+				delete(mergedMetadata, key)
+				continue
+			}
+			mergedMetadata[key] = value
+		}
+		newMetadataJSON, err := json.Marshal(mergedMetadata)
+		if err != nil {
+			return fmt.Errorf("failed to encode new metadata: %w", err)
+		}
+
+		insertQuery := `
+			INSERT INTO scaleodm_job_metadata
+			(workflow_name, odm_project_id, read_s3_path, write_s3_path, odm_flags, s3_region, metadata)
+			VALUES ($1, $2, $3, $4, $5, $6, $7)
+		`
+		if _, err := tx.Exec(ctx, insertQuery, newWorkflowName, projectID, readPath, writePath, flagsJSON, s3Region, newMetadataJSON); err != nil {
+			return fmt.Errorf("failed to insert restarted job metadata: %w", err)
+		}
+
+		deleteQuery := `DELETE FROM scaleodm_job_metadata WHERE workflow_name = $1`
+		deleteResult, err := tx.Exec(ctx, deleteQuery, oldWorkflowName)
+		if err != nil {
+			return fmt.Errorf("failed to delete old job metadata: %w", err)
+		}
+		if deleteResult.RowsAffected() == 0 {
+			return fmt.Errorf("job not found: %s", oldWorkflowName)
+		}
+
+		if err := tx.Commit(ctx); err != nil {
+			return fmt.Errorf("failed to commit restart metadata transaction: %w", err)
+		}
+		return nil
+	})
 }
 
 // ListJobs retrieves jobs with optional filters

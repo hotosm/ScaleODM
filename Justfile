@@ -167,6 +167,81 @@ dev:
   just test cluster-init
   just start
 
+# Seed local RustFS with example imagery from public bucket
+[private]
+_seed-example-imagery:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  echo "Ensuring local S3 service is running..."
+  docker compose up --detach s3
+
+  echo "Initializing RustFS bucket/credentials..."
+  AWS_ACCESS_KEY_ID=odm \
+  AWS_SECRET_ACCESS_KEY=somelongpassword \
+  docker compose run --rm s3-init
+
+  echo "Verifying local RustFS key access..."
+  docker run --rm \
+    --network host \
+    -e AWS_S3_ENDPOINT=${SCALEODM_LOCAL_S3_ENDPOINT:-http://localhost:31102} \
+    -e AWS_ACCESS_KEY_ID=odm \
+    -e AWS_SECRET_ACCESS_KEY=somelongpassword \
+    --entrypoint /bin/sh \
+    docker.io/rclone/rclone:1.69 \
+    -eu -c '
+      printf "%s\n" \
+        "[local]" \
+        "type = s3" \
+        "provider = Minio" \
+        "env_auth = false" \
+        "access_key_id = ${AWS_ACCESS_KEY_ID}" \
+        "secret_access_key = ${AWS_SECRET_ACCESS_KEY}" \
+        "region = us-east-1" \
+        "endpoint = ${AWS_S3_ENDPOINT}" \
+        "force_path_style = true" \
+        "use_path_style = true" \
+        > /tmp/rclone-check.conf
+      rclone --config /tmp/rclone-check.conf lsd local:scaleodm-test
+    '
+
+  echo "Seeding example imagery into local RustFS..."
+  docker run --rm \
+    --network host \
+    -e AWS_S3_ENDPOINT=${SCALEODM_LOCAL_S3_ENDPOINT:-http://localhost:31102} \
+    -e AWS_ACCESS_KEY_ID=odm \
+    -e AWS_SECRET_ACCESS_KEY=somelongpassword \
+    --entrypoint /bin/sh \
+    docker.io/rclone/rclone:1.69 \
+    -eu -c '
+      printf "%s\n" \
+        "[public]" \
+        "type = s3" \
+        "provider = AWS" \
+        "env_auth = false" \
+        "anonymous = true" \
+        "region = us-east-1" \
+        "endpoint = https://s3.amazonaws.com" \
+        "" \
+        "[local]" \
+        "type = s3" \
+        "provider = Minio" \
+        "env_auth = false" \
+        "access_key_id = ${AWS_ACCESS_KEY_ID}" \
+        "secret_access_key = ${AWS_SECRET_ACCESS_KEY}" \
+        "region = us-east-1" \
+        "endpoint = ${AWS_S3_ENDPOINT}" \
+        "force_path_style = true" \
+        "use_path_style = true" \
+        > /tmp/rclone.conf
+
+      rclone --config /tmp/rclone.conf sync \
+        public:dronetm-testdata/freetown-mini/ \
+        local:scaleodm-test/test/ \
+        --create-empty-src-dirs \
+        --progress
+    '
+
 # Run the manual workflow example (loads .env automatically via dotenv-load)
 example-manual:
   go run examples/manual_workflow.go
@@ -175,16 +250,38 @@ example-manual:
 example-python:
   #!/usr/bin/env bash
   set -euo pipefail
+  trap 'docker compose down --remove-orphans' EXIT
 
-  just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  just test build-api-image
+  docker compose down --remove-orphans
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+
+  if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
+    TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data[0].get("IPAM",{}).get("Config",[{}])[0].get("Gateway", "")) if data else "", end="")' 2>/dev/null || true)
+    if [ -n "$TALOS_GATEWAY_IP" ]; then
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://${TALOS_GATEWAY_IP}:31102"
+    else
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://host.docker.internal:31102"
+    fi
+  fi
+
+  echo "Using workflow S3 endpoint: ${SCALEODM_WORKFLOW_S3_ENDPOINT}"
+
+  echo "Ensuring workflow S3 secret uses local test credentials..."
+  kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
+    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
+    --from-literal=AWS_DEFAULT_REGION=us-east-1 \
+    --dry-run=client -o yaml | kubectl apply -f -
 
   echo "Starting API..."
-  docker compose up --wait --detach api
+  docker compose up --wait --detach --force-recreate api
 
   echo "Running Python API test inside container..."
   docker run --rm \
     --network host \
-    --env-file .env \
+    -e SCALEODM_WORKFLOW_S3_ENDPOINT=${SCALEODM_WORKFLOW_S3_ENDPOINT} \
     -v "$PWD/examples/python:/app" \
     --workdir /app \
     -e PYTHONDONTWRITEBYTECODE=1 \
@@ -198,7 +295,7 @@ example-python:
       uv sync
       uv run python main.py
     '
-  
+
   echo "Shutting down containers..."
   docker compose down --remove-orphans
 
@@ -206,16 +303,38 @@ example-python:
 example-pyodm:
   #!/usr/bin/env bash
   set -euo pipefail
+  trap 'docker compose down --remove-orphans' EXIT
 
-  just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  just test build-api-image
+  docker compose down --remove-orphans
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+
+  if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
+    TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data[0].get("IPAM",{}).get("Config",[{}])[0].get("Gateway", "")) if data else "", end="")' 2>/dev/null || true)
+    if [ -n "$TALOS_GATEWAY_IP" ]; then
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://${TALOS_GATEWAY_IP}:31102"
+    else
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://host.docker.internal:31102"
+    fi
+  fi
+
+  echo "Using workflow S3 endpoint: ${SCALEODM_WORKFLOW_S3_ENDPOINT}"
+
+  echo "Ensuring workflow S3 secret uses local test credentials..."
+  kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
+    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
+    --from-literal=AWS_DEFAULT_REGION=us-east-1 \
+    --dry-run=client -o yaml | kubectl apply -f -
 
   echo "Starting API..."
-  docker compose up --wait --detach api
+  docker compose up --wait --detach --force-recreate api
 
   echo "Running pyodm example inside container..."
   docker run --rm \
     --network host \
-    --env-file .env \
+    -e SCALEODM_WORKFLOW_S3_ENDPOINT=${SCALEODM_WORKFLOW_S3_ENDPOINT} \
     -v "$PWD/examples/pyodm:/app" \
     --workdir /app \
     -e PYTHONDONTWRITEBYTECODE=1 \

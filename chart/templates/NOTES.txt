@@ -58,9 +58,8 @@
 6. S3 Storage:
    {{- if .Values.s3.garage.enabled }}
    Garage S3 has been deployed in-cluster.
-   Access details are in the secret: {{ include "scaleodm.fullname" . }}-secret
-   Workflow credential secret created in namespace {{ .Release.Namespace }}:
-   {{ .Values.s3.workflowSecret.name | default "scaleodm-s3-creds" }}
+   Unified runtime secret (API + workflow) in namespace {{ .Release.Namespace }}:
+   {{ coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name }}
    {{- else }}
    External S3 is disabled, but bundled Garage is also disabled.
    Set s3.garage.enabled=true or provide an external S3 secret.
@@ -68,7 +67,8 @@
 {{- else }}
 6. S3 Storage:
    External S3 is enabled.
-   IMPORTANT: Create workflow credential secret '{{ .Values.s3.workflowSecret.name | default "scaleodm-s3-creds" }}'
-   in namespace '{{ .Release.Namespace }}' (same namespace as ScaleODM).
-   Required keys: AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION.
+   Ensure unified runtime secret '{{ coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name }}'
+   exists in namespace '{{ .Release.Namespace }}' (same namespace as ScaleODM).
+   Required keys: SCALEODM_DATABASE_URL, AWS_S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
+   Optional key: AWS_DEFAULT_REGION (runtime defaults to us-east-1 when omitted).
 {{- end }}

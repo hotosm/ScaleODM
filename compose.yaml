@@ -13,7 +13,7 @@ networks:
 
 volumes:
   db_data:
-  garage_data:
+  rustfs_data:
 
 services:
   api:
@@ -29,13 +29,14 @@ services:
     # Use host networking to access localhost Kubernetes API (Talos cluster)
     # This also allows direct access to DB and S3 via localhost ports
     network_mode: "host"
-    env_file: .env
     environment:
       KUBECONFIG_PATH: /root/.kube/config
+      K8S_NAMESPACE: ${K8S_NAMESPACE:-argo}
       SCALEODM_DATABASE_URL: ${SCALEODM_DATABASE_URL:-postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable}
-      SCALEODM_S3_ENDPOINT: ${SCALEODM_S3_ENDPOINT:-http://localhost:31102}
-      SCALEODM_S3_ACCESS_KEY: ${SCALEODM_S3_ACCESS_KEY:-odm}
-      SCALEODM_S3_SECRET_KEY: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
+      # Keep local compose S3 settings fixed for repeatable test runs.
+      AWS_S3_ENDPOINT: http://localhost:31102
+      AWS_ACCESS_KEY_ID: odm
+      AWS_SECRET_ACCESS_KEY: somelongpassword
     volumes:
       # Mount local files
       - ./go.mod:/code/go.mod:ro
@@ -78,65 +79,70 @@ services:
       retries: 3
 
   s3:
-    image: docker.io/dxflrs/garage:v1.3.1
+    image: rustfs/rustfs:1.0.0-alpha.90
+    environment:
+      # Keep local test credentials fixed to avoid dotenv/.env drift.
+      RUSTFS_ACCESS_KEY: odm
+      RUSTFS_SECRET_KEY: somelongpassword
     volumes:
-      - ./garage.toml:/etc/garage.toml:ro
-      - garage_data:/var/lib/garage
+      - rustfs_data:/data
+    command: server /data --console-address ":9001"
     ports:
-      - "31102:3900"
+      - "31102:9000"
     networks:
       - net
     restart: unless-stopped
-    # https://git.deuxfleurs.fr/Deuxfleurs/garage/issues/1354
-    # healthcheck:
-    #   test: ["CMD-SHELL", "/garage node health-check"]
-    #   start_period: 5s
-    #   interval: 5s
-    #   timeout: 5s
-    #   retries: 10
+    healthcheck:
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:9000/health"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
 
   s3-init:
-    image: docker.io/alpine:3.23
+    image: docker.io/python:3.13-slim-trixie
     depends_on:
       s3:
-        condition: service_started
-    network_mode: service:s3
-    pid: service:s3
+        condition: service_healthy
+    networks:
+      - net
     environment:
-      GARAGE_ADMIN_TOKEN: garage-admin-token
-      SCALEODM_S3_ACCESS_KEY: ${SCALEODM_S3_ACCESS_KEY:-odm}
-      SCALEODM_S3_SECRET_KEY: ${SCALEODM_S3_SECRET_KEY:-somelongpassword}
+      AWS_ENDPOINT_URL: http://s3:9000
+      AWS_ACCESS_KEY_ID: odm
+      AWS_SECRET_ACCESS_KEY: somelongpassword
+      AWS_DEFAULT_REGION: us-east-1
     restart: "on-failure:2"
     entrypoint:
       - /bin/sh
       - -eu
       - -c
       - |
-        # chroot into the s3 container's filesystem so the garage binary runs
-        # with its own libs/linker, while the shared network namespace keeps
-        # 127.0.0.1:3901 pointing at the live Garage server
-        G="chroot /proc/1/root /garage -c /etc/garage.toml"
+        python -m pip install --no-cache-dir boto3 >/dev/null
+        python - <<'PY'
+        import os
+        import boto3
+        import botocore.config
+        import botocore.exceptions
 
-        # Wait for server
-        for i in $$(seq 1 20); do
-          if $$G node id -q 2>/dev/null; then break; fi
-          echo "Waiting for Garage RPC... ($$i/20)"
-          sleep 3
-        done
-        $$G node id -q || { echo "Garage RPC not ready"; exit 1; }
+        s3 = boto3.client(
+            "s3",
+            endpoint_url=os.environ["AWS_ENDPOINT_URL"],
+            region_name=os.environ.get("AWS_DEFAULT_REGION", "us-east-1"),
+            aws_access_key_id=os.environ["AWS_ACCESS_KEY_ID"],
+            aws_secret_access_key=os.environ["AWS_SECRET_ACCESS_KEY"],
+            config=botocore.config.Config(s3={"addressing_style": "path"}),
+        )
 
-        # Init garage nodes
-        if $$G status 2>&1 | grep -q 'NO ROLE ASSIGNED'; then
-          NODE_ID=$$($$G node id -q | cut -c1-16)
-          $$G layout assign "$$NODE_ID" -z local -c 1G
-          $$G layout apply --version 1
-        fi
+        bucket = "scaleodm-test"
+        try:
+            s3.create_bucket(Bucket=bucket)
+            print(f"Created bucket '{bucket}'")
+        except botocore.exceptions.ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                print(f"Bucket '{bucket}' already exists")
+            else:
+                raise
 
-        # Create S3 bucket
-        $$G key import --yes -n scaleodm \
-          "$${SCALEODM_S3_ACCESS_KEY}" \
-          "$${SCALEODM_S3_SECRET_KEY}" || true
-        $$G bucket create scaleodm-test || true
-        $$G bucket allow scaleodm-test --key scaleodm --read --write --owner || true
-
-        echo "Garage initialized."
+        print("RustFS initialized.")
+        PY

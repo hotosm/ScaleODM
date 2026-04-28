@@ -1,0 +1,26 @@
+{{ define "layout.start" }}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{{ .Title }}</title>
+    <link rel="stylesheet" href="/ui/static/ui.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="container">
+        <a class="logo" href="/ui">ScaleODM UI</a>
+        <span class="badge">{{ if .ReadOnly }}Read-only{{ else }}Writable{{ end }}</span>
+      </div>
+    </header>
+    <main class="container">
+      <div class="warning">{{ .BannerText }}</div>
+{{ end }}
+
+{{ define "layout.end" }}
+    </main>
+    <script src="/ui/static/ui.js" defer></script>
+  </body>
+</html>
+{{ end }}

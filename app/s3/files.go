@@ -3,6 +3,29 @@ package s3
 // File handling utilities for S3-based workflows
 // These functions generate shell scripts for use in Argo workflow containers
 
+func rcloneS3ConfigSnippet() string {
+	return `PROVIDER="AWS"
+if [ -n "${AWS_S3_ENDPOINT:-}" ]; then
+  PROVIDER="Minio"
+fi
+
+cat > "$RCLONE_CONFIG" <<EOF
+[s3]
+type = s3
+provider = ${PROVIDER}
+env_auth = true
+region = ${AWS_DEFAULT_REGION:-us-east-1}
+EOF
+
+if [ -n "${AWS_S3_ENDPOINT:-}" ]; then
+  cat >> "$RCLONE_CONFIG" <<EOF
+endpoint = ${AWS_S3_ENDPOINT}
+force_path_style = true
+use_path_style = true
+EOF
+fi`
+}
+
 // GenerateDownloadScript generates a shell script for downloading and processing imagery from S3
 // Credentials are injected via Kubernetes Secret references in the workflow spec
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
@@ -21,15 +44,9 @@ mkdir -p "$DEST_DIR"
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
 # This avoids the RCLONE_CONFIG_* env var filtering issue
 mkdir -p /config/rclone
-RCLONE_CONFIG=/config/rclone/rclone.conf
+export RCLONE_CONFIG=/config/rclone/rclone.conf
 
-cat > "$RCLONE_CONFIG" <<EOF
-[s3]
-type = s3
-provider = AWS
-env_auth = true
-region = ${AWS_DEFAULT_REGION:-us-east-1}
-EOF
+` + rcloneS3ConfigSnippet() + `
 
 # Convert s3://bucket/path to s3:bucket/path format for rclone remote
 if echo "$SRC_PATH" | grep -q "^s3://"; then
@@ -87,27 +104,40 @@ extract_and_clean() {
   local dir="$1"
   local found_archive=false
 
-  find "$dir" -type f \( -name "*.zip" -o -name "*.ZIP" \) | while read zipfile; do
+  while IFS= read -r zipfile; do
+    [ -z "$zipfile" ] && continue
     found_archive=true
     echo "Extracting $zipfile..."
     # Use -j to junk (flatten) paths within the zip, preventing path traversal
-    unzip -q -o -j "$zipfile" -d "$(dirname "$zipfile")" || true
+    if ! unzip -q -o -j "$zipfile" -d "$(dirname "$zipfile")"; then
+      echo "ERROR: Failed to extract zip archive: $zipfile"
+      exit 1
+    fi
     rm -f "$zipfile"
     check_extract_limits "$dir"
-  done
+  done <<EOF
+$(find "$dir" -type f \( -name "*.zip" -o -name "*.ZIP" \))
+EOF
 
-  find "$dir" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.TAR.GZ" -o -name "*.TAR" \) | while read tarfile; do
+  while IFS= read -r tarfile; do
+    [ -z "$tarfile" ] && continue
     found_archive=true
     echo "Extracting $tarfile..."
     # --no-same-owner: don't try to preserve ownership
     # --no-same-permissions: don't try to preserve permissions
     # --no-absolute-filenames: strip leading / to prevent writing outside target
     # --transform: strip leading directory component (like -j for zip)
-    tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || \
-    tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null || true
+    if ! tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null; then
+      if ! tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xzf "$tarfile" -C "$(dirname "$tarfile")" 2>/dev/null; then
+        echo "ERROR: Failed to extract tar archive: $tarfile"
+        exit 1
+      fi
+    fi
     rm -f "$tarfile"
     check_extract_limits "$dir"
-  done
+  done <<EOF
+$(find "$dir" -type f \( -name "*.tar.gz" -o -name "*.tar" -o -name "*.TAR.GZ" -o -name "*.TAR" \))
+EOF
 
   if [ "$found_archive" = true ]; then
     extract_and_clean "$dir"
@@ -175,15 +205,9 @@ DEST_PATH="` + destPath + `"
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
 # This avoids the RCLONE_CONFIG_* env var filtering issue
 mkdir -p /config/rclone
-RCLONE_CONFIG=/config/rclone/rclone.conf
+export RCLONE_CONFIG=/config/rclone/rclone.conf
 
-cat > "$RCLONE_CONFIG" <<EOF
-[s3]
-type = s3
-provider = AWS
-env_auth = true
-region = ${AWS_DEFAULT_REGION:-us-east-1}
-EOF
+` + rcloneS3ConfigSnippet() + `
 
 # Convert s3://bucket/path to s3:bucket/path format for rclone remote
 if echo "$DEST_PATH" | grep -q "^s3://"; then
@@ -265,15 +289,9 @@ DEST_PATH="` + destPath + `"
 
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
 mkdir -p /config/rclone
-RCLONE_CONFIG=/config/rclone/rclone.conf
+export RCLONE_CONFIG=/config/rclone/rclone.conf
 
-cat > "$RCLONE_CONFIG" <<EOF
-[s3]
-type = s3
-provider = AWS
-env_auth = true
-region = ${AWS_DEFAULT_REGION:-us-east-1}
-EOF
+` + rcloneS3ConfigSnippet() + `
 
 JOB_ID="{{workflow.name}}"
 WORKSPACE_DIR="/workspace/$JOB_ID"

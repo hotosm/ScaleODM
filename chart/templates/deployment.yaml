@@ -1,3 +1,8 @@
+{{- $runtimeSecretName := coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name -}}
+{{- $runtimeDatabaseKey := coalesce .Values.database.external.secret.key .Values.secrets.runtime.keys.databaseUrl -}}
+{{- $runtimeS3EndpointKey := coalesce .Values.s3.external.secret.keys.endpoint .Values.secrets.runtime.keys.s3Endpoint -}}
+{{- $runtimeS3AccessKey := coalesce .Values.s3.external.secret.keys.accessKey .Values.secrets.runtime.keys.accessKey -}}
+{{- $runtimeS3SecretKey := coalesce .Values.s3.external.secret.keys.secretKey .Values.secrets.runtime.keys.secretKey -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -39,71 +44,189 @@ spec:
               containerPort: {{ .Values.api.port }}
               protocol: TCP
           env:
-            {{- if .Values.database.external.enabled }}
             - name: SCALEODM_DATABASE_URL
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "database.external.secret.name is required when database.external.enabled=true" .Values.database.external.secret.name }}
-                  key: {{ required "database.external.secret.key is required when database.external.enabled=true" .Values.database.external.secret.key }}
-            {{- else }}
-            - name: SCALEODM_DATABASE_URL
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "scaleodm.fullname" . }}-secret
-                  key: database-url
-            {{- end }}
+                  name: {{ $runtimeSecretName }}
+                  key: {{ $runtimeDatabaseKey }}
 
-            {{- if .Values.s3.external.enabled }}
-            - name: SCALEODM_S3_ENDPOINT
+            - name: AWS_S3_ENDPOINT
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
-                  key: {{ .Values.s3.external.secret.keys.endpoint | default "SCALEODM_S3_ENDPOINT" }}
+                  name: {{ $runtimeSecretName }}
+                  key: {{ $runtimeS3EndpointKey }}
+                  {{- if .Values.s3.external.enabled }}
                   optional: true
-            - name: SCALEODM_S3_ACCESS_KEY
+                  {{- end }}
+            - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
-                  key: {{ .Values.s3.external.secret.keys.accessKey | default "SCALEODM_S3_ACCESS_KEY" }}
+                  name: {{ $runtimeSecretName }}
+                  key: {{ $runtimeS3AccessKey }}
+                  {{- if .Values.s3.external.enabled }}
                   optional: true
-            - name: SCALEODM_S3_SECRET_KEY
+                  {{- end }}
+            - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
-                  name: {{ required "s3.external.secret.name is required when s3.external.enabled=true" .Values.s3.external.secret.name }}
-                  key: {{ .Values.s3.external.secret.keys.secretKey | default "SCALEODM_S3_SECRET_KEY" }}
+                  name: {{ $runtimeSecretName }}
+                  key: {{ $runtimeS3SecretKey }}
+                  {{- if .Values.s3.external.enabled }}
                   optional: true
-            {{- else }}
-            - name: SCALEODM_S3_ENDPOINT
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "scaleodm.fullname" . }}-secret
-                  key: s3-endpoint
-            - name: SCALEODM_S3_ACCESS_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "scaleodm.fullname" . }}-secret
-                  key: s3-access-key
-            - name: SCALEODM_S3_SECRET_KEY
-              valueFrom:
-                secretKeyRef:
-                  name: {{ include "scaleodm.fullname" . }}-secret
-                  key: s3-secret-key
-            {{- end }}
-            - name: SCALEODM_S3_SECRET_NAME
-              value: {{ .Values.s3.workflowSecret.name | default "scaleodm-s3-creds" | quote }}
+                  {{- end }}
+            - name: AWS_S3_SECRET_NAME
+              value: {{ $runtimeSecretName | quote }}
             - name: K8S_NAMESPACE
               value: {{ .Release.Namespace | quote }}
             - name: SCALEODM_ODM_IMAGE
               value: {{ .Values.config.odmImage | quote }}
             - name: ENQUEUE_TEST_JOBS
               value: {{ .Values.config.enqueueTestJobs | quote }}
+            - name: SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST
+              value: {{ .Values.config.s3EndpointPolicy.enforceAllowlist | quote }}
+            - name: SCALEODM_ALLOWED_S3_ENDPOINTS
+              value: {{ .Values.config.s3EndpointPolicy.allowedEndpoints | quote }}
+            - name: SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS
+              value: {{ .Values.config.workflowMissingGraceSeconds | quote }}
+            - name: SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS
+              value: {{ .Values.config.server.readHeaderTimeoutSeconds | quote }}
+            - name: SCALEODM_SERVER_READ_TIMEOUT_SECONDS
+              value: {{ .Values.config.server.readTimeoutSeconds | quote }}
+            - name: SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS
+              value: {{ .Values.config.server.writeTimeoutSeconds | quote }}
+            - name: SCALEODM_SERVER_IDLE_TIMEOUT_SECONDS
+              value: {{ .Values.config.server.idleTimeoutSeconds | quote }}
+            - name: SCALEODM_READINESS_CHECK_S3
+              value: {{ .Values.config.readiness.checkS3 | quote }}
+            - name: SCALEODM_READINESS_S3_PROBE_PATH
+              value: {{ .Values.config.readiness.s3ProbePath | quote }}
+            - name: SCALEODM_READINESS_TIMEOUT_SECONDS
+              value: {{ .Values.config.readiness.timeoutSeconds | quote }}
+            - name: SCALEODM_UI_ENABLED
+              value: {{ .Values.config.ui.enabled | quote }}
+            - name: SCALEODM_UI_READONLY
+              value: {{ .Values.config.ui.readOnly | quote }}
+            - name: SCALEODM_OBSERVABILITY_ENABLED
+              value: {{ .Values.config.observability.enabled | quote }}
+            - name: SCALEODM_OBSERVABILITY_SERVICE_NAME
+              value: {{ .Values.config.observability.serviceName | quote }}
+            - name: SCALEODM_OBSERVABILITY_SERVICE_VERSION
+              value: {{ .Values.config.observability.serviceVersion | quote }}
+            - name: SCALEODM_OBSERVABILITY_OTLP_ENDPOINT
+              value: {{ .Values.config.observability.otlpEndpoint | quote }}
+            - name: SCALEODM_OBSERVABILITY_OTLP_INSECURE
+              value: {{ .Values.config.observability.otlpInsecure | quote }}
+            - name: SCALEODM_OBSERVABILITY_METRICS_ENABLED
+              value: {{ .Values.config.observability.metricsEnabled | quote }}
+            - name: SCALEODM_OBSERVABILITY_TRACES_ENABLED
+              value: {{ .Values.config.observability.tracesEnabled | quote }}
+            - name: SCALEODM_OBSERVABILITY_TRACE_SAMPLE_RATIO
+              value: {{ .Values.config.observability.traceSampleRatio | quote }}
+            - name: SCALEODM_WORKFLOW_ACTIVE_DEADLINE_SECONDS
+              value: {{ .Values.config.workflow.activeDeadlineSeconds | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_MODE
+              value: {{ .Values.config.workflow.workspace.mode | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_SIZE
+              value: {{ .Values.config.workflow.workspace.size | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_STORAGE_CLASS
+              value: {{ .Values.config.workflow.workspace.storageClass | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_ACCESS_MODE
+              value: {{ .Values.config.workflow.workspace.accessMode | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_ENABLED
+              value: {{ .Values.config.workflow.workspace.dynamicSize.enabled | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MULTIPLIER
+              value: {{ .Values.config.workflow.workspace.dynamicSize.multiplier | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MIN_GIB
+              value: {{ .Values.config.workflow.workspace.dynamicSize.minGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
+              value: {{ .Values.config.workflow.workspace.dynamicSize.maxGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE
+              value: {{ .Values.config.workflow.workspace.dynamicSize.fallbackMBPerImage | quote }}
+            - name: SCALEODM_WORKFLOW_RETRY_LIMIT
+              value: {{ .Values.config.workflow.retryLimit | quote }}
+            - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_DURATION
+              value: {{ .Values.config.workflow.retryBackoffDuration | quote }}
+            - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_FACTOR
+              value: {{ .Values.config.workflow.retryBackoffFactor | quote }}
+            - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_MAX_DURATION
+              value: {{ .Values.config.workflow.retryBackoffMaxDuration | quote }}
+            - name: SCALEODM_WORKFLOW_TTL_SUCCESS_SECONDS
+              value: {{ .Values.config.workflow.ttlSuccessSeconds | quote }}
+            - name: SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS
+              value: {{ .Values.config.workflow.ttlFailureSeconds | quote }}
+            - name: SCALEODM_WORKFLOW_POD_GC_STRATEGY
+              value: {{ .Values.config.workflow.podGCStrategy | quote }}
+            - name: SCALEODM_WORKFLOW_POD_GC_DELETE_DELAY_SECONDS
+              value: {{ .Values.config.workflow.podGCDeleteDelaySeconds | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU
+              value: {{ .Values.config.workflow.resources.download.requests.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY
+              value: {{ .Values.config.workflow.resources.download.requests.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.download.requests.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_LIMIT_CPU
+              value: {{ .Values.config.workflow.resources.download.limits.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_LIMIT_MEMORY
+              value: {{ .Values.config.workflow.resources.download.limits.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_LIMIT_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.download.limits.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_REQUEST_CPU
+              value: {{ .Values.config.workflow.resources.process.requests.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_REQUEST_MEMORY
+              value: {{ .Values.config.workflow.resources.process.requests.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_REQUEST_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.process.requests.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_LIMIT_CPU
+              value: {{ .Values.config.workflow.resources.process.limits.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_LIMIT_MEMORY
+              value: {{ .Values.config.workflow.resources.process.limits.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_PROCESS_LIMIT_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.process.limits.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_REQUEST_CPU
+              value: {{ .Values.config.workflow.resources.upload.requests.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_REQUEST_MEMORY
+              value: {{ .Values.config.workflow.resources.upload.requests.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_REQUEST_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.upload.requests.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_LIMIT_CPU
+              value: {{ .Values.config.workflow.resources.upload.limits.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_LIMIT_MEMORY
+              value: {{ .Values.config.workflow.resources.upload.limits.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_UPLOAD_LIMIT_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.upload.limits.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_REQUEST_CPU
+              value: {{ .Values.config.workflow.resources.cleanup.requests.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_REQUEST_MEMORY
+              value: {{ .Values.config.workflow.resources.cleanup.requests.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_REQUEST_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.cleanup.requests.ephemeralStorage | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_CPU
+              value: {{ .Values.config.workflow.resources.cleanup.limits.cpu | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_MEMORY
+              value: {{ .Values.config.workflow.resources.cleanup.limits.memory | quote }}
+            - name: SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_EPHEMERAL_STORAGE
+              value: {{ .Values.config.workflow.resources.cleanup.limits.ephemeralStorage | quote }}
+            - name: SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT
+              value: {{ .Values.config.processSizing.memoryLimitMarginPercent | quote }}
+            - name: SCALEODM_PROCESS_MEMORY_MIN_GIB
+              value: {{ .Values.config.processSizing.memoryMinGiB | quote }}
+            - name: SCALEODM_PROCESS_MEMORY_MAX_GIB
+              value: {{ .Values.config.processSizing.memoryMaxGiB | quote }}
+            - name: SCALEODM_PROCESS_CPU_PER_GIB
+              value: {{ .Values.config.processSizing.cpuPerGiB | quote }}
+            - name: SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER
+              value: {{ .Values.config.processSizing.cpuLimitMultiplier | quote }}
+            - name: SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM
+              value: {{ .Values.config.processSizing.ephemeralGiBPerGiBRAM | quote }}
+            - name: SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER
+              value: {{ .Values.config.processSizing.ephemeralLimitMultiplier | quote }}
             {{- if .Values.kubernetes.kubeconfigPath }}
             - name: KUBECONFIG_PATH
               value: {{ .Values.kubernetes.kubeconfigPath | quote }}
             {{- end }}
           livenessProbe:
             httpGet:
-              path: /health
+              path: {{ .Values.api.probes.livenessPath | quote }}
               port: http
             initialDelaySeconds: 30
             periodSeconds: 10
@@ -111,7 +234,7 @@ spec:
             failureThreshold: 3
           readinessProbe:
             httpGet:
-              path: /health
+              path: {{ .Values.api.probes.readinessPath | quote }}
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5

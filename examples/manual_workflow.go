@@ -48,9 +48,13 @@ func main() {
 		apiURL = defaultAPIURL
 	}
 
-	// Define parameters - using test S3 paths from drone-tm-public bucket
-	readS3Path := "s3://drone-tm-public/dtm-data/test/"
-	writeS3Path := "s3://drone-tm-public/dtm-data/test/output/"
+	// Define parameters - using local Garage paths seeded by example flows
+	readS3Path := "s3://scaleodm-test/test/"
+	writeS3Path := "s3://scaleodm-test/test/output/"
+	s3Endpoint := os.Getenv("AWS_S3_ENDPOINT")
+	if s3Endpoint == "" {
+		s3Endpoint = "http://localhost:31102"
+	}
 
 	// Convert options array to JSON string (as required by API)
 	optionsArray := []ODMOption{
@@ -66,6 +70,7 @@ func main() {
 		Name:               "test-fast-orthophoto",
 		ReadS3Path:         readS3Path,
 		WriteS3Path:        writeS3Path,
+		S3Endpoint:         s3Endpoint,
 		Options:            string(optionsJSON),
 		SkipPostProcessing: false,
 		S3Region:           "us-east-1",
@@ -75,6 +80,7 @@ func main() {
 	fmt.Printf("   API URL: %s\n", apiURL)
 	fmt.Printf("   Read S3 Path: %s\n", readS3Path)
 	fmt.Printf("   Write S3 Path: %s\n", writeS3Path)
+	fmt.Printf("   S3 Endpoint: %s\n", s3Endpoint)
 
 	// Create task via API
 	taskUUID, err := createTask(apiURL, taskReq)
@@ -148,6 +154,7 @@ func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
 		"zipurl":             taskReq.ZipURL,
 		"readS3Path":         taskReq.ReadS3Path,
 		"writeS3Path":        taskReq.WriteS3Path,
+		"s3Endpoint":         taskReq.S3Endpoint,
 		"s3Region":           taskReq.S3Region,
 		"dateCreated":        taskReq.DateCreated,
 	}

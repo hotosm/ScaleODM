@@ -4,5 +4,8 @@
 # Allow files and directories
 !**/*.go
 !**/*.sql
+!**/*.tmpl
+!**/*.css
+!**/*.js
 !go.mod
 !go.sum

@@ -2,6 +2,7 @@ package meta
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 
@@ -336,4 +337,85 @@ func TestDeleteJob_NotFound(t *testing.T) {
 	err := store.DeleteJob(ctx, "non-existent-workflow")
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "not found")
+}
+
+func TestMergeJobMetadata(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.CreateJob(
+		ctx,
+		"test-workflow-merge",
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+
+	err = store.UpdateJobMetadata(ctx, "test-workflow-merge", map[string]interface{}{"a": 1, "b": "keep"})
+	require.NoError(t, err)
+
+	err = store.MergeJobMetadata(ctx, "test-workflow-merge", map[string]interface{}{"a": 2, "c": true, "b": nil})
+	require.NoError(t, err)
+
+	job, err := store.GetJob(ctx, "test-workflow-merge")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	var metaMap map[string]interface{}
+	require.NoError(t, json.Unmarshal(job.Metadata, &metaMap))
+	assert.Equal(t, float64(2), metaMap["a"])
+	assert.Equal(t, true, metaMap["c"])
+	_, hasB := metaMap["b"]
+	assert.False(t, hasB)
+}
+
+func TestRestartJobMetadata_AtomicSwap(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	store := NewStore(db)
+	ctx := context.Background()
+
+	_, err := store.CreateJob(
+		ctx,
+		"test-workflow-old",
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+	require.NoError(t, store.UpdateJobMetadata(ctx, "test-workflow-old", map[string]interface{}{"s3_endpoint": "http://localhost:9000", "image_count": 10, "image_total_bytes": 2048}))
+
+	err = store.RestartJobMetadata(
+		ctx,
+		"test-workflow-old",
+		"test-workflow-new",
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--dsm"},
+		"us-east-1",
+		map[string]interface{}{"image_count": 12},
+	)
+	require.NoError(t, err)
+
+	oldJob, err := store.GetJob(ctx, "test-workflow-old")
+	require.NoError(t, err)
+	assert.Nil(t, oldJob)
+
+	newJob, err := store.GetJob(ctx, "test-workflow-new")
+	require.NoError(t, err)
+	require.NotNil(t, newJob)
+	var metaMap map[string]interface{}
+	require.NoError(t, json.Unmarshal(newJob.Metadata, &metaMap))
+	assert.Equal(t, "http://localhost:9000", metaMap["s3_endpoint"])
+	assert.Equal(t, float64(12), metaMap["image_count"])
+	assert.Equal(t, float64(2048), metaMap["image_total_bytes"])
 }

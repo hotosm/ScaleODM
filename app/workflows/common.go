@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"strings"
 	"time"
 
@@ -292,8 +293,10 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 			},
 		)
 		if err != nil {
+			log.Printf("workflow watch terminated workflow=%s reason=watch_init_failed error=%v", workflowName, err)
 			return nil, fmt.Errorf("failed to watch workflow: %w", err)
 		}
+		log.Printf("workflow watch started workflow=%s", workflowName)
 
 		// Watch for events
 		for {
@@ -301,6 +304,7 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 			case <-ctx.Done():
 				// Context cancelled - get final status before returning
 				watcher.Stop()
+				log.Printf("workflow watch terminated workflow=%s reason=context_cancelled error=%v", workflowName, ctx.Err())
 				finalWf, err := c.GetWorkflow(ctx, workflowName)
 				if err != nil {
 					return nil, fmt.Errorf("context cancelled and failed to get workflow status: %w", err)
@@ -310,6 +314,7 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 				if !ok {
 					// Channel closed - watcher ended, check final status and potentially restart
 					watcher.Stop()
+					log.Printf("workflow watch terminated workflow=%s reason=channel_closed", workflowName)
 					finalWf, err := c.GetWorkflow(ctx, workflowName)
 					if err != nil {
 						return nil, fmt.Errorf("watch ended and failed to get workflow status: %w", err)
@@ -374,5 +379,3 @@ func (c *Client) IsWorkflowComplete(ctx context.Context, workflowName string) (b
 		phase == wfv1.WorkflowFailed ||
 		phase == wfv1.WorkflowError, nil
 }
-
-

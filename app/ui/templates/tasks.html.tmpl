@@ -1,0 +1,53 @@
+{{ define "tasks" }}
+{{ template "layout.start" . }}
+<section class="panel">
+  <h1>Tasks</h1>
+  <form class="filters" method="get" action="/ui">
+    <label>
+      Status
+      <input type="text" name="status" value="{{ .Status }}" placeholder="queued|running|completed|failed|canceled" />
+    </label>
+    <label>
+      Project ID
+      <input type="text" name="projectID" value="{{ .ProjectID }}" placeholder="project" />
+    </label>
+    <label>
+      Limit
+      <input type="number" min="1" max="200" name="limit" value="{{ .Limit }}" />
+    </label>
+    <button type="submit">Apply</button>
+  </form>
+
+  <table id="tasks-table" data-refresh-url="/ui/api/tasks">
+    <thead>
+      <tr>
+        <th>Workflow UUID</th>
+        <th>Project</th>
+        <th>Status</th>
+        <th>Progress</th>
+        <th>Created</th>
+        <th>Started</th>
+        <th>Completed</th>
+      </tr>
+    </thead>
+    <tbody>
+      {{ range .Tasks }}
+      <tr>
+        <td><a href="/ui/tasks/{{ .UUID }}">{{ .UUID }}</a></td>
+        <td>{{ .ProjectID }}</td>
+        <td><span class="status status-{{ .Status }}">{{ .StatusLabel }}</span></td>
+        <td>{{ .Progress }}%</td>
+        <td title="{{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
+        <td>{{ .StartedAt }}</td>
+        <td>{{ .CompletedAt }}</td>
+      </tr>
+      {{ else }}
+      <tr>
+        <td colspan="7">No tasks found.</td>
+      </tr>
+      {{ end }}
+    </tbody>
+  </table>
+</section>
+{{ template "layout.end" . }}
+{{ end }}

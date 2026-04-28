@@ -8,22 +8,24 @@ default:
 _check-cluster:
   #!/usr/bin/env bash
   set +e
-  
+
+  KUBECTL_TIMEOUT="${KUBECTL_TIMEOUT:-5s}"
+
   # Check if kubectl is available
   if ! command -v kubectl &> /dev/null; then
       exit 1
   fi
-  
-  # Check if we can connect to the cluster
-  if ! kubectl cluster-info &> /dev/null; then
+
+  # Check if we can connect to the cluster (fail fast when API is unreachable)
+  if ! kubectl --request-timeout="$KUBECTL_TIMEOUT" cluster-info &> /dev/null; then
       exit 1
   fi
-  
+
   # Check if we can get nodes (basic connectivity test)
-  if ! kubectl get nodes &> /dev/null; then
+  if ! kubectl --request-timeout="$KUBECTL_TIMEOUT" get nodes &> /dev/null; then
       exit 1
   fi
-  
+
   exit 0
 
 # Check test k8s cluster available
@@ -31,15 +33,19 @@ cluster-available:
   #!/usr/bin/env bash
   set -e
 
+  KUBECTL_TIMEOUT="${KUBECTL_TIMEOUT:-5s}"
+
   echo "Checking for Kubernetes cluster..."
   # Use the test module's private _check-cluster recipe explicitly
-  if ! just test _check-cluster; then
+  if ! KUBECTL_TIMEOUT="$KUBECTL_TIMEOUT" just test _check-cluster; then
       echo "⚠️  Kubernetes cluster not available"
       echo "📦 Initializing test cluster (this may take a few minutes)..."
       # Non-interactive mode will be auto-detected (no TTY in CI)
       just test cluster-init
   else
       echo "✓ Kubernetes cluster is available"
+      echo "📦 Reconciling cluster prerequisites..."
+      just test cluster-init
   fi
   echo ""
 
@@ -53,6 +59,10 @@ cluster-init:
   CONTROL_PLANE_MEMORY="${TALOS_CONTROL_PLANE_MEMORY:-2.0GiB}"
   NAMESPACE="${K8S_NAMESPACE:-argo}"
   ARGO_VERSION="${ARGO_WORKFLOWS_VERSION:-v3.7.3}"
+  WORKFLOW_S3_SECRET_NAME="${AWS_S3_SECRET_NAME:-scaleodm-secrets}"
+  WORKFLOW_S3_ACCESS_KEY="${AWS_ACCESS_KEY_ID:-odm}"
+  WORKFLOW_S3_SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-somelongpassword}"
+  WORKFLOW_S3_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
   
   echo "🚀 Setting up Talos cluster for ScaleODM testing..."
   echo "   Cluster name: $CLUSTER_NAME"
@@ -137,6 +147,15 @@ cluster-init:
                       --serviceaccount="$NAMESPACE:argo-odm" \
                       --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
                   echo "✓ Service account and RBAC verified"
+
+                  # Ensure workflow S3 credentials secret exists (idempotent)
+                  echo "📦 Verifying workflow S3 credentials secret..."
+                  kubectl create secret generic "$WORKFLOW_S3_SECRET_NAME" -n "$NAMESPACE" \
+                      --from-literal=AWS_ACCESS_KEY_ID="$WORKFLOW_S3_ACCESS_KEY" \
+                      --from-literal=AWS_SECRET_ACCESS_KEY="$WORKFLOW_S3_SECRET_KEY" \
+                      --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
+                      --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
+                  echo "✓ Workflow S3 credentials secret verified"
                   echo ""
                   exit 0
               fi
@@ -146,23 +165,40 @@ cluster-init:
   
   echo "📦 Creating Talos cluster $CLUSTER_NAME..."
 
+  # Lower kubelet eviction thresholds to prevent false disk-pressure taints
+  # in the Docker provider (containers inherit host disk but may report limited space)
+  # Use a strategic merge patch because JSON6902 patches are not supported
+  # for Talos multi-document machine configuration.
+  KUBELET_PATCH=$'machine:\n  kubelet:\n    extraConfig:\n      evictionHard:\n        nodefs.available: "5%"\n        imagefs.available: "5%"'
+
   talosctl cluster create docker \
     --name "$CLUSTER_NAME" \
     --workers 1 \
     --memory-controlplanes "${CONTROL_PLANE_MEMORY}" \
     --memory-workers "${WORKER_MEMORY}" \
     --cpus-controlplanes "1.0" \
-    --cpus-workers "2.0"
-  
-  echo ""
-  echo "✓ Talos cluster created successfully!"
-  echo ""
-  
-  # Wait for cluster to be ready
-  echo "⏳ Waiting for cluster to be ready..."
+    --cpus-workers "2.0" \
+    --config-patch "$KUBELET_PATCH"
+
+  # Ensure kubeconfig is merged (talosctl may fail to set context if stale configs exist)
+  echo "📦 Merging kubeconfig from cluster..."
+  CP_IP="10.5.0.2"
+  talosctl kubeconfig --nodes "$CP_IP" --force
+
+  # Wait for nodes and CoreDNS separately with generous timeouts
+  echo "⏳ Waiting for nodes to be ready..."
   kubectl wait --for=condition=Ready nodes --all --timeout=5m || {
       echo "⚠️  Warning: Some nodes may not be ready yet"
   }
+
+  echo "⏳ Waiting for CoreDNS to be ready..."
+  kubectl wait --for=condition=Ready pod -l k8s-app=kube-dns -n kube-system --timeout=10m || {
+      echo "⚠️  Warning: CoreDNS may not be ready yet"
+  }
+
+  echo ""
+  echo "✓ Talos cluster created successfully!"
+  echo ""
   
   # Get kubeconfig context name
   CONTEXT=$(kubectl config current-context)
@@ -198,7 +234,15 @@ cluster-init:
       --clusterrole=admin \
       --serviceaccount="$NAMESPACE:argo-odm" \
       --dry-run=client -o yaml | kubectl apply -f -
-  
+
+  # Create workflow S3 credentials secret for workflow pod env refs
+  echo "📦 Setting up workflow S3 credentials secret..."
+  kubectl create secret generic "$WORKFLOW_S3_SECRET_NAME" -n "$NAMESPACE" \
+      --from-literal=AWS_ACCESS_KEY_ID="$WORKFLOW_S3_ACCESS_KEY" \
+      --from-literal=AWS_SECRET_ACCESS_KEY="$WORKFLOW_S3_SECRET_KEY" \
+      --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
+      --dry-run=client -o yaml | kubectl apply -f -
+
   echo ""
   echo "✅ Talos cluster setup complete!"
   echo ""
@@ -214,23 +258,149 @@ cluster-init:
 cluster-destroy:
   #!/usr/bin/env bash
   set -e
-  
-  CLUSTER_NAME="${TALOS_CLUSTER_NAME:-scaleodm-test}"
-  
-  echo "🗑️  Destroying Talos cluster: $CLUSTER_NAME"
-  talosctl cluster destroy --name "$CLUSTER_NAME"
-  echo "✓ Cluster destroyed"
 
-# Run all tests (requires Talos cluster and compose services)
-# Will start DB and S3 if not already running
-# Automatically initializes cluster if not available
-all:
+  CLUSTER_NAME="${TALOS_CLUSTER_NAME:-scaleodm-test}"
+
+  echo "Destroying Talos cluster: $CLUSTER_NAME"
+  talosctl cluster destroy --name "$CLUSTER_NAME" || true
+
+  # Clean up any leftover Docker containers and networks
+  echo "Cleaning up leftover Docker resources..."
+  LEFTOVER_CONTAINERS=$(docker ps -a --filter "name=${CLUSTER_NAME}" -q 2>/dev/null || true)
+  if [ -n "$LEFTOVER_CONTAINERS" ]; then
+      docker rm -f $LEFTOVER_CONTAINERS
+      echo "  Removed leftover containers"
+  fi
+  if docker network rm "$CLUSTER_NAME" 2>/dev/null; then
+      echo "  Removed leftover network"
+  fi
+
+  # Remove stale Talos state directory
+  TALOS_STATE_DIR="${HOME}/.talos/clusters/${CLUSTER_NAME}"
+  if [ -d "$TALOS_STATE_DIR" ]; then
+      rm -rf "$TALOS_STATE_DIR"
+      echo "  Removed state directory: $TALOS_STATE_DIR"
+  fi
+
+  # Remove stale talosconfig and kubeconfig contexts
+  talosctl config remove "$CLUSTER_NAME" 2>/dev/null || true
+  kubectl config delete-context "admin@$CLUSTER_NAME" 2>/dev/null || true
+  kubectl config delete-cluster "$CLUSTER_NAME" 2>/dev/null || true
+  kubectl config delete-user "admin@$CLUSTER_NAME" 2>/dev/null || true
+  # Clean up any renamed contexts (e.g. scaleodm-test-2, scaleodm-test-3)
+  for ctx in $(talosctl config contexts 2>/dev/null | grep "^${CLUSTER_NAME}-[0-9]" || true); do
+      talosctl config remove "$ctx" 2>/dev/null || true
+  done
+
+  echo "Cluster destroyed"
+
+# Build the local API image used by compose test runs
+build-api-image:
   #!/usr/bin/env bash
   set -e
 
   cd {{justfile_directory()}}
 
+  echo "Building local API image (ghcr.io/hotosm/scaleodm:${TAG_OVERRIDE:-ci})..."
+  docker compose build api
+
+# Validate Helm chart ingress guardrails (no cluster required)
+chart-ingress-guardrails:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  cd {{justfile_directory()}}
+
+  if ! command -v helm &> /dev/null; then
+      echo "❌ Error: helm is required for chart ingress guardrail checks"
+      exit 1
+  fi
+
+  echo "Running chart ingress guardrail checks..."
+
+  RENDERED_FILE=$(mktemp)
+  ERROR_FILE=$(mktemp)
+  trap 'rm -f "$RENDERED_FILE" "$ERROR_FILE"' EXIT
+
+  # 1) Ingress renders with only /ui path when ingress and UI are enabled
+  helm template scaleodm ./chart \
+      --set ingress.enabled=true \
+      --set config.ui.enabled=true > "$RENDERED_FILE"
+
+  INGRESS_PATHS=$(awk '
+    /^kind: Ingress$/ { in_ingress=1 }
+    in_ingress && /^---$/ { in_ingress=0 }
+    in_ingress && /path: / {
+      line=$0
+      sub(/^.*path: /, "", line)
+      print line
+    }
+  ' "$RENDERED_FILE")
+
+  if [ -z "$INGRESS_PATHS" ]; then
+      echo "❌ Expected ingress paths, but none were rendered"
+      exit 1
+  fi
+
+  while IFS= read -r path; do
+      if [ "$path" != "/ui" ]; then
+          echo "❌ Expected only /ui ingress path, found: $path"
+          exit 1
+      fi
+  done <<< "$INGRESS_PATHS"
+
+  # 2) Enabling ingress while UI is disabled must fail rendering
+  if helm template scaleodm ./chart \
+      --set ingress.enabled=true \
+      --set config.ui.enabled=false > /dev/null 2> "$ERROR_FILE"; then
+      echo "❌ Expected helm template to fail when ingress.enabled=true and config.ui.enabled=false"
+      exit 1
+  fi
+
+  if ! grep -q "ingress is UI-only and requires config.ui.enabled=true" "$ERROR_FILE"; then
+      echo "❌ Expected UI-only ingress guardrail error message was not found"
+      exit 1
+  fi
+
+  # 3) User-provided path overrides must not expose non-UI paths
+  helm template scaleodm ./chart \
+      --set ingress.enabled=true \
+      --set config.ui.enabled=true \
+      --set ingress.hosts[0].paths[0].path=/openapi.json \
+      --set ingress.hosts[0].paths[0].pathType=Prefix > "$RENDERED_FILE"
+
+  INGRESS_PATHS=$(awk '
+    /^kind: Ingress$/ { in_ingress=1 }
+    in_ingress && /^---$/ { in_ingress=0 }
+    in_ingress && /path: / {
+      line=$0
+      sub(/^.*path: /, "", line)
+      print line
+    }
+  ' "$RENDERED_FILE")
+
+  while IFS= read -r path; do
+      if [ "$path" != "/ui" ]; then
+          echo "❌ Path override escaped UI-only guardrail: $path"
+          exit 1
+      fi
+  done <<< "$INGRESS_PATHS"
+
+  echo "✓ Chart ingress guardrail checks passed"
+
+# Run all tests (requires Talos cluster and compose services)
+all:
+  #!/usr/bin/env bash
+  set -e
+
+  # Will start DB and S3 if not already running
+  # Automatically initializes cluster if not available
+
+  cd {{justfile_directory()}}
+
+  just test chart-ingress-guardrails
   just test cluster-available
+  just test build-api-image
 
   echo "Running tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api
@@ -243,9 +413,10 @@ unit:
 integration:
   #!/usr/bin/env bash
   set -e
-  
+
   cd {{justfile_directory()}}
-  
+  just test build-api-image
+
   echo "Running integration tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -short ./app/meta/... ./app/db/... ./app/api/...
 
@@ -253,9 +424,10 @@ integration:
 e2e:
   #!/usr/bin/env bash
   set -e
-  
+
   cd {{justfile_directory()}}
-  
+
   just test cluster-available
+  just test build-api-image
   echo "Running E2E tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .

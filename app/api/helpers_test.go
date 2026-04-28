@@ -51,3 +51,9 @@ func TestWorkflowToProgress(t *testing.T) {
 	}
 }
 
+func TestClampTaskAdditionalLimit(t *testing.T) {
+	assert.Equal(t, taskAssetsDefaultAdditionalLimit, clampTaskAdditionalLimit(0))
+	assert.Equal(t, taskAssetsDefaultAdditionalLimit, clampTaskAdditionalLimit(-10))
+	assert.Equal(t, 25, clampTaskAdditionalLimit(25))
+	assert.Equal(t, taskAssetsMaxAdditionalLimit, clampTaskAdditionalLimit(taskAssetsMaxAdditionalLimit+500))
+}

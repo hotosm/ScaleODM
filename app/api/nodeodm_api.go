@@ -13,9 +13,13 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/danielgtaylor/huma/v2"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
+	"github.com/minio/minio-go/v7"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/config"
+	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
@@ -37,6 +41,149 @@ func validateShellSafe(value, fieldName string) error {
 		return fmt.Errorf("%s contains invalid characters: only alphanumerics, hyphens, underscores, dots, slashes, colons, equals, and @ are allowed", fieldName)
 	}
 	return nil
+}
+
+const (
+	metadataS3EndpointKey            = "s3_endpoint"
+	metadataImageCountKey            = "image_count"
+	metadataImageTotalBytesKey       = "image_total_bytes"
+	metadataWorkflowMissingFirstSeen = "workflow_missing_first_seen_at"
+)
+
+const (
+	taskAssetsDefaultAdditionalLimit = 100
+	taskAssetsMaxAdditionalLimit     = 1000
+)
+
+func normalizeOptionalS3Endpoint(endpoint string) (string, error) {
+	if strings.TrimSpace(endpoint) == "" {
+		return "", nil
+	}
+	return s3.NormalizeEndpoint(endpoint)
+}
+
+func parseMetadataMap(metadataJSON []byte) map[string]interface{} {
+	if len(metadataJSON) == 0 {
+		return map[string]interface{}{}
+	}
+	metaMap := map[string]interface{}{}
+	if err := json.Unmarshal(metadataJSON, &metaMap); err != nil {
+		return map[string]interface{}{}
+	}
+	return metaMap
+}
+
+func normalizedEndpointFromMetadata(metadataJSON []byte) string {
+	metaMap := parseMetadataMap(metadataJSON)
+	endpoint, _ := metaMap[metadataS3EndpointKey].(string)
+	normalized, err := normalizeOptionalS3Endpoint(endpoint)
+	if err != nil {
+		return ""
+	}
+	return normalized
+}
+
+func parseAllowedEndpointAllowlist(raw string) map[string]struct{} {
+	allowed := map[string]struct{}{}
+	for _, candidate := range strings.Split(raw, ",") {
+		normalized, err := normalizeOptionalS3Endpoint(candidate)
+		if err != nil || normalized == "" {
+			continue
+		}
+		allowed[normalized] = struct{}{}
+	}
+	return allowed
+}
+
+func enforceEndpointAllowlist(endpoint string) error {
+	if !config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST || endpoint == "" {
+		return nil
+	}
+	allowed := parseAllowedEndpointAllowlist(config.SCALEODM_ALLOWED_S3_ENDPOINTS)
+	if _, ok := allowed[endpoint]; ok {
+		return nil
+	}
+	return fmt.Errorf("s3 endpoint %q is not in SCALEODM_ALLOWED_S3_ENDPOINTS", endpoint)
+}
+
+func resolveTaskS3Client(metadataJSON []byte) (*minio.Client, string, error) {
+	endpoint := normalizedEndpointFromMetadata(metadataJSON)
+	if endpoint != "" {
+		client, err := s3.GetS3ClientForEndpoint(endpoint)
+		if err != nil {
+			return nil, endpoint, err
+		}
+		return client, endpoint, nil
+	}
+	return s3.GetS3Client(), "", nil
+}
+
+func taskS3Client(metadataJSON []byte) (*minio.Client, error) {
+	client, _, err := resolveTaskS3Client(metadataJSON)
+	return client, err
+}
+
+func metadataImageCount(metadataJSON []byte) int {
+	metaMap := parseMetadataMap(metadataJSON)
+	value, ok := metaMap[metadataImageCountKey]
+	if !ok {
+		return 0
+	}
+	switch n := value.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
+func metadataImageTotalBytes(metadataJSON []byte) int64 {
+	metaMap := parseMetadataMap(metadataJSON)
+	value, ok := metaMap[metadataImageTotalBytesKey]
+	if !ok {
+		return 0
+	}
+	switch n := value.(type) {
+	case float64:
+		return int64(n)
+	case int64:
+		return n
+	case int:
+		return int64(n)
+	}
+	return 0
+}
+
+func detectWorkflowInfraFailure(wf *wfv1.Workflow) string {
+	infraFailure := func(msg string) bool {
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "createcontainerconfigerror") {
+			return true
+		}
+		if strings.Contains(lower, "secret") && strings.Contains(lower, "not found") {
+			return true
+		}
+		if strings.Contains(lower, "errimagepull") || strings.Contains(lower, "imagepullbackoff") {
+			return true
+		}
+		if strings.Contains(lower, "failed to pull image") || strings.Contains(lower, "back-off pulling image") {
+			return true
+		}
+		return false
+	}
+
+	if infraFailure(wf.Status.Message) {
+		return wf.Status.Message
+	}
+
+	for _, node := range wf.Status.Nodes {
+		if infraFailure(node.Message) {
+			return node.Message
+		}
+	}
+
+	return ""
 }
 
 // NodeODM status codes
@@ -142,8 +289,8 @@ type TaskNewRequest struct {
 	// Optional S3-compatible endpoint override (e.g. for MinIO or non-AWS providers).
 	// If omitted, the server uses its configured default endpoint.
 	S3Endpoint string `json:"s3Endpoint,omitempty" form:"s3Endpoint" doc:"Custom S3 endpoint (optional, for non-AWS S3 providers)"`
-	// S3 region. Defaults to us-east-1 if omitted or empty.
-	S3Region string `json:"s3Region,omitempty" form:"s3Region" default:"us-east-1" doc:"S3 region (default: us-east-1)"`
+	// S3 region. Defaults to "garage" when s3Endpoint is set, otherwise "us-east-1".
+	S3Region string `json:"s3Region,omitempty" form:"s3Region" default:"us-east-1" doc:"S3 region (default: us-east-1, or garage when s3Endpoint is set)"`
 
 	// Optional override for creation timestamp. If omitted, the server uses the current
 	// time when the job is created.
@@ -159,6 +306,54 @@ type ErrorResponse struct {
 	Body struct {
 		Error string `json:"error" doc:"Error description"`
 	}
+}
+
+type TaskAssetsPrimaryItem struct {
+	ID          string `json:"id" doc:"Logical asset identifier"`
+	Asset       string `json:"asset" doc:"Asset key used by /task/{uuid}/download/{asset}"`
+	Exists      bool   `json:"exists" doc:"Whether this asset currently exists in task output"`
+	DownloadURL string `json:"downloadUrl,omitempty" doc:"ScaleODM download URL when the asset exists"`
+}
+
+type TaskAssetsAdditionalItem struct {
+	Asset       string `json:"asset" doc:"Discovered additional asset key"`
+	DownloadURL string `json:"downloadUrl" doc:"ScaleODM download URL for this asset"`
+}
+
+type TaskAssets struct {
+	Primary    []TaskAssetsPrimaryItem    `json:"primary" doc:"Primary ODM assets with existence status"`
+	Additional []TaskAssetsAdditionalItem `json:"additional,omitempty" doc:"Optional additional discovered assets"`
+}
+
+type TaskAssetsResponse struct {
+	Body TaskAssets
+}
+
+type taskPrimaryAssetDefinition struct {
+	ID     string
+	Assets []string
+}
+
+var taskPrimaryAssetDefinitions = []taskPrimaryAssetDefinition{
+	{ID: "all_zip", Assets: []string{"all.zip"}},
+	{ID: "orthophoto", Assets: []string{"orthophoto.tif"}},
+	{ID: "dsm", Assets: []string{"dsm.tif"}},
+	{ID: "dtm", Assets: []string{"dtm.tif"}},
+	{ID: "point_cloud", Assets: []string{"georeferenced_model.laz", "georeferenced_model.las", "georeferenced_model.ply", "point_cloud.laz", "point_cloud.ply"}},
+}
+
+func taskAssetDownloadURL(uuid, asset string) string {
+	return fmt.Sprintf("/task/%s/download/%s", uuid, asset)
+}
+
+func clampTaskAdditionalLimit(limit int) int {
+	if limit <= 0 {
+		return taskAssetsDefaultAdditionalLimit
+	}
+	if limit > taskAssetsMaxAdditionalLimit {
+		return taskAssetsMaxAdditionalLimit
+	}
+	return limit
 }
 
 // registerNodeODMRoutes registers NodeODM-compatible API routes
@@ -188,7 +383,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		resp := &InfoResponse{}
-		resp.Body.Version = "0.2.0" // The ScaleODM version (normally the NodeODM version)
+		resp.Body.Version = "0.3.0" // The ScaleODM version (normally the NodeODM version)
 		resp.Body.TaskQueueCount = queueCount
 		resp.Body.MaxImages = nil // Unlimited
 		resp.Body.Engine = "odm"
@@ -264,6 +459,19 @@ func (a *API) registerNodeODMRoutes() {
 		SetUUID string `header:"set-uuid" doc:"Optional UUID to use for this task"`
 		Body    TaskNewRequest
 	}) (*TaskNewResponse, error) {
+		start := time.Now()
+		metricResult := "failure"
+		metricReason := "unknown"
+		ctx, span := observability.Tracer().Start(ctx, "task.new")
+		defer func() {
+			span.SetAttributes(
+				attribute.String("task.new.result", metricResult),
+				attribute.String("task.new.reason", metricReason),
+			)
+			span.End()
+			observability.RecordTaskNew(metricResult, metricReason, time.Since(start))
+		}()
+
 		req := input.Body
 
 		// Log incoming task creation request
@@ -287,6 +495,9 @@ func (a *API) registerNodeODMRoutes() {
 		var odmFlags []string
 		if req.Options != "" {
 			if err := json.Unmarshal([]byte(req.Options), &options); err != nil {
+				metricResult = "failure"
+				metricReason = "invalid_options"
+				span.AddEvent("task.new.rejected", trace.WithAttributes(attribute.String("reason", metricReason)))
 				log.Printf("POST /task/new: invalid options JSON: %v", err)
 				return nil, huma.NewError(400, "Invalid options JSON", err)
 			}
@@ -326,6 +537,7 @@ func (a *API) registerNodeODMRoutes() {
 			isHTTPZip := strings.HasPrefix(req.ZipURL, "http://") || strings.HasPrefix(req.ZipURL, "https://")
 
 			if !isS3Prefix && !isHTTPZip {
+				metricReason = "invalid_zipurl"
 				log.Printf("POST /task/new: invalid zipurl=%q (must be s3:// or http(s) zip URL)", req.ZipURL)
 				return nil, huma.NewError(400, "zipurl must be an s3://... prefix or a http(s) zip URL")
 			}
@@ -335,20 +547,24 @@ func (a *API) registerNodeODMRoutes() {
 				writePath = strings.TrimSuffix(req.ZipURL, "/") + "-output/"
 			} else {
 				// HTTP zip - not supported for S3 read/write workflow
+				metricReason = "http_zip_not_supported"
 				log.Printf("POST /task/new: HTTP zip URLs not supported zipurl=%q", req.ZipURL)
 				return nil, huma.NewError(400, "HTTP zip URLs not supported. Use readS3Path for S3-based processing")
 			}
 		} else {
+			metricReason = "missing_read_path"
 			log.Printf("POST /task/new: missing required readS3Path or zipurl")
 			return nil, huma.NewError(400, "readS3Path is required (or zipurl for legacy support)")
 		}
 
 		// Validate S3 paths
 		if !strings.HasPrefix(readPath, "s3://") {
+			metricReason = "invalid_read_path"
 			log.Printf("POST /task/new: readPath must be s3:// path, got %q", readPath)
 			return nil, huma.NewError(400, "readS3Path must be an s3:// path")
 		}
 		if !strings.HasPrefix(writePath, "s3://") {
+			metricReason = "invalid_write_path"
 			log.Printf("POST /task/new: writePath must be s3:// path, got %q", writePath)
 			return nil, huma.NewError(400, "writeS3Path must be an s3:// path")
 		}
@@ -361,31 +577,68 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Validate all values that will be embedded in shell scripts
 		if err := validateShellSafe(projectID, "name"); err != nil {
+			metricReason = "invalid_project_name"
 			return nil, huma.NewError(400, err.Error())
 		}
 		for _, flag := range odmFlags {
 			if err := validateShellSafe(flag, "options flag"); err != nil {
+				metricReason = "invalid_option_flag"
 				return nil, huma.NewError(400, err.Error())
 			}
 		}
 		if err := validateShellSafe(readPath, "readS3Path"); err != nil {
+			metricReason = "invalid_read_path"
 			return nil, huma.NewError(400, err.Error())
 		}
 		if err := validateShellSafe(writePath, "writeS3Path"); err != nil {
+			metricReason = "invalid_write_path"
 			return nil, huma.NewError(400, err.Error())
 		}
 
 		// Determine S3 region & optional endpoint
 		s3Region := req.S3Region
-		if s3Region == "" {
-			s3Region = "us-east-1"
+		s3Endpoint, err := normalizeOptionalS3Endpoint(req.S3Endpoint)
+		if err != nil {
+			metricResult = "failure"
+			metricReason = "invalid_s3_endpoint"
+			return nil, huma.NewError(400, "Invalid s3Endpoint", err)
 		}
-		s3Endpoint := req.S3Endpoint
+		if err := enforceEndpointAllowlist(s3Endpoint); err != nil {
+			metricResult = "failure"
+			metricReason = "invalid_s3_endpoint"
+			return nil, huma.NewError(400, "Invalid s3Endpoint", err)
+		}
+		if s3Region == "" {
+			if s3Endpoint != "" {
+				s3Region = "garage"
+			} else {
+				s3Region = "us-east-1"
+			}
+		}
+		log.Printf("POST /task/new: endpoint selection endpoint=%q region=%q allowlist_enforced=%t", s3Endpoint, s3Region, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
+
+		// Count images before workflow submission so resources can be sized.
+		taskClient, clientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
+		if s3Endpoint != "" {
+			taskClient, clientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
+		}
+		if clientErr != nil {
+			metricResult = "failure"
+			metricReason = "s3_client_init_failed"
+			log.Printf("POST /task/new: failed to construct S3 client for image counting endpoint=%q: %v", s3Endpoint, clientErr)
+			return nil, huma.NewError(500, "Failed to initialize S3 client", clientErr)
+		}
+		imageCount, imageTotalBytes, countErr := s3.CountImageStatsInS3Path(ctx, taskClient, readPath)
+		if countErr != nil {
+			metricResult = "failure"
+			metricReason = "image_count_failed"
+			log.Printf("POST /task/new: failed to count images for readPath=%q endpoint=%q: %v", readPath, s3Endpoint, countErr)
+			return nil, huma.NewError(400, "Unable to read imagery from readS3Path", countErr)
+		}
 
 		// S3 credentials are configured at the server level and injected into
 		// workflow pods via Kubernetes Secret references (secretKeyRef).
 		// No per-request credential handling needed.
-
 		wfConfig := workflows.NewDefaultODMConfig(
 			projectID,
 			readPath,
@@ -394,22 +647,30 @@ func (a *API) registerNodeODMRoutes() {
 		)
 		wfConfig.S3Region = s3Region
 		wfConfig.S3Endpoint = s3Endpoint
+		wfConfig.ImageCount = imageCount
+		wfConfig.ImageTotalBytes = imageTotalBytes
 
 		// Submit workflow to Argo
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
 		if err != nil {
-			log.Printf("Failed to create workflow: %v", err)
+			metricResult = "failure"
+			metricReason = "argo_create_failed"
+			log.Printf("workflow creation rejected reason=argo_create_failed project_id=%q error=%v", projectID, err)
 			return nil, huma.NewError(500, "Failed to create workflow", err)
 		}
+		log.Printf("workflow creation accepted workflow=%q project_id=%q", wf.Name, projectID)
 
 		log.Printf(
-			"POST /task/new: created workflow name=%q projectID=%q readPath=%q writePath=%q odmFlags=%v s3Region=%q",
+			"POST /task/new: created workflow name=%q projectID=%q readPath=%q writePath=%q odmFlags=%v s3Region=%q imageCount=%d imageTotalBytes=%d endpoint=%q",
 			wf.Name,
 			projectID,
 			readPath,
 			writePath,
 			odmFlags,
 			s3Region,
+			imageCount,
+			imageTotalBytes,
+			s3Endpoint,
 		)
 
 		// Record metadata in database. If this fails, the workflow exists in
@@ -425,12 +686,33 @@ func (a *API) registerNodeODMRoutes() {
 			s3Region,
 		)
 		if err != nil {
-			log.Printf("ERROR: Failed to record job metadata for workflow %q: %v", wf.Name, err)
+			metricResult = "failure"
+			metricReason = "metadata_create_failed"
+			log.Printf("workflow created but metadata update failed workflow=%q reason=metadata_create_failed error=%v", wf.Name, err)
+			if rollbackErr := a.workflowClient.DeleteWorkflow(ctx, wf.Name); rollbackErr != nil && !isNotFound(rollbackErr) {
+				log.Printf("POST /task/new: failed cleanup delete of unmanaged workflow %q after metadata create failure: %v", wf.Name, rollbackErr)
+			} else {
+				log.Printf("POST /task/new: compensated orphan workflow %q after metadata create failure", wf.Name)
+			}
 			return nil, huma.NewError(500, "Workflow created but failed to record metadata - retry the request", err)
+		}
+
+		metadataUpdates := map[string]interface{}{
+			metadataImageCountKey:            imageCount,
+			metadataImageTotalBytesKey:       imageTotalBytes,
+			metadataWorkflowMissingFirstSeen: nil,
+		}
+		if s3Endpoint != "" {
+			metadataUpdates[metadataS3EndpointKey] = s3Endpoint
+		}
+		if metaErr := a.metadataStore.MergeJobMetadata(ctx, wf.Name, metadataUpdates); metaErr != nil {
+			log.Printf("workflow created but metadata enrichment failed workflow=%q reason=metadata_enrichment_failed error=%v", wf.Name, metaErr)
 		}
 
 		resp := &TaskNewResponse{}
 		resp.Body.UUID = wf.Name
+		metricResult = "success"
+		metricReason = "none"
 		return resp, nil
 	})
 
@@ -491,14 +773,90 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(404, "Task not found")
 		}
 
-		// Build task info response purely from metadata. This allows the
-		// endpoint to continue working even if the backing Argo workflow
-		// has been garbage-collected or is otherwise unavailable.
-		status := TaskStatus{
-			Code: jobStatusToStatusCode(job.JobStatus),
-		}
+		// Build task info from metadata, but prefer live workflow phase when
+		// the Argo workflow still exists.
+		statusCode := jobStatusToStatusCode(job.JobStatus)
+		progress := jobStatusToProgress(job.JobStatus)
+		errorMessage := ""
 		if job.ErrorMessage != nil {
-			status.ErrorMessage = *job.ErrorMessage
+			errorMessage = *job.ErrorMessage
+		}
+
+		imagesCount := metadataImageCount(job.Metadata)
+
+		if wf, wfErr := a.workflowClient.GetWorkflow(ctx, input.UUID); wfErr == nil {
+			statusCode = workflowToStatusCode(wf.Status.Phase)
+			progress = workflowToProgress(wf.Status.Phase)
+			if (wf.Status.Phase == wfv1.WorkflowFailed || wf.Status.Phase == wfv1.WorkflowError) && wf.Status.Message != "" {
+				errorMessage = wf.Status.Message
+			}
+			if len(job.Metadata) > 0 {
+				if err := a.metadataStore.MergeJobMetadata(ctx, input.UUID, map[string]interface{}{metadataWorkflowMissingFirstSeen: nil}); err != nil {
+					log.Printf("GET /task/%s/info: failed clearing missing-workflow marker: %v", input.UUID, err)
+				}
+			}
+
+			// Reconcile infra/runtime pod failures (for example missing secrets,
+			// image pull backoff, or container config errors) into failed status
+			// without waiting for Argo to eventually mark the whole workflow phase.
+			if statusCode == StatusCodeRunning {
+				failureMsg := detectWorkflowInfraFailure(wf)
+				if failureMsg != "" {
+					statusCode = StatusCodeFailed
+					progress = 0
+					errorMessage = failureMsg
+					observability.RecordWorkflowReconciliation("running_to_failed", "infra_failure")
+					log.Printf("reconciliation transition uuid=%s source=argo transition=running_to_failed reason=infra_failure", input.UUID)
+					if err := a.metadataStore.UpdateJobStatus(ctx, input.UUID, "failed", &failureMsg); err != nil {
+						log.Printf("GET /task/%s/info: failed to persist reconciled failure status: %v", input.UUID, err)
+					}
+				}
+			}
+		} else if isNotFound(wfErr) {
+			jobStatus := strings.ToLower(job.JobStatus)
+			if jobStatus == "queued" || jobStatus == "claimed" || jobStatus == "running" {
+				metaMap := parseMetadataMap(job.Metadata)
+				now := time.Now().UTC()
+				firstSeen := now
+				if rawFirstSeen, ok := metaMap[metadataWorkflowMissingFirstSeen].(string); ok && rawFirstSeen != "" {
+					if parsed, err := time.Parse(time.RFC3339, rawFirstSeen); err == nil {
+						firstSeen = parsed
+					}
+				} else {
+					patchErr := a.metadataStore.MergeJobMetadata(ctx, input.UUID, map[string]interface{}{metadataWorkflowMissingFirstSeen: now.Format(time.RFC3339)})
+					if patchErr != nil {
+						log.Printf("GET /task/%s/info: failed to persist missing-workflow first-seen timestamp: %v", input.UUID, patchErr)
+					}
+				}
+				grace := time.Duration(config.SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS) * time.Second
+				if grace <= 0 {
+					grace = 5 * time.Minute
+				}
+				if now.Sub(firstSeen) < grace {
+					log.Printf("GET /task/%s/info: workflow missing but within grace period status=%q first_seen=%s grace=%s", input.UUID, jobStatus, firstSeen.Format(time.RFC3339), grace)
+				} else {
+					msg := "Workflow missing in Argo beyond grace window; marking task as failed"
+					observability.RecordWorkflowReconciliation("missing_workflow_to_failed", "missing_workflow_grace_expired")
+					log.Printf("reconciliation transition uuid=%s source=metadata transition=missing_workflow_to_failed reason=missing_workflow_grace_expired", input.UUID)
+					if err := a.metadataStore.UpdateJobStatus(ctx, input.UUID, "failed", &msg); err != nil {
+						log.Printf("GET /task/%s/info: failed to reconcile missing workflow to failed status: %v", input.UUID, err)
+					} else {
+						_ = a.metadataStore.MergeJobMetadata(ctx, input.UUID, map[string]interface{}{metadataWorkflowMissingFirstSeen: nil})
+						job.JobStatus = "failed"
+						job.ErrorMessage = &msg
+					}
+					statusCode = StatusCodeFailed
+					progress = 0
+					errorMessage = msg
+				}
+			}
+		} else {
+			log.Printf("GET /task/%s/info: failed to fetch live workflow state: %v", input.UUID, wfErr)
+		}
+
+		status := TaskStatus{Code: statusCode}
+		if errorMessage != "" {
+			status.ErrorMessage = errorMessage
 		}
 
 		info := TaskInfo{
@@ -506,8 +864,8 @@ func (a *API) registerNodeODMRoutes() {
 			Name:        job.ODMProjectID,
 			DateCreated: job.CreatedAt.Unix(),
 			Status:      status,
-			ImagesCount: 0, // Not yet tracked
-			Progress:    jobStatusToProgress(job.JobStatus),
+			ImagesCount: imagesCount,
+			Progress:    progress,
 		}
 
 		// Calculate processing time from metadata timestamps, if present.
@@ -540,8 +898,10 @@ func (a *API) registerNodeODMRoutes() {
 			var logBuilder strings.Builder
 			// Use S3 path if available for fallback
 			if job.WriteS3Path != "" {
-				s3Client := s3.GetS3Client()
-				if err := a.workflowClient.GetWorkflowLogsWithS3Path(ctx, input.UUID, job.WriteS3Path, s3Client, &logBuilder); err == nil {
+				s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(job.Metadata)
+				if clientErr != nil {
+					log.Printf("GET /task/%s/info: failed to construct S3 client for log fallback endpoint=%q: %v", input.UUID, selectedEndpoint, clientErr)
+				} else if err := a.workflowClient.GetWorkflowLogsWithS3Path(ctx, input.UUID, job.WriteS3Path, s3Client, &logBuilder); err == nil {
 					lines := strings.Split(logBuilder.String(), "\n")
 					if input.WithOutput < len(lines) {
 						info.Output = lines[input.WithOutput:]
@@ -596,7 +956,11 @@ func (a *API) registerNodeODMRoutes() {
 		var logBuilder strings.Builder
 		if job.WriteS3Path != "" {
 			// Use S3 path for fallback
-			s3Client := s3.GetS3Client()
+			s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(job.Metadata)
+			if clientErr != nil {
+				log.Printf("GET /task/%s/output: failed to construct S3 client for log fallback endpoint=%q: %v", input.UUID, selectedEndpoint, clientErr)
+				return nil, huma.NewError(500, "Failed to initialize S3 client", clientErr)
+			}
 			err = a.workflowClient.GetWorkflowLogsWithS3Path(ctx, input.UUID, job.WriteS3Path, s3Client, &logBuilder)
 			if err != nil {
 				log.Printf("GET /task/%s/output: failed to retrieve logs from workflow or S3: %v", input.UUID, err)
@@ -622,6 +986,89 @@ func (a *API) registerNodeODMRoutes() {
 		log.Printf("GET /task/%s/output: returned %d bytes of output", input.UUID, len(output))
 
 		return &struct{ Body string }{Body: output}, nil
+	})
+
+	// GET /task/{uuid}/assets - Discover task output assets
+	huma.Register(a.api, huma.Operation{
+		OperationID: "task-uuid-assets-get",
+		Method:      http.MethodGet,
+		Path:        "/task/{uuid}/assets",
+		Summary:     "Lists primary and optional additional output assets",
+		Tags:        []string{"task"},
+	}, func(ctx context.Context, input *struct {
+		UUID              string `path:"uuid" doc:"UUID of the task"`
+		Token             string `query:"token" doc:"Authentication token (optional)"`
+		IncludeAdditional bool   `query:"includeAdditional" default:"false" doc:"Include additional discovered files"`
+		AdditionalLimit   int    `query:"additionalLimit" default:"100" doc:"Maximum number of additional files to return (clamped to 1000)"`
+	}) (*TaskAssetsResponse, error) {
+		log.Printf("GET /task/%s/assets: token_provided=%t includeAdditional=%t additionalLimit=%d", input.UUID, input.Token != "", input.IncludeAdditional, input.AdditionalLimit)
+
+		job, err := a.metadataStore.GetJob(ctx, input.UUID)
+		if err != nil {
+			log.Printf("GET /task/%s/assets: failed to retrieve task metadata: %v", input.UUID, err)
+			return nil, huma.NewError(500, "Failed to retrieve task metadata", err)
+		}
+		if job == nil {
+			log.Printf("GET /task/%s/assets: task not found", input.UUID)
+			return nil, huma.NewError(404, "Task not found")
+		}
+		if job.WriteS3Path == "" {
+			log.Printf("GET /task/%s/assets: write S3 path not available", input.UUID)
+			return nil, huma.NewError(400, "Write S3 path not available for this task")
+		}
+
+		s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(job.Metadata)
+		if clientErr != nil {
+			log.Printf("GET /task/%s/assets: failed to initialize S3 client endpoint=%q: %v", input.UUID, selectedEndpoint, clientErr)
+			return nil, huma.NewError(500, "Failed to initialize S3 client", clientErr)
+		}
+
+		response := &TaskAssetsResponse{}
+		response.Body.Primary = make([]TaskAssetsPrimaryItem, 0, len(taskPrimaryAssetDefinitions))
+
+		representedAssets := map[string]struct{}{}
+		for _, definition := range taskPrimaryAssetDefinitions {
+			item := TaskAssetsPrimaryItem{ID: definition.ID, Asset: definition.Assets[0], Exists: false}
+			for _, candidate := range definition.Assets {
+				exists, existsErr := s3.ObjectExistsInS3Path(ctx, s3Client, job.WriteS3Path, candidate)
+				if existsErr != nil {
+					log.Printf("GET /task/%s/assets: failed checking candidate asset=%q: %v", input.UUID, candidate, existsErr)
+					return nil, huma.NewError(500, "Failed to query task assets", existsErr)
+				}
+				if exists {
+					item.Asset = candidate
+					item.Exists = true
+					item.DownloadURL = taskAssetDownloadURL(input.UUID, candidate)
+					representedAssets[candidate] = struct{}{}
+					break
+				}
+			}
+			response.Body.Primary = append(response.Body.Primary, item)
+		}
+
+		if input.IncludeAdditional {
+			limit := clampTaskAdditionalLimit(input.AdditionalLimit)
+			listedAssets, listErr := s3.ListFilesInS3PathWithLimit(ctx, s3Client, job.WriteS3Path, limit)
+			if listErr != nil {
+				log.Printf("GET /task/%s/assets: failed listing additional assets: %v", input.UUID, listErr)
+				return nil, huma.NewError(500, "Failed to query task assets", listErr)
+			}
+
+			additional := make([]TaskAssetsAdditionalItem, 0, len(listedAssets))
+			for _, asset := range listedAssets {
+				if _, alreadyRepresented := representedAssets[asset]; alreadyRepresented {
+					continue
+				}
+				additional = append(additional, TaskAssetsAdditionalItem{
+					Asset:       asset,
+					DownloadURL: taskAssetDownloadURL(input.UUID, asset),
+				})
+			}
+			response.Body.Additional = additional
+		}
+
+		log.Printf("GET /task/%s/assets: returning primary=%d additional=%d includeAdditional=%t", input.UUID, len(response.Body.Primary), len(response.Body.Additional), input.IncludeAdditional)
+		return response, nil
 	})
 
 	// POST /task/cancel - Cancel a task
@@ -712,6 +1159,9 @@ func (a *API) registerNodeODMRoutes() {
 		metadata, err := a.metadataStore.GetJob(ctx, input.Body.UUID)
 		if err != nil {
 			log.Printf("POST /task/restart: failed to retrieve metadata for %q: %v", input.Body.UUID, err)
+			return nil, huma.NewError(500, "Failed to retrieve task metadata", err)
+		}
+		if metadata == nil {
 			return nil, huma.NewError(404, "Task not found")
 		}
 
@@ -719,34 +1169,69 @@ func (a *API) registerNodeODMRoutes() {
 		var odmFlags []string
 		if input.Body.Options != "" {
 			var options []TaskOption
-			if err := json.Unmarshal([]byte(input.Body.Options), &options); err == nil {
-				for _, opt := range options {
-					flag := fmt.Sprintf("--%s", opt.Name)
-					odmFlags = append(odmFlags, flag)
-					if opt.Value != nil && opt.Value != true {
-						odmFlags = append(odmFlags, fmt.Sprintf("%v", opt.Value))
+			if err := json.Unmarshal([]byte(input.Body.Options), &options); err != nil {
+				log.Printf("POST /task/restart: invalid options JSON for %q: %v", input.Body.UUID, err)
+				return nil, huma.NewError(400, "Invalid options JSON", err)
+			}
+			for _, opt := range options {
+				flag := fmt.Sprintf("--%s", opt.Name)
+				if opt.Value != nil && opt.Value != false {
+					if boolVal, ok := opt.Value.(bool); ok && boolVal {
+						odmFlags = append(odmFlags, flag)
+					} else {
+						odmFlags = append(odmFlags, flag, fmt.Sprintf("%v", opt.Value))
 					}
 				}
-			} else {
-				log.Printf("POST /task/restart: invalid options JSON for %q: %v", input.Body.UUID, err)
 			}
 		} else {
-			// Use original flags
-			json.Unmarshal(metadata.ODMFlags, &odmFlags)
+			if err := json.Unmarshal(metadata.ODMFlags, &odmFlags); err != nil {
+				return nil, huma.NewError(500, "Failed to parse stored task options", err)
+			}
+		}
+		if len(odmFlags) == 0 {
+			odmFlags = []string{"--fast-orthophoto"}
+		}
+		for _, flag := range odmFlags {
+			if err := validateShellSafe(flag, "options flag"); err != nil {
+				return nil, huma.NewError(400, err.Error())
+			}
 		}
 
-		// Delete old workflow
-		if err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID); err != nil && !isNotFound(err) {
-			log.Printf("POST /task/restart: failed to delete old workflow for %q: %v", input.Body.UUID, err)
+		s3Endpoint := normalizedEndpointFromMetadata(metadata.Metadata)
+		if err := enforceEndpointAllowlist(s3Endpoint); err != nil {
+			return nil, huma.NewError(400, "Invalid s3Endpoint", err)
+		}
+		log.Printf("POST /task/restart: endpoint selection endpoint=%q allowlist_enforced=%t", s3Endpoint, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
+
+		imageCount := metadataImageCount(metadata.Metadata)
+		imageTotalBytes := metadataImageTotalBytes(metadata.Metadata)
+		if imageCount == 0 || imageTotalBytes == 0 {
+			taskClient, clientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
+			if s3Endpoint != "" {
+				taskClient, clientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
+			}
+			if clientErr == nil {
+				if counted, totalBytes, countErr := s3.CountImageStatsInS3Path(ctx, taskClient, metadata.ReadS3Path); countErr == nil {
+					if imageCount == 0 {
+						imageCount = counted
+					}
+					if imageTotalBytes == 0 {
+						imageTotalBytes = totalBytes
+					}
+				}
+			}
 		}
 
-		// Create new workflow with same UUID prefix
 		wfConfig := workflows.NewDefaultODMConfig(
 			metadata.ODMProjectID,
 			metadata.ReadS3Path,
 			metadata.WriteS3Path,
 			odmFlags,
 		)
+		wfConfig.S3Region = metadata.S3Region
+		wfConfig.S3Endpoint = s3Endpoint
+		wfConfig.ImageCount = imageCount
+		wfConfig.ImageTotalBytes = imageTotalBytes
 
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
 		if err != nil {
@@ -754,24 +1239,42 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(500, "Failed to restart task", err)
 		}
 
-		// Update metadata with new workflow name
-		if err := a.metadataStore.DeleteJob(ctx, input.Body.UUID); err != nil {
-			log.Printf("POST /task/restart: failed to delete old job metadata for %q: %v", input.Body.UUID, err)
+		metadataPatch := map[string]interface{}{
+			metadataImageCountKey:            imageCount,
+			metadataImageTotalBytesKey:       imageTotalBytes,
+			metadataWorkflowMissingFirstSeen: nil,
 		}
-		if _, err := a.metadataStore.CreateJob(
+		if s3Endpoint != "" {
+			metadataPatch[metadataS3EndpointKey] = s3Endpoint
+		}
+		oldWorkflowName := input.Body.UUID
+		if err := a.metadataStore.RestartJobMetadata(
 			ctx,
+			oldWorkflowName,
 			wf.Name,
 			metadata.ODMProjectID,
 			metadata.ReadS3Path,
 			metadata.WriteS3Path,
 			odmFlags,
 			metadata.S3Region,
+			metadataPatch,
 		); err != nil {
-			log.Printf("POST /task/restart: failed to create new job metadata for %q (new workflow %q): %v", input.Body.UUID, wf.Name, err)
+			log.Printf("POST /task/restart: failed to swap metadata for %q -> %q: %v", oldWorkflowName, wf.Name, err)
+			if wf.Name != oldWorkflowName {
+				if delErr := a.workflowClient.DeleteWorkflow(ctx, wf.Name); delErr != nil && !isNotFound(delErr) {
+					log.Printf("POST /task/restart: failed cleanup delete of unmanaged workflow %q: %v", wf.Name, delErr)
+				}
+			}
+			return nil, huma.NewError(500, "Failed to persist restarted task metadata", err)
 		}
 
-		log.Printf("POST /task/restart: task %q restarted as workflow %q", input.Body.UUID, wf.Name)
+		if wf.Name != oldWorkflowName {
+			if err := a.workflowClient.DeleteWorkflow(ctx, oldWorkflowName); err != nil && !isNotFound(err) {
+				log.Printf("POST /task/restart: failed post-cutover cleanup delete of old workflow %q: %v", oldWorkflowName, err)
+			}
+		}
 
+		log.Printf("POST /task/restart: task %q restarted as workflow %q imageCount=%d imageTotalBytes=%d endpoint=%q", oldWorkflowName, wf.Name, imageCount, imageTotalBytes, s3Endpoint)
 		return &Response{Success: true}, nil
 	})
 
@@ -801,7 +1304,12 @@ func (a *API) registerNodeODMRoutes() {
 			return
 		}
 
-		s3Client := s3.GetS3Client()
+		s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(metadata.Metadata)
+		if clientErr != nil {
+			log.Printf("GET /task/%s/download/%s: failed to initialize S3 client endpoint=%q: %v", uuid, asset, selectedEndpoint, clientErr)
+			http.Error(w, `{"error":"Failed to initialize S3 client"}`, http.StatusInternalServerError)
+			return
+		}
 		presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
 		if err != nil {
 			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, asset, err)

@@ -20,4 +20,3 @@ type WorkflowClient interface {
 	GetWorkflowStatus(ctx context.Context, workflowName string) (wfv1.WorkflowPhase, string, error)
 	IsWorkflowComplete(ctx context.Context, workflowName string) (bool, error)
 }
-

@@ -1,0 +1,41 @@
+{{ define "task_detail" }}
+{{ template "layout.start" . }}
+<section class="panel">
+  <h1>Task {{ .Task.Task.UUID }}</h1>
+  <div class="meta-grid">
+    <div><strong>Project:</strong> {{ .Task.Task.ProjectID }}</div>
+    <div><strong>Status:</strong> <span class="status status-{{ .Task.Task.Status }}">{{ .Task.Task.StatusLabel }}</span></div>
+    <div><strong>Progress:</strong> {{ .Task.Task.Progress }}%</div>
+    <div><strong>Created:</strong> {{ .Task.Task.CreatedAt }}</div>
+    <div><strong>Started:</strong> {{ .Task.Task.StartedAt }}</div>
+    <div><strong>Completed:</strong> {{ .Task.Task.CompletedAt }}</div>
+    <div><strong>Read path:</strong> <code>{{ .Task.ReadS3 }}</code></div>
+    <div><strong>Write path:</strong> <code>{{ .Task.WriteS3 }}</code></div>
+    <div><strong>Region:</strong> {{ .Task.Region }}</div>
+  </div>
+
+  {{ if .Task.Error }}
+  <div class="error">{{ .Task.Error }}</div>
+  {{ end }}
+
+  <h2>Options</h2>
+  <ul>
+    {{ range .Task.Options }}
+    <li><code>--{{ .Name }}</code> = {{ .Value }}</li>
+    {{ else }}
+    <li>No options recorded.</li>
+    {{ end }}
+  </ul>
+
+  <h2>Downloads</h2>
+  <ul>
+    {{ range .Task.Assets }}
+    <li><a href="{{ .URL }}">{{ .Name }}</a></li>
+    {{ end }}
+  </ul>
+
+  <h2>Logs</h2>
+  <pre id="task-output" data-output-url="/ui/api/tasks/{{ .Task.Task.UUID }}/output">Loading logs...</pre>
+</section>
+{{ template "layout.end" . }}
+{{ end }}

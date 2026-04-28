@@ -1,4 +1,7 @@
 {{- if .Values.ingress.enabled -}}
+{{- if not .Values.config.ui.enabled -}}
+{{- fail "ingress is UI-only and requires config.ui.enabled=true" -}}
+{{- end -}}
 {{- $fullName := include "scaleodm.fullname" . -}}
 {{- $svcPort := .Values.api.service.port -}}
 {{- if and .Values.ingress.className (not (hasPrefix "nginx" .Values.ingress.className)) }}
@@ -34,15 +37,13 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
-          {{- range .paths }}
-          - path: {{ .path }}
-            pathType: {{ .pathType }}
+          - path: /ui
+            pathType: Prefix
             backend:
               service:
                 name: {{ $fullName }}
                 port:
                   number: {{ $svcPort }}
-          {{- end }}
     {{- end }}
 {{- end }}
 

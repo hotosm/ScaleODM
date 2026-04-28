@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -16,43 +17,120 @@ import (
 )
 
 func GetS3Client() *minio.Client {
-	endpoint := config.SCALEODM_S3_ENDPOINT
-	accessKey := config.SCALEODM_S3_ACCESS_KEY
-	secretKey := config.SCALEODM_S3_SECRET_KEY
-
-	// Determine if we should use secure connection
-	// For AWS S3, always use secure. For custom endpoints, check if it's https
-	secure := true
-	if !strings.HasPrefix(endpoint, "https://") && !strings.HasPrefix(endpoint, "http://") {
-		// No protocol specified, assume secure for AWS, but allow override via config
-		secure = true
-	} else if strings.HasPrefix(endpoint, "http://") {
-		secure = false
-		endpoint = strings.TrimPrefix(endpoint, "http://")
-	} else if strings.HasPrefix(endpoint, "https://") {
-		secure = true
-		endpoint = strings.TrimPrefix(endpoint, "https://")
-	}
-
-	// MinIO client doesn't allow paths, query parameters, or fragments in endpoint
-	// Endpoint should be just host:port or host
-	// Strip any path, query, or fragment components
-	if idx := strings.IndexAny(endpoint, "/?#"); idx != -1 {
-		endpoint = endpoint[:idx]
-	}
-
-	// Remove trailing slash if present (shouldn't happen after above, but be safe)
-	endpoint = strings.TrimSuffix(endpoint, "/")
-
-	minioClient, err := minio.New(endpoint, &minio.Options{
-		Creds:  credentials.NewStaticV4(accessKey, secretKey, ""),
-		Secure: secure,
-	})
+	client, err := GetS3ClientWithCredentials(
+		config.AWS_S3_ENDPOINT,
+		config.AWS_ACCESS_KEY_ID,
+		config.AWS_SECRET_ACCESS_KEY,
+		"",
+	)
 	if err != nil {
 		log.Fatalln(err)
 	}
+	return client
+}
 
-	return minioClient
+// NormalizeEndpoint strips unsupported URL components while preserving the
+// scheme (if provided) for rclone-compatible endpoint injection.
+func NormalizeEndpoint(endpoint string) (string, error) {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return "", fmt.Errorf("endpoint is empty")
+	}
+
+	if !strings.Contains(endpoint, "://") {
+		if idx := strings.IndexAny(endpoint, "/?#"); idx != -1 {
+			endpoint = endpoint[:idx]
+		}
+		return strings.TrimSuffix(endpoint, "/"), nil
+	}
+
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return "", fmt.Errorf("invalid endpoint: %w", err)
+	}
+	if parsed.Host == "" {
+		return "", fmt.Errorf("invalid endpoint host")
+	}
+
+	return fmt.Sprintf("%s://%s", parsed.Scheme, parsed.Host), nil
+}
+
+// GetS3ClientForEndpoint builds a client using server credentials and an
+// explicit endpoint override.
+func GetS3ClientForEndpoint(endpoint string) (*minio.Client, error) {
+	return GetS3ClientWithCredentials(
+		endpoint,
+		config.AWS_ACCESS_KEY_ID,
+		config.AWS_SECRET_ACCESS_KEY,
+		"",
+	)
+}
+
+// GetS3ClientWithCredentials builds an S3 client from explicit endpoint and credentials.
+func GetS3ClientWithCredentials(endpoint, accessKey, secretKey, sessionToken string) (*minio.Client, error) {
+	normalized, err := NormalizeEndpoint(endpoint)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvedEndpoint, secure := resolveMinIOEndpoint(normalized)
+	bucketLookup := bucketLookupForEndpoint(resolvedEndpoint)
+
+	client, err := minio.New(resolvedEndpoint, &minio.Options{
+		Creds:        credentials.NewStaticV4(accessKey, secretKey, sessionToken),
+		Secure:       secure,
+		BucketLookup: bucketLookup,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return client, nil
+}
+
+func resolveMinIOEndpoint(endpoint string) (string, bool) {
+	secure := true
+	if strings.HasPrefix(endpoint, "http://") {
+		secure = false
+		endpoint = strings.TrimPrefix(endpoint, "http://")
+	} else if strings.HasPrefix(endpoint, "https://") {
+		endpoint = strings.TrimPrefix(endpoint, "https://")
+	}
+	return endpoint, secure
+}
+
+func bucketLookupForEndpoint(endpoint string) minio.BucketLookupType {
+	host := endpoint
+	if parsedHost, _, found := strings.Cut(endpoint, ":"); found {
+		host = parsedHost
+	}
+	host = strings.ToLower(host)
+
+	if host == "s3.amazonaws.com" || strings.HasSuffix(host, ".amazonaws.com") {
+		return minio.BucketLookupAuto
+	}
+
+	return minio.BucketLookupPath
+}
+
+func parseS3Path(s3Path string) (string, string, error) {
+	if !strings.HasPrefix(s3Path, "s3://") {
+		return "", "", fmt.Errorf("invalid S3 path: %s", s3Path)
+	}
+
+	pathParts := strings.TrimPrefix(s3Path, "s3://")
+	parts := strings.SplitN(pathParts, "/", 2)
+	if len(parts) < 1 || strings.TrimSpace(parts[0]) == "" {
+		return "", "", fmt.Errorf("invalid S3 path format: %s", s3Path)
+	}
+
+	bucket := parts[0]
+	prefix := ""
+	if len(parts) > 1 {
+		prefix = strings.TrimSuffix(parts[1], "/") + "/"
+	}
+
+	return bucket, prefix, nil
 }
 
 // GetWorkflowLogsFromS3 fetches workflow logs from S3
@@ -94,47 +172,155 @@ func GetWorkflowLogsFromS3(ctx context.Context, client *minio.Client, writeS3Pat
 	return string(content), nil
 }
 
-// ListFilesInS3Path lists files in the S3 path
+// ObjectExistsInS3Path checks if an exact object exists under writeS3Path.
 // writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
-// Returns a list of object names (without the prefix)
+// fileName is the exact object key suffix under the prefix.
+func ObjectExistsInS3Path(ctx context.Context, client *minio.Client, writeS3Path, fileName string) (bool, error) {
+	bucket, prefix, err := parseS3Path(writeS3Path)
+	if err != nil {
+		return false, err
+	}
+
+	objectKey := prefix + strings.TrimPrefix(fileName, "/")
+	_, err = client.StatObject(ctx, bucket, objectKey, minio.StatObjectOptions{})
+	if err == nil {
+		return true, nil
+	}
+
+	errResp := minio.ToErrorResponse(err)
+	if errResp.Code == "NoSuchKey" || errResp.Code == "NoSuchObject" || errResp.StatusCode == 404 {
+		return false, nil
+	}
+
+	return false, fmt.Errorf("failed to stat object %q: %w", objectKey, err)
+}
+
+// ListFilesInS3Path lists files in the S3 path.
+// writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
+// Returns a list of object names (without the prefix).
 func ListFilesInS3Path(ctx context.Context, client *minio.Client, writeS3Path string) ([]string, error) {
-	// Parse S3 path: s3://bucket/path -> bucket and path
-	if !strings.HasPrefix(writeS3Path, "s3://") {
-		return nil, fmt.Errorf("invalid S3 path: %s", writeS3Path)
+	return ListFilesInS3PathWithLimit(ctx, client, writeS3Path, 0)
+}
+
+// ListFilesInS3PathWithLimit lists files in the S3 path with an optional cap.
+// If limit <= 0, all listed files are returned.
+func ListFilesInS3PathWithLimit(ctx context.Context, client *minio.Client, writeS3Path string, limit int) ([]string, error) {
+	bucket, prefix, err := parseS3Path(writeS3Path)
+	if err != nil {
+		return nil, err
 	}
 
-	pathParts := strings.TrimPrefix(writeS3Path, "s3://")
-	parts := strings.SplitN(pathParts, "/", 2)
-	if len(parts) < 1 {
-		return nil, fmt.Errorf("invalid S3 path format: %s", writeS3Path)
-	}
-
-	bucket := parts[0]
-	prefix := ""
-	if len(parts) > 1 {
-		prefix = strings.TrimSuffix(parts[1], "/") + "/"
-	}
-
-	// List objects with the prefix
-	objectCh := client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+	listOpts := minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: false,
-	})
+	}
+	if limit > 0 {
+		listOpts.MaxKeys = limit
+	}
+
+	objectCh := client.ListObjects(ctx, bucket, listOpts)
 
 	var files []string
 	for object := range objectCh {
 		if object.Err != nil {
 			return nil, fmt.Errorf("failed to list objects: %w", object.Err)
 		}
-		// Remove the prefix from the object key to get just the filename
+
 		fileName := strings.TrimPrefix(object.Key, prefix)
-		// Skip hidden files and directories
-		if fileName != "" && !strings.HasPrefix(fileName, ".") {
-			files = append(files, fileName)
+		if fileName == "" || strings.HasSuffix(fileName, "/") || strings.Contains(fileName, "/") {
+			continue
+		}
+		if strings.HasPrefix(fileName, ".") {
+			continue
+		}
+
+		files = append(files, fileName)
+		if limit > 0 && len(files) >= limit {
+			break
 		}
 	}
 
 	return files, nil
+}
+
+// ProbeS3Path checks that an S3 path is reachable by issuing a bounded list request.
+// It is intended for readiness probes and avoids scanning large prefixes.
+func ProbeS3Path(ctx context.Context, client *minio.Client, s3Path string) error {
+	bucket, prefix, err := parseS3Path(s3Path)
+	if err != nil {
+		return err
+	}
+
+	objectCh := client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: false,
+		MaxKeys:   1,
+	})
+
+	for object := range objectCh {
+		if object.Err != nil {
+			return fmt.Errorf("failed to probe s3 path: %w", object.Err)
+		}
+		break
+	}
+
+	return nil
+}
+
+// CountImageStatsInS3Path counts supported image files and sums their object sizes under an S3 path recursively.
+func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Path string) (int, int64, error) {
+	bucket, prefix, err := parseS3Path(readS3Path)
+	if err != nil {
+		return 0, 0, err
+	}
+
+	objectCh := client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+
+	return accumulateImageStatsFromObjects(objectCh)
+}
+
+// CountImageFilesInS3Path counts image files under an S3 path recursively.
+func CountImageFilesInS3Path(ctx context.Context, client *minio.Client, readS3Path string) (int, error) {
+	count, _, err := CountImageStatsInS3Path(ctx, client, readS3Path)
+	if err != nil {
+		return 0, err
+	}
+	return count, nil
+}
+
+func accumulateImageStatsFromObjects(objectCh <-chan minio.ObjectInfo) (int, int64, error) {
+	count := 0
+	totalBytes := int64(0)
+	for object := range objectCh {
+		if object.Err != nil {
+			return 0, 0, fmt.Errorf("failed to list objects: %w", object.Err)
+		}
+		if object.Key == "" || strings.HasSuffix(object.Key, "/") {
+			continue
+		}
+		if !isSupportedImageKey(object.Key) {
+			continue
+		}
+		count++
+		if object.Size > 0 {
+			totalBytes += object.Size
+		}
+	}
+
+	return count, totalBytes, nil
+}
+
+func isSupportedImageKey(objectKey string) bool {
+	ext := strings.ToLower(filepath.Ext(objectKey))
+	switch ext {
+	case ".jpg", ".jpeg", ".tif", ".tiff":
+		return true
+	default:
+		return false
+	}
 }
 
 // GeneratePresignedURL generates a pre-signed URL for downloading a file from S3

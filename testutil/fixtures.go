@@ -15,4 +15,3 @@ func WaitForCondition(condition func() bool, timeout time.Duration, interval tim
 	}
 	return false
 }
-

@@ -2,9 +2,9 @@ package db
 
 import (
 	"context"
-	"hash/crc32"
 	_ "embed"
 	"fmt"
+	"hash/crc32"
 	"strings"
 	"time"
 
@@ -60,20 +60,20 @@ func (db *DB) Close() {
 // Create the required tables and indexes
 func (db *DB) InitSchema(ctx context.Context) error {
 	lockID := schemaLockID
-	
+
 	// Use a transaction to ensure we use the same connection for lock/unlock
 	tx, err := db.Pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %w", err)
 	}
 	defer tx.Rollback(ctx)
-	
+
 	// Acquire advisory lock (blocking - will wait if another init is in progress)
 	_, err = tx.Exec(ctx, "SELECT pg_advisory_lock($1)", lockID)
 	if err != nil {
 		return fmt.Errorf("failed to acquire schema initialization lock: %w", err)
 	}
-	
+
 	// Execute schema with error handling for already-existing objects
 	_, err = tx.Exec(ctx, schemaSQL)
 	if err != nil {
@@ -89,18 +89,18 @@ func (db *DB) InitSchema(ctx context.Context) error {
 		}
 		return fmt.Errorf("failed to initialize schema: %w", err)
 	}
-	
+
 	// Unlock before committing
 	_, err = tx.Exec(ctx, "SELECT pg_advisory_unlock($1)", lockID)
 	if err != nil {
 		return fmt.Errorf("failed to release schema initialization lock: %w", err)
 	}
-	
+
 	// Commit the transaction
 	if err := tx.Commit(ctx); err != nil {
 		return fmt.Errorf("failed to commit schema initialization: %w", err)
 	}
-	
+
 	return nil
 }
 

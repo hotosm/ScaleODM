@@ -2,6 +2,8 @@
 
 ScaleODM implements the NodeODM API specification with S3-native storage, making it a scalable replacement for NodeODM via Argo Workflows.
 
+Looking for the shortest pyodm migration path first? Start with the [quick migration guide](./nodeodm-migrate.md), then return here for full endpoint and behavior reference details.
+
 ## Quick Start: Deploy to Existing Cluster
 
 If you already have Argo Workflows installed in an `argo` namespace:
@@ -10,22 +12,11 @@ If you already have Argo Workflows installed in an `argo` namespace:
 # 1. Create the namespace
 kubectl create namespace scaleodm
 
-# 2. Create the required secrets
-#    Database (external PostgreSQL):
-kubectl create secret generic scaleodm-db-vars \
+# 2. Create the required runtime secret
+kubectl create secret generic scaleodm-secrets \
   --namespace scaleodm \
-  --from-literal=SCALEODM_DATABASE_URL="postgresql://user:pass@your-db:5432/scaleodm?sslmode=require"
-
-#    S3 credentials for the API server:
-kubectl create secret generic scaleodm-s3-vars \
-  --namespace scaleodm \
-  --from-literal=SCALEODM_S3_ENDPOINT="https://s3.amazonaws.com" \
-  --from-literal=SCALEODM_S3_ACCESS_KEY="YOUR_ACCESS_KEY" \
-  --from-literal=SCALEODM_S3_SECRET_KEY="YOUR_SECRET_KEY"
-
-#    S3 credentials for workflow pods (used by rclone inside Argo containers):
-kubectl create secret generic scaleodm-s3-creds \
-  --namespace scaleodm \
+  --from-literal=SCALEODM_DATABASE_URL="postgresql://user:pass@your-db:5432/scaleodm?sslmode=require" \
+  --from-literal=AWS_S3_ENDPOINT="https://s3.amazonaws.com" \
   --from-literal=AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY" \
   --from-literal=AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY" \
   --from-literal=AWS_DEFAULT_REGION="us-east-1"
@@ -35,7 +26,8 @@ helm install scaleodm ./chart \
   --namespace scaleodm \
   --set argo.enabled=false \
   --set database.external.enabled=true \
-  --set s3.external.enabled=true
+  --set s3.external.enabled=true \
+  --set secrets.runtime.name="scaleodm-secrets"
 
 # 4. Verify
 kubectl get pods -n scaleodm
@@ -52,7 +44,7 @@ The processing pipeline for each task:
 2. **Download stage** - Argo workflow pod uses rclone to copy images from S3 to local disk. Supports raw images (jpg/tif) and archives (zip/tar/tar.gz) which are auto-extracted and flattened.
 3. **Process stage** - ODM container processes the images
 4. **Upload stage** - rclone pushes results back to S3 (to `writeS3Path` or `{zipurl}-output/`)
-5. **Query results** - `GET /task/{uuid}/info` for status, `GET /task/{uuid}/download/{asset}` returns a 302 redirect to a pre-signed S3 URL
+5. **Query results** - `GET /task/{uuid}/info` for status, `GET /task/{uuid}/assets` for output discovery, and `GET /task/{uuid}/download/{asset}` for the canonical 302 redirect flow to pre-signed S3 URLs
 
 ## Using with pyodm
 
@@ -182,7 +174,7 @@ Returns node information including queue count and engine version.
 
 ```json
 {
-  "version": "0.2.0",
+  "version": "0.3.0",
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
@@ -207,7 +199,7 @@ Creates a new processing task.
 | `writeS3Path` | | S3 path for outputs. Defaults to `readS3Path/output/`. |
 | `name` | | Task name. Defaults to `odm-project`. |
 | `options` | | JSON array: `[{"name": "dsm", "value": true}]` |
-| `s3Endpoint` | | Custom S3 endpoint (MinIO, etc.) |
+| `s3Endpoint` | | Custom S3 endpoint (MinIO, Garage, etc.). Must be reachable from workflow pods. |
 | `s3Region` | | S3 region. Defaults to `us-east-1`. |
 | `webhook` | | Callback URL on completion. |
 | `skipPostProcessing` | | Skip point cloud tiles. |
@@ -216,6 +208,11 @@ Creates a new processing task.
 
 When using `zipurl`, outputs are written to `{zipurl}-output/`.
 When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `writeS3Path`).
+
+If `s3Endpoint` is provided, ScaleODM applies that endpoint to workflow pods and API-side
+S3 operations (image counting, log fallback, and pre-signed downloads). Endpoints are
+normalized to scheme+host[:port] and local S3-compatible systems use path-style bucket
+addressing.
 
 **Response:** `{"uuid": "odm-pipeline-abc123"}`
 
@@ -243,8 +240,44 @@ Failed tasks include an error message: `{"status": {"code": 30, "errorMessage": 
 #### `GET /task/{uuid}/output`
 Console output. Query param `line` to start from a specific line.
 
+#### `GET /task/{uuid}/assets`
+Additive convenience endpoint for explicit output discovery.
+
+Query params:
+
+- `includeAdditional` (default `false`): when true, includes discovered non-primary files.
+- `additionalLimit` (default `100`, max `1000`): cap for additional discovered files.
+
+Response shape:
+
+```json
+{
+  "primary": [
+    {
+      "id": "all_zip",
+      "asset": "all.zip",
+      "exists": true,
+      "downloadUrl": "/task/odm-pipeline-abc/download/all.zip"
+    },
+    {
+      "id": "point_cloud",
+      "asset": "georeferenced_model.laz",
+      "exists": false
+    }
+  ],
+  "additional": [
+    {
+      "asset": "report.pdf",
+      "downloadUrl": "/task/odm-pipeline-abc/download/report.pdf"
+    }
+  ]
+}
+```
+
+Primary assets are always returned as exists/missing using a bounded check set (`all.zip`, `orthophoto.tif`, `dsm.tif`, `dtm.tif`, and first-match point-cloud candidates).
+
 #### `GET /task/{uuid}/download/{asset}`
-HTTP 302 redirect to a pre-signed S3 URL (1 hour expiry). Assets: `all.zip`, `orthophoto.tif`, `dsm.tif`, `dtm.tif`.
+Canonical download endpoint. Returns HTTP 302 redirect to a pre-signed S3 URL (1 hour expiry). The new `/assets` endpoint returns URLs pointing here (not direct pre-signed URLs), so existing redirect semantics remain unchanged.
 
 #### `POST /task/cancel`
 Body: `{"uuid": "..."}` → `{"success": true}`
@@ -288,18 +321,20 @@ argo:
 database:
   external:
     enabled: true
-    secret:
-      name: "scaleodm-db-vars"
-      key: "SCALEODM_DATABASE_URL"
 
 s3:
   external:
     enabled: true
-    secret:
-      name: "scaleodm-s3-vars"
-  workflowSecret:
-    name: "scaleodm-s3-creds"
-    region: "us-east-1"
+
+secrets:
+  runtime:
+    name: "scaleodm-secrets"
+    keys:
+      databaseUrl: "SCALEODM_DATABASE_URL"
+      s3Endpoint: "AWS_S3_ENDPOINT"
+      accessKey: "AWS_ACCESS_KEY_ID"
+      secretKey: "AWS_SECRET_ACCESS_KEY"
+      region: "AWS_DEFAULT_REGION"
 
 api:
   replicaCount: 2  # HA - also creates a PodDisruptionBudget

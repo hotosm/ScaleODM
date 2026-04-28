@@ -4,7 +4,7 @@ services:
   api:
     build:
       target: build
-    # Use .test.env to force local Garage S3 settings for test runs.
+    # Use .test.env to force local RustFS S3 settings for test runs.
     env_file: .test.env
     command: test -timeout=5m -v -p 1 -tags=e2e ./...
     restart: "no"

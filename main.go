@@ -1,6 +1,6 @@
 // REST API for job queue management
 // @title           ScaleODM Job Queue API
-// @version         0.2.0
+// @version         0.3.0
 // @description     NodeODM-compatible API for managing distributed ODM jobs via Argo Workflows
 // @contact.name    Sam Woodcock
 // @contact.url     https://slack.hotosm.org
@@ -28,6 +28,7 @@ import (
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/db"
 	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -55,6 +56,26 @@ func main() {
 	log.Println("Validating environment variables...")
 	config.ValidateEnv()
 	log.Printf("Environment validation complete (took %v)", time.Since(startTime))
+
+	obsShutdown := func(context.Context) error { return nil }
+	obsConfig := observability.Config{
+		Enabled:          config.SCALEODM_OBSERVABILITY_ENABLED,
+		ServiceName:      config.SCALEODM_OBSERVABILITY_SERVICE_NAME,
+		ServiceVersion:   config.SCALEODM_OBSERVABILITY_SERVICE_VERSION,
+		OTLPEndpoint:     config.SCALEODM_OBSERVABILITY_OTLP_ENDPOINT,
+		OTLPInsecure:     config.SCALEODM_OBSERVABILITY_OTLP_INSECURE,
+		MetricsEnabled:   config.SCALEODM_OBSERVABILITY_METRICS_ENABLED,
+		TracesEnabled:    config.SCALEODM_OBSERVABILITY_TRACES_ENABLED,
+		TraceSampleRatio: config.SCALEODM_OBSERVABILITY_TRACE_SAMPLE_RATIO,
+	}
+	if shutdownFn, err := observability.Init(ctx, obsConfig); err != nil {
+		log.Printf("observability init failed, continuing without telemetry: %v", err)
+	} else {
+		obsShutdown = shutdownFn
+		if config.SCALEODM_OBSERVABILITY_ENABLED {
+			log.Printf("observability enabled service=%s version=%s traces=%t metrics=%t endpoint=%q", obsConfig.ServiceName, obsConfig.ServiceVersion, obsConfig.TracesEnabled, obsConfig.MetricsEnabled, obsConfig.OTLPEndpoint)
+		}
+	}
 
 	// Database connection
 	log.Println("Connecting to database...")
@@ -104,11 +125,32 @@ func main() {
 		// Create API (register routes and get the HTTP handler)
 		apiObj, handler := api.NewAPI(metadataStore, wfClient)
 		_ = apiObj
+		handler = observability.WrapHTTPHandler(handler)
+
+		readHeaderTimeout := time.Duration(config.SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS) * time.Second
+		if readHeaderTimeout <= 0 {
+			readHeaderTimeout = 10 * time.Second
+		}
+		readTimeout := time.Duration(config.SCALEODM_SERVER_READ_TIMEOUT_SECONDS) * time.Second
+		if readTimeout <= 0 {
+			readTimeout = 30 * time.Second
+		}
+		writeTimeout := time.Duration(config.SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS) * time.Second
+		if writeTimeout <= 0 {
+			writeTimeout = 300 * time.Second
+		}
+		idleTimeout := time.Duration(config.SCALEODM_SERVER_IDLE_TIMEOUT_SECONDS) * time.Second
+		if idleTimeout <= 0 {
+			idleTimeout = 120 * time.Second
+		}
 
 		srv := &http.Server{
 			Addr:              fmt.Sprintf(":%d", options.Port),
 			Handler:           handler,
-			ReadHeaderTimeout: 10 * time.Second,
+			ReadHeaderTimeout: readHeaderTimeout,
+			ReadTimeout:       readTimeout,
+			WriteTimeout:      writeTimeout,
+			IdleTimeout:       idleTimeout,
 		}
 
 		hooks.OnStart(func() {
@@ -150,6 +192,12 @@ func main() {
 		}
 	default:
 		// Server never started
+	}
+
+	obsShutdownCtx, obsShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer obsShutdownCancel()
+	if err := obsShutdown(obsShutdownCtx); err != nil {
+		log.Printf("observability shutdown error: %v", err)
 	}
 
 	log.Println("Shutdown complete")

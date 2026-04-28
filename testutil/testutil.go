@@ -52,7 +52,7 @@ func WaitForDB(dbURL string, timeout time.Duration) error {
 }
 
 // TestS3Endpoint returns the S3 endpoint for tests.
-// We deliberately ignore any production SCALEODM_S3_ENDPOINT override so that
+// We deliberately ignore any production AWS_S3_ENDPOINT override so that
 // the test suite never talks to a real AWS S3 endpoint just because the
 // developer has those env vars set in their shell.
 func TestS3Endpoint() string {
@@ -78,10 +78,10 @@ func SetupTestS3Bucket(ctx context.Context, bucketName string) error {
 	endpoint := TestS3Endpoint()
 	accessKey := TestS3AccessKey()
 	secretKey := TestS3SecretKey()
-	
+
 	// Debug: log the credentials being used (without exposing the full secret)
 	if len(secretKey) > 0 {
-		fmt.Printf("DEBUG: Setting up S3 bucket with endpoint=%q, accessKey=%q, secretKeyLen=%d\n", 
+		fmt.Printf("DEBUG: Setting up S3 bucket with endpoint=%q, accessKey=%q, secretKeyLen=%d\n",
 			endpoint, accessKey, len(secretKey))
 	}
 
