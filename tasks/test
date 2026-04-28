@@ -318,6 +318,8 @@ chart-ingress-guardrails:
 
   echo "Running chart ingress guardrail checks..."
 
+  just chart dependencies
+
   RENDERED_FILE=$(mktemp)
   ERROR_FILE=$(mktemp)
   trap 'rm -f "$RENDERED_FILE" "$ERROR_FILE"' EXIT
