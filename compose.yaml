@@ -65,7 +65,7 @@ services:
       - POSTGRES_PASSWORD=odm
       - POSTGRES_DB=scaleodm
     volumes:
-      - db_data:/var/lib/postgresql/data/
+      - db_data:/var/lib/postgresql
     ports:
       - "31101:5432"
     networks:
