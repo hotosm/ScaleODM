@@ -411,7 +411,7 @@ all:
   }
   trap cleanup EXIT
 
-  docker compose $COMPOSE_TEST_ARGS up --detach --wait db s3 s3-init api || {
+  docker compose $COMPOSE_TEST_ARGS up --detach --wait db s3 s3-init || {
     echo "❌ Failed to start test dependencies."
     docker compose $COMPOSE_TEST_ARGS ps || true
     docker compose $COMPOSE_TEST_ARGS logs --no-color --tail=120 api db s3 s3-init || true

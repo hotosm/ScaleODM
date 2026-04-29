@@ -8,8 +8,6 @@ services:
     env_file: .test.env
     command: test -timeout=5m -v -p 1 -tags=e2e ./...
     restart: "no"
-    healthcheck:
-      disable: true
 
 volumes:
   test-cache:
