@@ -37,8 +37,6 @@ You do **not** need to add a classic HTTP Helm repo; you can install directly fr
 helm install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
   --namespace scaleodm --create-namespace \
   --version <chart-version> \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
   --set secrets.runtime.name="scaleodm-secrets" \
   --set argo.enabled=true
 ```
@@ -51,8 +49,6 @@ Replace `<chart-version>` with the desired chart version (e.g. the latest releas
 # Install from the local `./chart` directory
 helm install scaleodm ./chart \
   --namespace scaleodm --create-namespace \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
   --set secrets.runtime.name="scaleodm-secrets" \
   --set argo.enabled=true
 ```
@@ -64,24 +60,12 @@ By default, Argo Workflows is installed as a subchart in the `argo` namespace:
 ```bash
 helm install scaleodm ./chart \
   --namespace scaleodm --create-namespace \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
   --set secrets.runtime.name="scaleodm-secrets" \
   --set argo.enabled=true
 ```
 
-### Install without Argo Workflows Subchart
-
-If Argo Workflows is already installed in your cluster:
-
-```bash
-helm install scaleodm ./chart \
-  --namespace scaleodm --create-namespace \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
-  --set secrets.runtime.name="scaleodm-secrets" \
-  --set argo.enabled=false
-```
+> To install without the Argo workflow subchart, use:
+> `--set argo.enabled=false`
 
 ## Configuration
 
@@ -89,9 +73,9 @@ helm install scaleodm ./chart \
 
 At least one database and one S3 configuration path must be provided:
 
-- **Database** (choose one):
-  - `database.external.enabled=true` with `secrets.runtime.name` pointing at a Secret key that contains the full PostgreSQL URI under `secrets.runtime.keys.databaseUrl` (default key `SCALEODM_DATABASE_URL`), or
-  - `database.postgres.enabled=true` and corresponding `database.postgres.auth.*` for the bundled Postgres subchart.
+- **Database**:
+  - Provide `SCALEODM_DATABASE_URL` in the Secret named by `secrets.runtime.name`, using key `secrets.runtime.keys.databaseUrl` (default key `SCALEODM_DATABASE_URL`), or
+  - set `database.postgres.enabled=true` and corresponding `database.postgres.auth.*` for the bundled Postgres subchart.
 
 - **S3** (same unified runtime secret in the release namespace):
   - `secrets.runtime.name` must point to a Secret containing:
@@ -195,8 +179,6 @@ Example: AWS / EKS production with `gp3`
 helm upgrade --install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
   --namespace scaleodm --create-namespace \
   --version <chart-version> \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
   --set secrets.runtime.name="scaleodm-secrets" \
   --set config.workflow.workspace.mode="pvc" \
   --set config.workflow.workspace.storageClass="gp3" \
@@ -212,8 +194,6 @@ Example: lightweight test cluster with `emptyDir`
 helm upgrade --install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
   --namespace scaleodm --create-namespace \
   --version <chart-version> \
-  --set database.external.enabled=true \
-  --set s3.external.enabled=true \
   --set secrets.runtime.name="scaleodm-secrets" \
   --set config.workflow.workspace.mode="emptyDir"
 ```
@@ -237,36 +217,25 @@ kubectl create secret generic scaleodm-secrets \
 Then install:
 
 ```bash
---set database.external.enabled=true \
---set s3.external.enabled=true \
 --set secrets.runtime.name="scaleodm-secrets"
 ```
 
 `AWS_DEFAULT_REGION` is optional for runtime compatibility. If omitted, ScaleODM workflow/runtime defaults to `us-east-1`; set it explicitly when your S3-compatible backend requires a different region.
 
-### Bundled Postgres
+### RustFS subchart (local dev/test)
 
-To deploy a Postgres instance via the bundled Bitnami subchart:
-
-```bash
---set database.postgres.enabled=true \
---set database.postgres.auth.password="your-password"
-```
-
-### Bundled Garage
-
-To deploy Garage in-cluster:
+To deploy in-cluster RustFS for local chart testing:
 
 ```bash
 --set s3.external.enabled=false \
---set s3.garage.enabled=true \
---set s3.garage.admin.token="<garage-admin-token>" \
---set s3.garage.rpc.secret="<garage-rpc-secret>" \
---set s3.garage.auth.accessKey="<s3-access-key>" \
---set s3.garage.auth.secretKey="<s3-secret-key>"
+--set s3.rustfs.enabled=true \
+--set s3.rustfs.auth.accessKey="odm" \
+--set s3.rustfs.auth.secretKey="somelongpassword"
 ```
 
-## Argo Workflows Configuration
+In this mode the chart synthesizes `AWS_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` in the unified runtime secret.
+
 
 ### Deploy Argo Workflows via Subchart
 
@@ -376,24 +345,20 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `api.service.port` | Service port | `31100` |
 | `api.probes.livenessPath` | Liveness probe path | `"/__lbheartbeat__"` |
 | `api.probes.readinessPath` | Readiness probe path | `"/__heartbeat__"` |
-| `database.external.enabled` | Use external PostgreSQL via existing Secret | `true` |
 | `secrets.runtime.name` | Unified runtime Secret used by API + workflow pods | `"scaleodm-secrets"` |
 | `secrets.runtime.keys.databaseUrl` | Key in runtime Secret for DB URI | `"SCALEODM_DATABASE_URL"` |
-| `database.external.secret.name` | Deprecated alias for `secrets.runtime.name` | `""` |
-| `database.external.secret.key` | Deprecated alias for `secrets.runtime.keys.databaseUrl` | `""` |
 | `database.postgres.enabled` | Deploy bundled Postgres subchart | `false` |
-| `s3.external.secret.name` | Deprecated alias for `secrets.runtime.name` | `""` |
-| `s3.external.secret.keys.endpoint` | Deprecated alias for `secrets.runtime.keys.s3Endpoint` | `""` |
-| `s3.external.secret.keys.accessKey` | Deprecated alias for `secrets.runtime.keys.accessKey` | `""` |
-| `s3.external.secret.keys.secretKey` | Deprecated alias for `secrets.runtime.keys.secretKey` | `""` |
+| `s3.external.enabled` | Use external S3 from pre-created runtime secret | `true` |
+| `s3.rustfs.enabled` | Deploy RustFS subchart for in-cluster S3 | `false` |
+| `s3.rustfs.endpoint` | Optional override for RustFS service host used in runtime secret | `""` |
+| `s3.rustfs.port` | RustFS service port used in runtime secret | `9000` |
+| `s3.rustfs.auth.accessKey` | RustFS access key for synthesized runtime secret | `"odm"` |
+| `s3.rustfs.auth.secretKey` | RustFS secret key for synthesized runtime secret | `"somelongpassword"` |
+| `s3.rustfs.region` | Region value written to runtime secret in RustFS mode | `"us-east-1"` |
 | `secrets.runtime.keys.s3Endpoint` | Key in runtime Secret for S3 endpoint | `"AWS_S3_ENDPOINT"` |
 | `secrets.runtime.keys.accessKey` | Key in runtime Secret for S3 access key | `"AWS_ACCESS_KEY_ID"` |
 | `secrets.runtime.keys.secretKey` | Key in runtime Secret for S3 secret key | `"AWS_SECRET_ACCESS_KEY"` |
 | `secrets.runtime.keys.region` | Key in runtime Secret for AWS region | `"AWS_DEFAULT_REGION"` |
-| `s3.external.enabled` | Use external S3 endpoint | `true` |
-| `s3.workflowSecret.name` | Deprecated alias for `secrets.runtime.name` | `""` |
-| `s3.workflowSecret.region` | Deprecated alias used for chart-managed region value | `""` |
-| `s3.garage.enabled` | Deploy bundled Garage in-cluster | `false` |
 | `config.workflow.workspace.mode` | Workspace storage mode (`auto|emptyDir|pvc`) | `"auto"` |
 | `config.workflow.workspace.size` | Workspace PVC size request | `"30Gi"` |
 | `config.workflow.workspace.storageClass` | Workspace PVC storage class (empty = unset) | `""` |

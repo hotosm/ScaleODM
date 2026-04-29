@@ -1,8 +1,8 @@
-{{- $runtimeSecretName := coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name -}}
-{{- $runtimeDatabaseKey := coalesce .Values.database.external.secret.key .Values.secrets.runtime.keys.databaseUrl -}}
-{{- $runtimeS3EndpointKey := coalesce .Values.s3.external.secret.keys.endpoint .Values.secrets.runtime.keys.s3Endpoint -}}
-{{- $runtimeS3AccessKey := coalesce .Values.s3.external.secret.keys.accessKey .Values.secrets.runtime.keys.accessKey -}}
-{{- $runtimeS3SecretKey := coalesce .Values.s3.external.secret.keys.secretKey .Values.secrets.runtime.keys.secretKey -}}
+{{- $runtimeSecretName := .Values.secrets.runtime.name -}}
+{{- $runtimeDatabaseKey := .Values.secrets.runtime.keys.databaseUrl -}}
+{{- $runtimeS3EndpointKey := .Values.secrets.runtime.keys.s3Endpoint -}}
+{{- $runtimeS3AccessKey := .Values.secrets.runtime.keys.accessKey -}}
+{{- $runtimeS3SecretKey := .Values.secrets.runtime.keys.secretKey -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -55,33 +55,22 @@ spec:
                 secretKeyRef:
                   name: {{ $runtimeSecretName }}
                   key: {{ $runtimeS3EndpointKey }}
-                  {{- if .Values.s3.external.enabled }}
-                  optional: true
-                  {{- end }}
             - name: AWS_ACCESS_KEY_ID
               valueFrom:
                 secretKeyRef:
                   name: {{ $runtimeSecretName }}
                   key: {{ $runtimeS3AccessKey }}
-                  {{- if .Values.s3.external.enabled }}
-                  optional: true
-                  {{- end }}
             - name: AWS_SECRET_ACCESS_KEY
               valueFrom:
                 secretKeyRef:
                   name: {{ $runtimeSecretName }}
                   key: {{ $runtimeS3SecretKey }}
-                  {{- if .Values.s3.external.enabled }}
-                  optional: true
-                  {{- end }}
             - name: AWS_S3_SECRET_NAME
               value: {{ $runtimeSecretName | quote }}
             - name: K8S_NAMESPACE
               value: {{ .Release.Namespace | quote }}
             - name: SCALEODM_ODM_IMAGE
               value: {{ .Values.config.odmImage | quote }}
-            - name: ENQUEUE_TEST_JOBS
-              value: {{ .Values.config.enqueueTestJobs | quote }}
             - name: SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST
               value: {{ .Values.config.s3EndpointPolicy.enforceAllowlist | quote }}
             - name: SCALEODM_ALLOWED_S3_ENDPOINTS

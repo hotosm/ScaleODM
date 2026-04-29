@@ -66,20 +66,9 @@ secrets:
 
 # Database configuration
 database:
-  # Use an existing Kubernetes Secret for runtime variables.
-  # The secret should contain a key with the full PostgreSQL URI
-  # (e.g. postgres://user:password@host:port/database?sslmode=disable).
-  external:
-    enabled: true
-    secret:
-      # Deprecated compatibility alias for secrets.runtime.name.
-      name: ""
-      # Deprecated compatibility alias for secrets.runtime.keys.databaseUrl.
-      key: ""
-
-  # Optional: Deploy PostgreSQL as a subchart when external.enabled is false.
-  # NOTE: This path is mainly for development; for production, prefer an
-  # operator-managed or externally provisioned database and runtime secret.
+  # Optional: Deploy PostgreSQL as a subchart.
+  # NOTE: For production, prefer an operator-managed or externally provisioned
+  # database and provide SCALEODM_DATABASE_URL via secrets.runtime.
   postgres:
     enabled: false
     auth:
@@ -93,49 +82,21 @@ database:
 
 # S3 configuration
 s3:
-  # Use an existing Kubernetes Secret for S3 configuration. This secret
-  # must live in the same namespace as ScaleODM (the release namespace)
-  # and contain the keys configured under secrets.runtime.keys.
-  # AWS_DEFAULT_REGION defaults to us-east-1 in runtime if omitted, but set it
-  # explicitly in the runtime secret when your object store requires a specific region.
+  # Use an externally managed S3-compatible object store via runtime secret keys.
   external:
     enabled: true
-    secret:
-      # Deprecated compatibility alias for secrets.runtime.name.
-      name: ""
-      keys:
-        # Deprecated compatibility aliases for secrets.runtime.keys.*.
-        endpoint: ""
-        accessKey: ""
-        secretKey: ""
 
-  # Deprecated compatibility alias for secrets.runtime.* in workflow pods.
-  workflowSecret:
-    name: ""
-    region: ""
-
-  # Optional: Deploy Garage S3 in-cluster when external.enabled is false.
-  garage:
+  # Optional: deploy RustFS in-cluster for local development/testing.
+  # When enabled, set s3.external.enabled=false so the chart can synthesize
+  # runtime secret S3 keys from these values.
+  rustfs:
     enabled: false
-    image:
-      repository: docker.io/dxflrs/garage
-      tag: v1.3.1
-      pullPolicy: IfNotPresent
+    endpoint: ""
+    port: 9000
     auth:
-      accessKey: ""
-      secretKey: ""
-    bucket:
-      name: scaleodm
-      keyName: scaleodm
-    admin:
-      token: ""
-    rpc:
-      secret: ""
-      replicationFactor: 1
-    persistence:
-      enabled: true
-      size: 100Gi
-      storageClass: ""
+      accessKey: "odm"
+      secretKey: "somelongpassword"
+    region: "us-east-1"
 
 # Kubernetes configuration
 kubernetes:
@@ -161,9 +122,6 @@ kubernetes:
 config:
   # ODM image to use in workflows
   odmImage: "docker.io/opendronemap/odm:3.5.6"
-
-  # Enqueue test jobs (for testing)
-  enqueueTestJobs: "false"
 
   s3EndpointPolicy:
     enforceAllowlist: false
@@ -295,6 +253,9 @@ argo:
 # Ingress configuration (optional, UI-only)
 ingress:
   # Enables ingress that exposes only /ui and /ui/... routes.
+  # This is safe with api.service.type=ClusterIP because browser requests hit
+  # /ui/api on the same ingress host, then the in-cluster UI handler fetches
+  # internal data server-side and returns JSON to the browser.
   # Security guardrail: requires config.ui.enabled=true.
   enabled: false
   className: ""
@@ -302,9 +263,4 @@ ingress:
   # Hostnames for the UI-only ingress rule.
   hosts:
     - host: scaleodm.local
-      # paths are accepted for backward compatibility but ignored;
-      # chart ingress always routes only /ui with Prefix pathType.
-      paths:
-        - path: /
-          pathType: Prefix
   tls: []

@@ -1,9 +1,7 @@
 1. Get the application URL by running these commands:
 {{- if .Values.ingress.enabled }}
 {{- range $host := .Values.ingress.hosts }}
-  {{- range .paths }}
-  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}{{ .path }}
-  {{- end }}
+  http{{ if $.Values.ingress.tls }}s{{ end }}://{{ $host.host }}/ui
 {{- end }}
 {{- else if contains "NodePort" .Values.api.service.type }}
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "scaleodm.fullname" . }})
@@ -48,27 +46,23 @@
    ScaleODM workflows will run in namespace: {{ .Release.Namespace }}
 {{- end }}
 
-{{- if not .Values.database.external.enabled }}
+{{- if not .Values.database.postgres.enabled }}
+5. Database:
+   Using external database from runtime secret '{{ .Values.secrets.runtime.name }}'.
+{{- else }}
 5. Database:
    PostgreSQL has been deployed as a subchart.
-   Connection details are in the secret: {{ include "scaleodm.fullname" . }}-secret
 {{- end }}
 
-{{- if not .Values.s3.external.enabled }}
 6. S3 Storage:
-   {{- if .Values.s3.garage.enabled }}
-   Garage S3 has been deployed in-cluster.
-   Unified runtime secret (API + workflow) in namespace {{ .Release.Namespace }}:
-   {{ coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name }}
+   {{- if .Values.s3.external.enabled }}
+   External S3 mode enabled.
+   Ensure runtime secret '{{ .Values.secrets.runtime.name }}' exists in namespace '{{ .Release.Namespace }}'.
+   {{- else if .Values.s3.rustfs.enabled }}
+   RustFS subchart mode enabled (in-cluster S3).
+   Runtime secret '{{ .Values.secrets.runtime.name }}' is populated with RustFS endpoint/credentials by this chart.
    {{- else }}
-   External S3 is disabled, but bundled Garage is also disabled.
-   Set s3.garage.enabled=true or provide an external S3 secret.
+   Invalid configuration: set s3.external.enabled=true or set s3.rustfs.enabled=true.
    {{- end }}
-{{- else }}
-6. S3 Storage:
-   External S3 is enabled.
-   Ensure unified runtime secret '{{ coalesce .Values.database.external.secret.name .Values.s3.external.secret.name .Values.s3.workflowSecret.name .Values.secrets.runtime.name }}'
-   exists in namespace '{{ .Release.Namespace }}' (same namespace as ScaleODM).
    Required keys: SCALEODM_DATABASE_URL, AWS_S3_ENDPOINT, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY.
    Optional key: AWS_DEFAULT_REGION (runtime defaults to us-east-1 when omitted).
-{{- end }}
