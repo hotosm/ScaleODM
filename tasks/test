@@ -405,7 +405,25 @@ all:
   just test build-api-image
 
   echo "Running tests..."
-  docker compose -f compose.yaml -f compose.test.yaml run --rm api
+  COMPOSE_TEST_ARGS="-f compose.yaml -f compose.test.yaml"
+  cleanup() {
+    docker compose $COMPOSE_TEST_ARGS down --remove-orphans || true
+  }
+  trap cleanup EXIT
+
+  docker compose $COMPOSE_TEST_ARGS up --detach --wait db s3 s3-init api || {
+    echo "❌ Failed to start test dependencies."
+    docker compose $COMPOSE_TEST_ARGS ps || true
+    docker compose $COMPOSE_TEST_ARGS logs --no-color --tail=120 api db s3 s3-init || true
+    exit 1
+  }
+
+  docker compose $COMPOSE_TEST_ARGS run --rm api || {
+    echo "❌ Test run failed."
+    docker compose $COMPOSE_TEST_ARGS ps || true
+    docker compose $COMPOSE_TEST_ARGS logs --no-color --tail=120 api db s3 s3-init || true
+    exit 1
+  }
 
 # Run unit tests only (no external dependencies)
 unit:

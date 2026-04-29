@@ -28,7 +28,14 @@ generate-openapi:
   }
   trap cleanup EXIT
 
-  docker compose $COMPOSE_DOCS_ARGS up -d db s3 s3-init api
+  docker compose $COMPOSE_DOCS_ARGS up --detach --wait db s3 s3-init api || {
+    echo "❌ Failed to start docs dependencies."
+    echo "docker compose status:"
+    docker compose $COMPOSE_DOCS_ARGS ps || true
+    echo "Recent container logs:"
+    docker compose $COMPOSE_DOCS_ARGS logs --no-color --tail=120 api db s3 s3-init || true
+    exit 1
+  }
 
   # Wait for API to be ready
   echo "⏳ Waiting for API to be ready..."
