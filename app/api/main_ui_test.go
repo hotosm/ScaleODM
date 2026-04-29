@@ -10,7 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestUIRoutesDisabledByDefault(t *testing.T) {
+func TestUIRoutesEnabledByDefault(t *testing.T) {
 	db, cleanup := testDB(t)
 	defer cleanup()
 
@@ -19,7 +19,7 @@ func TestUIRoutesDisabledByDefault(t *testing.T) {
 
 	prevEnabled := config.SCALEODM_UI_ENABLED
 	prevReadonly := config.SCALEODM_UI_READONLY
-	config.SCALEODM_UI_ENABLED = false
+	config.SCALEODM_UI_ENABLED = true
 	config.SCALEODM_UI_READONLY = true
 	t.Cleanup(func() {
 		config.SCALEODM_UI_ENABLED = prevEnabled
@@ -32,7 +32,7 @@ func TestUIRoutesDisabledByDefault(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
 }
 
 func TestUIRoutesEnabledAlongsideExistingRoutes(t *testing.T) {

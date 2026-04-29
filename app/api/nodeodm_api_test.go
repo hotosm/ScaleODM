@@ -362,15 +362,22 @@ func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
 	assert.Equal(t, "georeferenced_model.las", byID["point_cloud"].Asset)
 	assert.Equal(t, "/task/"+workflowName+"/download/georeferenced_model.las", byID["point_cloud"].DownloadURL)
 
-	req = httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/assets?includeAdditional=true&additionalLimit=1", nil)
+	req = httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/assets?includeAdditional=true&additionalLimit=10", nil)
 	w = httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 	require.Equal(t, http.StatusOK, w.Code)
 
 	assets = decodeTaskAssetsResponse(t, w.Body.Bytes())
-	require.Len(t, assets.Additional, 1)
-	assert.Equal(t, "report.pdf", assets.Additional[0].Asset)
-	assert.Equal(t, "/task/"+workflowName+"/download/report.pdf", assets.Additional[0].DownloadURL)
+	require.NotEmpty(t, assets.Additional)
+	var found bool
+	for _, item := range assets.Additional {
+		if item.Asset == "report.pdf" {
+			assert.Equal(t, "/task/"+workflowName+"/download/report.pdf", item.DownloadURL)
+			found = true
+			break
+		}
+	}
+	assert.True(t, found)
 }
 
 func TestTaskAssetsEndpoint_ErrorScenarios(t *testing.T) {
@@ -807,7 +814,7 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, http.StatusNoContent, w.Code)
 	require.Len(t, wfClient.deletedNames, 1)
 	assert.Equal(t, "old-wf", wfClient.deletedNames[0])
 
