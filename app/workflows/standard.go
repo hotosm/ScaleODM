@@ -662,7 +662,7 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 			Entrypoint:            "main",
 			OnExit:                "cleanup",
 			ServiceAccountName:    cfg.ServiceAccount,
-			PodSpecPatch:          `{"securityContext":{"runAsNonRoot":true,"fsGroup":1000,"seccompProfile":{"type":"RuntimeDefault"}}}`,
+			PodSpecPatch:          `{"securityContext":{"fsGroup":1000,"seccompProfile":{"type":"RuntimeDefault"}}}`,
 			ActiveDeadlineSeconds: &activeDeadline,
 			TTLStrategy: &wfv1.TTLStrategy{
 				SecondsAfterSuccess: &ttlSuccess,

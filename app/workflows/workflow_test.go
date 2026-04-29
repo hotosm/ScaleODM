@@ -164,7 +164,7 @@ func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
 	require.NotNil(t, wf.Spec.TTLStrategy.SecondsAfterFailure)
 	require.NotNil(t, wf.Spec.PodGC)
 	require.NotNil(t, wf.Spec.Templates[0].RetryStrategy)
-	assert.Contains(t, wf.Spec.PodSpecPatch, `"runAsNonRoot":true`)
+	assert.NotContains(t, wf.Spec.PodSpecPatch, `"runAsNonRoot"`)
 	assert.Contains(t, wf.Spec.PodSpecPatch, `"seccompProfile":{"type":"RuntimeDefault"}`)
 
 	containers := wf.Spec.Templates[0].ContainerSet.Containers

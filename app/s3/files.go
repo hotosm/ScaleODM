@@ -43,8 +43,9 @@ mkdir -p "$DEST_DIR"
 
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
 # This avoids the RCLONE_CONFIG_* env var filtering issue
-mkdir -p /config/rclone
-export RCLONE_CONFIG=/config/rclone/rclone.conf
+RCLONE_DIR="/workspace/$JOB_ID/.rclone"
+mkdir -p "$RCLONE_DIR"
+export RCLONE_CONFIG="$RCLONE_DIR/rclone.conf"
 
 ` + rcloneS3ConfigSnippet() + `
 
@@ -158,7 +159,7 @@ find "$DEST_DIR" -type d ! -path "*/output/*" -empty -delete
 
 echo "Flattening directory structure..."
 FLAT_DIR="$DEST_DIR"
-TEMP_LIST=$(mktemp)
+TEMP_LIST="$DEST_DIR/.flatten-list.txt"
 
 # Find image files, excluding any in output directories
 find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) \
@@ -201,11 +202,14 @@ func GenerateUploadScript(destPath string) string {
 echo "Running final upload..."
 
 DEST_PATH="` + destPath + `"
+JOB_ID="{{workflow.name}}"
+SRC_DIR="/workspace/$JOB_ID"
 
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
 # This avoids the RCLONE_CONFIG_* env var filtering issue
-mkdir -p /config/rclone
-export RCLONE_CONFIG=/config/rclone/rclone.conf
+RCLONE_DIR="$SRC_DIR/.rclone"
+mkdir -p "$RCLONE_DIR"
+export RCLONE_CONFIG="$RCLONE_DIR/rclone.conf"
 
 ` + rcloneS3ConfigSnippet() + `
 
@@ -233,7 +237,7 @@ else
 fi
 echo "AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-not set}"
 
-TEST_FILE="$(mktemp)"
+TEST_FILE="$SRC_DIR/.s3-write-test-local-$(date +%s).txt"
 echo "s3 write test $(date)" > "$TEST_FILE"
 TEST_OBJECT="$S3_REMOTE/.s3-write-test-$(date +%s)"
 
@@ -257,9 +261,6 @@ fi
 
 rm -f "$TEST_FILE"
 
-JOB_ID="{{workflow.name}}"
-SRC_DIR="/workspace/$JOB_ID"
-
 echo "Job ID: $JOB_ID"
 echo "Source: $SRC_DIR"
 echo "Destination: $DEST_PATH"
@@ -270,7 +271,7 @@ echo "Listing ODM imagery products..."
 ls -lh "$SRC_DIR"
 
 echo "Uploading to S3..."
-if ! rclone copy "$SRC_DIR" "$S3_REMOTE" --progress; then
+if ! rclone copy "$SRC_DIR" "$S3_REMOTE" --exclude ".rclone/**" --progress; then
   echo "Upload failed."
   exit 1
 fi
@@ -288,14 +289,15 @@ echo "Collecting workflow logs..."
 DEST_PATH="` + destPath + `"
 
 # Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
-mkdir -p /config/rclone
-export RCLONE_CONFIG=/config/rclone/rclone.conf
+JOB_ID="{{workflow.name}}"
+WORKSPACE_DIR="/workspace/$JOB_ID"
+RCLONE_DIR="$WORKSPACE_DIR/.rclone"
+mkdir -p "$RCLONE_DIR"
+export RCLONE_CONFIG="$RCLONE_DIR/rclone.conf"
 
 ` + rcloneS3ConfigSnippet() + `
 
-JOB_ID="{{workflow.name}}"
-WORKSPACE_DIR="/workspace/$JOB_ID"
-LOG_FILE="/tmp/workflow-logs.txt"
+LOG_FILE="$WORKSPACE_DIR/.workflow-logs.txt"
 
 # Collect logs from all containers and combine into single log file
 echo "=== Workflow Logs for $JOB_ID ===" > "$LOG_FILE"
