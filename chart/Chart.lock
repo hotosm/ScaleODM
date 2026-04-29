@@ -1,9 +1,12 @@
 dependencies:
 - name: argo-workflows
   repository: https://argoproj.github.io/argo-helm
-  version: 0.45.28
+  version: 1.0.13
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 15.5.17
-digest: sha256:96242786c989ffc363eca9fedf7e74c9e67de4f8c45098af5d7316886f2458e2
-generated: "2026-03-05T14:15:26.127861451Z"
+- name: rustfs
+  repository: https://charts.rustfs.com
+  version: 1.0.0-beta.1
+digest: sha256:2bc25c35d9d76ebaaa0a6f8ca5aaa7542b411a21c82f06ec4ee4fee81ddd1cba
+generated: "2026-04-29T21:33:13.19233937+01:00"
