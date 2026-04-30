@@ -400,6 +400,10 @@ func s3SecretEnvVars(cfg *ODMPipelineConfig) []apiv1.EnvVar {
 
 	envVars := []apiv1.EnvVar{
 		{
+			Name: "TMPDIR",
+			Value: "/tmp",
+		},
+		{
 			Name: "AWS_ACCESS_KEY_ID",
 			ValueFrom: &apiv1.EnvVarSource{
 				SecretKeyRef: &apiv1.SecretKeySelector{
@@ -541,6 +545,12 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 			Command:         []string{"/bin/bash", "-c"},
 			Resources:       containerRequirements(cfg.ProcessResources),
 			SecurityContext: workflowContainerSecurityContext(),
+			Env: []apiv1.EnvVar{
+				{
+					Name:  "TMPDIR",
+					Value: "/tmp",
+				},
+			},
 			Args: []string{
 				fmt.Sprintf(`
 set -e
@@ -596,6 +606,10 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 					Name:      "workspace",
 					MountPath: "/workspace",
 				},
+				{
+					Name:      "tmp",
+					MountPath: "/tmp",
+				},
 			},
 		},
 	}
@@ -623,6 +637,10 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 					Name:      "workspace",
 					MountPath: "/workspace",
 				},
+				{
+					Name:      "tmp",
+					MountPath: "/tmp",
+				},
 			},
 			Containers: []wfv1.ContainerNode{
 				downloadContainer,
@@ -641,6 +659,18 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 	workspaceAccessMode := parseWorkspaceAccessMode(cfg.Workspace.AccessMode)
 	useWorkspacePVC := shouldUseWorkspacePVC(cfg.Workspace)
 
+	tmpVolumeSizeLimit := resource.MustParse("20Gi")
+	tmpVolume := apiv1.Volume{
+		Name: "tmp",
+		VolumeSource: apiv1.VolumeSource{
+			EmptyDir: &apiv1.EmptyDirVolumeSource{
+				SizeLimit: &tmpVolumeSizeLimit,
+			},
+		},
+	}
+	mainTemplate.Volumes = []apiv1.Volume{tmpVolume}
+	cleanupTemplate.Volumes = []apiv1.Volume{tmpVolume}
+
 	if !useWorkspacePVC {
 		emptyDirWorkspace := apiv1.Volume{
 			Name: "workspace",
@@ -648,8 +678,8 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 				EmptyDir: &apiv1.EmptyDirVolumeSource{},
 			},
 		}
-		mainTemplate.Volumes = []apiv1.Volume{emptyDirWorkspace}
-		cleanupTemplate.Volumes = []apiv1.Volume{emptyDirWorkspace}
+		mainTemplate.Volumes = append(mainTemplate.Volumes, emptyDirWorkspace)
+		cleanupTemplate.Volumes = append(cleanupTemplate.Volumes, emptyDirWorkspace)
 	}
 
 	// Create workflow

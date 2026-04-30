@@ -219,9 +219,13 @@ func TestBuildODMWorkflow_UsesEmptyDirWorkspaceInEmptyDirMode(t *testing.T) {
 	require.NotNil(t, wf)
 	require.Empty(t, wf.Spec.VolumeClaimTemplates)
 	require.Len(t, wf.Spec.Templates, 2)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
-	assert.Equal(t, "workspace", wf.Spec.Templates[0].Volumes[0].Name)
+	require.Len(t, wf.Spec.Templates[0].Volumes, 2)
+	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
 	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
+	assert.Equal(t, "workspace", wf.Spec.Templates[0].Volumes[1].Name)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[1].EmptyDir)
 }
 
 func TestBuildODMWorkflow_UsesPVCWorkspaceInPVCMode(t *testing.T) {
@@ -241,7 +245,11 @@ func TestBuildODMWorkflow_UsesPVCWorkspaceInPVCMode(t *testing.T) {
 
 	require.NotNil(t, wf)
 	require.Len(t, wf.Spec.VolumeClaimTemplates, 1)
-	assert.Empty(t, wf.Spec.Templates[0].Volumes)
+	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
+	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
 
 	claim := wf.Spec.VolumeClaimTemplates[0]
 	assert.Equal(t, "workspace", claim.Name)
@@ -269,7 +277,11 @@ func TestBuildODMWorkflow_UsesPVCWorkspaceInAutoModeWhenStorageClassSet(t *testi
 
 	require.NotNil(t, wf)
 	require.Len(t, wf.Spec.VolumeClaimTemplates, 1)
-	assert.Empty(t, wf.Spec.Templates[0].Volumes)
+	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
+	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
 
 	claim := wf.Spec.VolumeClaimTemplates[0]
 	require.NotNil(t, claim.Spec.StorageClassName)
@@ -294,8 +306,13 @@ func TestBuildODMWorkflow_UsesEmptyDirWorkspaceInAutoModeWithoutStorageClass(t *
 
 	require.NotNil(t, wf)
 	require.Empty(t, wf.Spec.VolumeClaimTemplates)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
+	require.Len(t, wf.Spec.Templates[0].Volumes, 2)
+	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
 	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
+	assert.Equal(t, "workspace", wf.Spec.Templates[0].Volumes[1].Name)
+	require.NotNil(t, wf.Spec.Templates[0].Volumes[1].EmptyDir)
 }
 
 func TestApplyDynamicWorkspaceSize_DisabledKeepsStaticSize(t *testing.T) {
