@@ -383,7 +383,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		resp := &InfoResponse{}
-		resp.Body.Version = "0.3.0" // The ScaleODM version (normally the NodeODM version)
+		resp.Body.Version = "0.3.1" // The ScaleODM version (normally the NodeODM version)
 		resp.Body.TaskQueueCount = queueCount
 		resp.Body.MaxImages = nil // Unlimited
 		resp.Body.Engine = "odm"

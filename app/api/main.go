@@ -36,7 +36,7 @@ type API struct {
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
 func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) (*API, http.Handler) {
-	apiConfig := huma.DefaultConfig("ScaleODM API", "0.3.0")
+	apiConfig := huma.DefaultConfig("ScaleODM API", "0.3.1")
 	apiConfig.DocsPath = "/"
 	apiConfig.OpenAPIPath = "/openapi.json"
 	apiConfig.Servers = []*huma.Server{

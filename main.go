@@ -1,6 +1,6 @@
 // REST API for job queue management
 // @title           ScaleODM Job Queue API
-// @version         0.3.0
+// @version         0.3.1
 // @description     NodeODM-compatible API for managing distributed ODM jobs via Argo Workflows
 // @contact.name    Sam Woodcock
 // @contact.url     https://slack.hotosm.org

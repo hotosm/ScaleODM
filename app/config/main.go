@@ -95,6 +95,7 @@ var AWS_DEFAULT_REGION = cmp.Or(
 // The secret must contain at least:
 //   - AWS_ACCESS_KEY_ID
 //   - AWS_SECRET_ACCESS_KEY
+//
 // AWS_DEFAULT_REGION defaults to us-east-1 at runtime when not provided.
 var AWS_S3_SECRET_NAME = cmp.Or(
 	os.Getenv("AWS_S3_SECRET_NAME"),
@@ -125,7 +126,7 @@ var SCALEODM_OBSERVABILITY_SERVICE_NAME = cmp.Or(
 )
 var SCALEODM_OBSERVABILITY_SERVICE_VERSION = cmp.Or(
 	strings.TrimSpace(os.Getenv("SCALEODM_OBSERVABILITY_SERVICE_VERSION")),
-	"0.3.0",
+	"0.3.1",
 )
 var SCALEODM_OBSERVABILITY_OTLP_ENDPOINT = strings.TrimSpace(os.Getenv("SCALEODM_OBSERVABILITY_OTLP_ENDPOINT"))
 var SCALEODM_OBSERVABILITY_OTLP_INSECURE = envBool("SCALEODM_OBSERVABILITY_OTLP_INSECURE", false)
