@@ -46,6 +46,28 @@ _install-curl:
       echo "✓ curl installed"
   fi
 
+# Install jq if missing
+[private]
+_install-jq:
+  #!/usr/bin/env bash
+  set -e
+
+  if ! command -v jq &> /dev/null; then
+      echo "📦 Installing jq..."
+      if command -v apt-get &> /dev/null; then
+          sudo apt-get update -qq && sudo apt-get install -y jq
+      elif command -v yum &> /dev/null; then
+          sudo yum install -y jq
+      elif command -v apk &> /dev/null; then
+          sudo apk add --no-cache jq
+      else
+          echo "❌ Error: jq is not installed and no package manager found"
+          echo "   Please install jq manually"
+          exit 1
+      fi
+      echo "✓ jq installed"
+  fi
+
 # Install talosctl if missing
 [private]
 _install-talosctl:
@@ -245,6 +267,121 @@ _seed-example-imagery:
 # Run the manual workflow example (loads .env automatically via dotenv-load)
 example-manual:
   go run examples/manual_workflow.go
+
+# Example the API usage with curl
+example-curl:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  trap 'docker compose down --remove-orphans' EXIT
+
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  just test build-api-image
+  docker compose down --remove-orphans
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+
+  if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
+    TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | jq -r '.[0].IPAM.Config[0].Gateway // ""' 2>/dev/null || true)
+    if [ -n "$TALOS_GATEWAY_IP" ]; then
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://${TALOS_GATEWAY_IP}:31102"
+    else
+      SCALEODM_WORKFLOW_S3_ENDPOINT="http://host.docker.internal:31102"
+    fi
+  fi
+
+  API_URL="${SCALEODM_BASE_URL:-http://localhost:31100}"
+  READ_S3_PATH="s3://scaleodm-test/test/"
+  WRITE_S3_PATH="s3://scaleodm-test/test/output/"
+  export READ_S3_PATH WRITE_S3_PATH SCALEODM_WORKFLOW_S3_ENDPOINT
+
+  echo "Using ScaleODM API: ${API_URL}"
+  echo "Using workflow S3 endpoint: ${SCALEODM_WORKFLOW_S3_ENDPOINT}"
+
+  echo "Ensuring workflow S3 secret uses local test credentials..."
+  kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
+    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
+    --from-literal=AWS_DEFAULT_REGION=us-east-1 \
+    --dry-run=client -o yaml | kubectl apply -f -
+
+  echo "Starting API..."
+  docker compose up --wait --detach --force-recreate api
+
+  PAYLOAD=$(jq -n \
+    --arg name "curl-test-project" \
+    --arg readS3Path "$READ_S3_PATH" \
+    --arg writeS3Path "$WRITE_S3_PATH" \
+    --arg s3Endpoint "$SCALEODM_WORKFLOW_S3_ENDPOINT" \
+    --arg s3Region "us-east-1" \
+    --arg options '[{"name":"fast-orthophoto","value":true}]' \
+    '{name: $name, readS3Path: $readS3Path, writeS3Path: $writeS3Path, s3Endpoint: $s3Endpoint, s3Region: $s3Region, options: $options}')
+
+  echo "Creating task with curl..."
+  CREATE_RESPONSE=$(curl -fsS \
+    -X POST "${API_URL}/task/new" \
+    -H "Content-Type: application/json" \
+    --data "${PAYLOAD}")
+  echo "Create response: ${CREATE_RESPONSE}"
+
+  UUID=$(printf "%s" "${CREATE_RESPONSE}" | jq -r '.uuid // ""')
+  if [ -z "$UUID" ]; then
+    echo "Failed to find task UUID in create response"
+    exit 1
+  fi
+
+  echo "Created task: ${UUID}"
+  echo "Polling task status..."
+
+  MAX_POLLS="${SCALEODM_EXAMPLE_MAX_POLLS:-120}"
+  POLL_INTERVAL="${SCALEODM_EXAMPLE_POLL_INTERVAL:-60}"
+  for _ in $(seq 1 "$MAX_POLLS"); do
+    INFO_RESPONSE=$(curl -fsS "${API_URL}/task/${UUID}/info")
+    STATUS_CODE=$(printf "%s" "${INFO_RESPONSE}" | jq -r '.status.code // ""')
+    PROGRESS=$(printf "%s" "${INFO_RESPONSE}" | jq -r '.progress // 0')
+
+    echo "Status: ${STATUS_CODE} progress=${PROGRESS}%"
+
+    case "$STATUS_CODE" in
+      40)
+        echo "Task completed successfully."
+        break
+        ;;
+      30)
+        echo "Task failed."
+        curl -fsS "${API_URL}/task/${UUID}/output?line=0" || true
+        exit 1
+        ;;
+      50)
+        echo "Task was canceled."
+        exit 1
+        ;;
+    esac
+
+    sleep "$POLL_INTERVAL"
+  done
+
+  if [ "$STATUS_CODE" != "40" ]; then
+    echo "Task did not complete after $MAX_POLLS polls."
+    exit 1
+  fi
+
+  echo "Listing tasks..."
+  curl -fsS "${API_URL}/task/list"
+  echo
+
+  echo "Fetching final task info..."
+  curl -fsS "${API_URL}/task/${UUID}/info"
+  echo
+
+  echo "Fetching task log preview..."
+  set +o pipefail
+  curl -fsS "${API_URL}/task/${UUID}/output?line=0" | sed -n '1,80p'
+  set -o pipefail
+
+  echo "Checking download redirect for orthophoto.tif..."
+  curl -fsSI "${API_URL}/task/${UUID}/download/orthophoto.tif" | sed -n '1,20p'
+
+  echo "Shutting down containers..."
+  docker compose down --remove-orphans
 
 # Example the API usage via Python script
 example-python:
