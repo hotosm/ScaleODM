@@ -31,3 +31,11 @@ ScaleODM-*.tgz
 openapi.yaml
 docs/api
 site
+
+# LLM tools
+.claude
+checkpoints
+plans
+.codex
+dronetm-docs
+rcrc-drones

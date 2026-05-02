@@ -336,14 +336,49 @@ type taskPrimaryAssetDefinition struct {
 
 var taskPrimaryAssetDefinitions = []taskPrimaryAssetDefinition{
 	{ID: "all_zip", Assets: []string{"all.zip"}},
-	{ID: "orthophoto", Assets: []string{"orthophoto.tif"}},
-	{ID: "dsm", Assets: []string{"dsm.tif"}},
-	{ID: "dtm", Assets: []string{"dtm.tif"}},
-	{ID: "point_cloud", Assets: []string{"georeferenced_model.laz", "georeferenced_model.las", "georeferenced_model.ply", "point_cloud.laz", "point_cloud.ply"}},
+	{ID: "orthophoto", Assets: []string{"odm_orthophoto/odm_orthophoto.tif", "orthophoto.tif"}},
+	{ID: "dsm", Assets: []string{"odm_dem/dsm.tif", "dsm.tif"}},
+	{ID: "dtm", Assets: []string{"odm_dem/dtm.tif", "dtm.tif"}},
+	{ID: "point_cloud", Assets: []string{"odm_georeferencing/odm_georeferenced_model.laz", "odm_georeferencing/odm_georeferenced_model.las", "odm_georeferencing/odm_georeferenced_model.ply", "georeferenced_model.laz", "georeferenced_model.las", "georeferenced_model.ply", "point_cloud.laz", "point_cloud.ply"}},
+}
+
+var taskAssetAliasCandidates = map[string][]string{
+	"orthophoto": {"odm_orthophoto/odm_orthophoto.tif", "orthophoto.tif"},
+	"dsm":        {"odm_dem/dsm.tif", "dsm.tif"},
+	"dtm":        {"odm_dem/dtm.tif", "dtm.tif"},
+	"point_cloud": {
+		"odm_georeferencing/odm_georeferenced_model.laz",
+		"odm_georeferencing/odm_georeferenced_model.las",
+		"odm_georeferencing/odm_georeferenced_model.ply",
+		"georeferenced_model.laz",
+		"georeferenced_model.las",
+		"georeferenced_model.ply",
+		"point_cloud.laz",
+		"point_cloud.ply",
+	},
 }
 
 func taskAssetDownloadURL(uuid, asset string) string {
 	return fmt.Sprintf("/task/%s/download/%s", uuid, asset)
+}
+
+func resolveAssetAliasCandidate(ctx context.Context, client *minio.Client, writeS3Path, requestedAsset string) (string, bool, error) {
+	candidates, ok := taskAssetAliasCandidates[requestedAsset]
+	if !ok {
+		return "", false, nil
+	}
+
+	for _, candidate := range candidates {
+		exists, err := s3.ObjectExistsInS3Path(ctx, client, writeS3Path, candidate)
+		if err != nil {
+			return "", false, err
+		}
+		if exists {
+			return candidate, true, nil
+		}
+	}
+
+	return "", true, nil
 }
 
 func clampTaskAdditionalLimit(limit int) int {
@@ -1278,48 +1313,81 @@ func (a *API) registerNodeODMRoutes() {
 		return &Response{Success: true}, nil
 	})
 
-	// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)
-	// Registered as a raw HTTP handler on the mux for reliable redirect support.
-	// Huma handlers return structured responses which can't express HTTP redirects,
-	// so we handle this endpoint outside Huma.
-	a.downloadHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		uuid := r.PathValue("uuid")
-		asset := r.PathValue("asset")
-		log.Printf("GET /task/%s/download/%s", uuid, asset)
+		// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)
+		// Registered as a raw HTTP handler on the mux for reliable redirect support.
+		// Huma handlers return structured responses which can't express HTTP redirects,
+		// so we handle this endpoint outside Huma.
+		a.downloadHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			uuid := r.PathValue("uuid")
+			asset := r.PathValue("asset")
+			log.Printf("GET /task/%s/download/%s", uuid, asset)
 
-		metadata, err := a.metadataStore.GetJob(r.Context(), uuid)
-		if err != nil {
-			log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", uuid, asset, err)
-			http.Error(w, `{"error":"Failed to retrieve task metadata"}`, http.StatusInternalServerError)
-			return
-		}
-		if metadata == nil {
-			log.Printf("GET /task/%s/download/%s: task not found", uuid, asset)
-			http.Error(w, `{"error":"Task not found"}`, http.StatusNotFound)
-			return
-		}
-		if metadata.WriteS3Path == "" {
-			log.Printf("GET /task/%s/download/%s: write S3 path not available", uuid, asset)
-			http.Error(w, `{"error":"Write S3 path not available for this task"}`, http.StatusBadRequest)
-			return
-		}
+			metadata, err := a.metadataStore.GetJob(r.Context(), uuid)
+			if err != nil {
+				log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", uuid, asset, err)
+				http.Error(w, `{"error":"Failed to retrieve task metadata"}`, http.StatusInternalServerError)
+				return
+			}
+			if metadata == nil {
+				log.Printf("GET /task/%s/download/%s: task not found", uuid, asset)
+				http.Error(w, `{"error":"Task not found"}`, http.StatusNotFound)
+				return
+			}
+			if metadata.WriteS3Path == "" {
+				log.Printf("GET /task/%s/download/%s: write S3 path not available", uuid, asset)
+				http.Error(w, `{"error":"Write S3 path not available for this task"}`, http.StatusBadRequest)
+				return
+			}
 
-		s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(metadata.Metadata)
-		if clientErr != nil {
-			log.Printf("GET /task/%s/download/%s: failed to initialize S3 client endpoint=%q: %v", uuid, asset, selectedEndpoint, clientErr)
-			http.Error(w, `{"error":"Failed to initialize S3 client"}`, http.StatusInternalServerError)
-			return
-		}
-		presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
-		if err != nil {
-			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, asset, err)
-			http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, asset), http.StatusNotFound)
-			return
-		}
+			s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(metadata.Metadata)
+			if clientErr != nil {
+				log.Printf("GET /task/%s/download/%s: failed to initialize S3 client endpoint=%q: %v", uuid, asset, selectedEndpoint, clientErr)
+				http.Error(w, `{"error":"Failed to initialize S3 client"}`, http.StatusInternalServerError)
+				return
+			}
 
-		log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL (expires in 1 hour)", uuid, asset)
-		http.Redirect(w, r, presignedURL, http.StatusFound)
-	})
+			requestedAsset := asset
+			if resolvedAsset, isAlias, resolveErr := resolveAssetAliasCandidate(r.Context(), s3Client, metadata.WriteS3Path, requestedAsset); resolveErr != nil {
+				log.Printf("GET /task/%s/download/%s: failed to resolve asset alias: %v", uuid, asset, resolveErr)
+				http.Error(w, `{"error":"Failed to resolve asset alias"}`, http.StatusInternalServerError)
+				return
+			} else if isAlias {
+				if resolvedAsset == "" {
+					log.Printf("GET /task/%s/download/%s: alias requested but no asset found", uuid, asset)
+					http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, asset), http.StatusNotFound)
+					return
+				}
+				asset = resolvedAsset
+			}
+
+			presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
+			if err == nil {
+				log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL for key=%q (expires in 1 hour)", uuid, requestedAsset, asset)
+				http.Redirect(w, r, presignedURL, http.StatusFound)
+				return
+			}
+
+			if requestedAsset == "all.zip" {
+				w.Header().Set("Content-Type", "application/zip")
+				w.Header().Set("Content-Disposition", `attachment; filename="all.zip"`)
+
+				written, streamErr := s3.StreamS3PathAsZip(r.Context(), s3Client, metadata.WriteS3Path, w)
+				if streamErr != nil {
+					if streamErr == s3.ErrNoObjectsToZip {
+						log.Printf("GET /task/%s/download/%s: no output objects found for synthetic all.zip", uuid, requestedAsset)
+						http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
+						return
+					}
+					log.Printf("GET /task/%s/download/%s: failed to stream synthetic all.zip: %v", uuid, requestedAsset, streamErr)
+					return
+				}
+				log.Printf("GET /task/%s/download/%s: streamed synthetic all.zip with %d entries", uuid, requestedAsset, written)
+				return
+			}
+
+			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, requestedAsset, err)
+			http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
+		})
 }
 
 // Helper functions

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"encoding/json"
@@ -332,8 +333,8 @@ func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
 		"s3_endpoint": "http://" + testutil.TestS3Endpoint(),
 	}))
 
-	ensureTestObjectInBucket(ctx, t, bucket, "output/orthophoto.tif", "orthophoto")
-	ensureTestObjectInBucket(ctx, t, bucket, "output/georeferenced_model.las", "pointcloud")
+	ensureTestObjectInBucket(ctx, t, bucket, "output/odm_orthophoto/odm_orthophoto.tif", "orthophoto")
+	ensureTestObjectInBucket(ctx, t, bucket, "output/odm_georeferencing/odm_georeferenced_model.las", "pointcloud")
 	ensureTestObjectInBucket(ctx, t, bucket, "output/report.pdf", "report")
 
 	_, handler := NewAPI(metadataStore, &recordingWorkflowClient{})
@@ -356,12 +357,12 @@ func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
 	assert.Empty(t, byID["all_zip"].DownloadURL)
 
 	assert.True(t, byID["orthophoto"].Exists)
-	assert.Equal(t, "orthophoto.tif", byID["orthophoto"].Asset)
-	assert.Equal(t, "/task/"+workflowName+"/download/orthophoto.tif", byID["orthophoto"].DownloadURL)
+	assert.Equal(t, "odm_orthophoto/odm_orthophoto.tif", byID["orthophoto"].Asset)
+	assert.Equal(t, "/task/"+workflowName+"/download/odm_orthophoto/odm_orthophoto.tif", byID["orthophoto"].DownloadURL)
 
 	assert.True(t, byID["point_cloud"].Exists)
-	assert.Equal(t, "georeferenced_model.las", byID["point_cloud"].Asset)
-	assert.Equal(t, "/task/"+workflowName+"/download/georeferenced_model.las", byID["point_cloud"].DownloadURL)
+	assert.Equal(t, "odm_georeferencing/odm_georeferenced_model.las", byID["point_cloud"].Asset)
+	assert.Equal(t, "/task/"+workflowName+"/download/odm_georeferencing/odm_georeferenced_model.las", byID["point_cloud"].DownloadURL)
 
 	req = httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/assets?includeAdditional=true&additionalLimit=10", nil)
 	w = httptest.NewRecorder()
@@ -484,6 +485,97 @@ func TestDownloadEndpoint_StillRedirectsForExistingAsset(t *testing.T) {
 
 	assert.Equal(t, http.StatusFound, w.Code)
 	assert.NotEmpty(t, w.Header().Get("Location"))
+}
+
+func TestDownloadEndpoint_AliasResolvesNestedOrthophoto(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-download-alias-ortho"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	metadataStore := meta.NewStore(db)
+	workflowName := "download-alias-ortho"
+	_, err := metadataStore.CreateJob(
+		ctx,
+		workflowName,
+		"test-project",
+		"s3://"+bucket+"/images/",
+		"s3://"+bucket+"/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
+		"s3_endpoint": "http://" + testutil.TestS3Endpoint(),
+	}))
+
+	ensureTestObjectInBucket(ctx, t, bucket, "output/odm_orthophoto/odm_orthophoto.tif", "nested-ortho")
+
+	_, handler := NewAPI(metadataStore, &recordingWorkflowClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/download/orthophoto", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusFound, w.Code)
+	location := w.Header().Get("Location")
+	assert.NotEmpty(t, location)
+	assert.Contains(t, location, "/output/odm_orthophoto/odm_orthophoto.tif")
+}
+
+func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-download-allzip-stream"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	metadataStore := meta.NewStore(db)
+	workflowName := "download-allzip-stream"
+	_, err := metadataStore.CreateJob(
+		ctx,
+		workflowName,
+		"test-project",
+		"s3://"+bucket+"/images/",
+		"s3://"+bucket+"/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
+		"s3_endpoint": "http://" + testutil.TestS3Endpoint(),
+	}))
+
+	ensureTestObjectInBucket(ctx, t, bucket, "output/odm_orthophoto/odm_orthophoto.tif", "ortho-bytes")
+	ensureTestObjectInBucket(ctx, t, bucket, "output/odm_dem/dsm.tif", "dsm-bytes")
+
+	_, handler := NewAPI(metadataStore, &recordingWorkflowClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/download/all.zip", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	assert.Equal(t, "application/zip", w.Header().Get("Content-Type"))
+
+	zr, zipErr := zip.NewReader(bytes.NewReader(w.Body.Bytes()), int64(w.Body.Len()))
+	require.NoError(t, zipErr)
+
+	entries := map[string]string{}
+	for _, f := range zr.File {
+		rc, openErr := f.Open()
+		require.NoError(t, openErr)
+		payload, readErr := io.ReadAll(rc)
+		require.NoError(t, readErr)
+		require.NoError(t, rc.Close())
+		entries[f.Name] = string(payload)
+	}
+
+	assert.Equal(t, "ortho-bytes", entries["odm_orthophoto/odm_orthophoto.tif"])
+	assert.Equal(t, "dsm-bytes", entries["odm_dem/dsm.tif"])
 }
 
 func TestNormalizeOptionalS3Endpoint(t *testing.T) {

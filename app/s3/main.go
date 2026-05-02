@@ -1,11 +1,14 @@
 package s3
 
 import (
+	"archive/zip"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net/url"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -242,6 +245,115 @@ func ListFilesInS3PathWithLimit(ctx context.Context, client *minio.Client, write
 
 	return files, nil
 }
+
+func ListObjectsRecursiveInS3Path(ctx context.Context, client *minio.Client, s3Path string) ([]minio.ObjectInfo, error) {
+	bucket, prefix, err := parseS3Path(s3Path)
+	if err != nil {
+		return nil, err
+	}
+
+	objectCh := client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	})
+
+	objects := make([]minio.ObjectInfo, 0)
+	for object := range objectCh {
+		if object.Err != nil {
+			return nil, fmt.Errorf("failed to list objects: %w", object.Err)
+		}
+		if object.Key == "" || strings.HasSuffix(object.Key, "/") {
+			continue
+		}
+		objects = append(objects, object)
+	}
+
+	return objects, nil
+}
+
+func sanitizeZipEntryName(prefix, objectKey string) (string, bool) {
+	rel := strings.TrimPrefix(objectKey, prefix)
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" {
+		return "", false
+	}
+
+	clean := path.Clean(rel)
+	if clean == "." || clean == "" {
+		return "", false
+	}
+	if strings.HasPrefix(clean, "../") || clean == ".." {
+		return "", false
+	}
+	if strings.HasPrefix(clean, "/") {
+		return "", false
+	}
+
+	return clean, true
+}
+
+func StreamS3PathAsZip(ctx context.Context, client *minio.Client, s3Path string, writer io.Writer) (int, error) {
+	bucket, prefix, err := parseS3Path(s3Path)
+	if err != nil {
+		return 0, err
+	}
+
+	objects, err := ListObjectsRecursiveInS3Path(ctx, client, s3Path)
+	if err != nil {
+		return 0, err
+	}
+
+	zipWriter := zip.NewWriter(writer)
+
+	written := 0
+	for _, object := range objects {
+		entryName, ok := sanitizeZipEntryName(prefix, object.Key)
+		if !ok {
+			log.Printf("skipping unsafe zip entry key=%q", object.Key)
+			continue
+		}
+
+		header := &zip.FileHeader{
+			Name:   entryName,
+			Method: zip.Deflate,
+		}
+		if !object.LastModified.IsZero() {
+			header.Modified = object.LastModified
+		}
+
+		entryWriter, createErr := zipWriter.CreateHeader(header)
+		if createErr != nil {
+			return written, fmt.Errorf("failed to create zip entry for %q: %w", object.Key, createErr)
+		}
+
+		objReader, getErr := client.GetObject(ctx, bucket, object.Key, minio.GetObjectOptions{})
+		if getErr != nil {
+			return written, fmt.Errorf("failed to read object %q: %w", object.Key, getErr)
+		}
+
+		if _, copyErr := io.Copy(entryWriter, objReader); copyErr != nil {
+			objReader.Close()
+			return written, fmt.Errorf("failed to stream object %q into zip: %w", object.Key, copyErr)
+		}
+		if closeErr := objReader.Close(); closeErr != nil {
+			return written, fmt.Errorf("failed to close object %q: %w", object.Key, closeErr)
+		}
+
+		written++
+	}
+
+	if written == 0 {
+		return 0, ErrNoObjectsToZip
+	}
+
+	if closeErr := zipWriter.Close(); closeErr != nil {
+		return written, fmt.Errorf("failed to finalize zip stream: %w", closeErr)
+	}
+
+	return written, nil
+}
+
+var ErrNoObjectsToZip = errors.New("no objects to zip")
 
 // ProbeS3Path checks that an S3 path is reachable by issuing a bounded list request.
 // It is intended for readiness probes and avoids scanning large prefixes.

@@ -1,10 +1,12 @@
 package s3
 
 import (
+	"archive/zip"
 	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -277,4 +279,76 @@ func TestCountImageStatsInS3Path_PropagatesListingErrors(t *testing.T) {
 	assert.Equal(t, 0, count)
 	assert.Equal(t, int64(0), totalBytes)
 	assert.Contains(t, err.Error(), "failed to list objects")
+}
+
+func TestListObjectsRecursiveInS3Path_IncludesNestedKeys(t *testing.T) {
+	ctx := context.Background()
+	bucket := "test-bucket-list-recursive"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	client := testS3Client(t)
+	prefix := "results/task-recursive/"
+	putTestObject(t, client, bucket, prefix+"orthophoto.tif", "ortho")
+	putTestObject(t, client, bucket, prefix+"odm_orthophoto/odm_orthophoto.tif", "nested-ortho")
+	putTestObject(t, client, bucket, prefix+"odm_dem/dsm.tif", "dsm")
+
+	objects, err := ListObjectsRecursiveInS3Path(ctx, client, "s3://"+bucket+"/results/task-recursive/")
+	require.NoError(t, err)
+
+	keys := make([]string, 0, len(objects))
+	for _, object := range objects {
+		keys = append(keys, object.Key)
+	}
+	sort.Strings(keys)
+	assert.Contains(t, keys, prefix+"orthophoto.tif")
+	assert.Contains(t, keys, prefix+"odm_orthophoto/odm_orthophoto.tif")
+	assert.Contains(t, keys, prefix+"odm_dem/dsm.tif")
+}
+
+func TestStreamS3PathAsZip_StreamsNestedEntries(t *testing.T) {
+	ctx := context.Background()
+	bucket := "test-bucket-stream-zip"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	client := testS3Client(t)
+	prefix := "results/task-zip/"
+	putTestObject(t, client, bucket, prefix+"odm_orthophoto/odm_orthophoto.tif", "ortho-bytes")
+	putTestObject(t, client, bucket, prefix+"odm_dem/dsm.tif", "dsm-bytes")
+
+	var buf bytes.Buffer
+	count, err := StreamS3PathAsZip(ctx, client, "s3://"+bucket+"/results/task-zip/", &buf)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+
+	zr, err := zip.NewReader(bytes.NewReader(buf.Bytes()), int64(buf.Len()))
+	require.NoError(t, err)
+
+	entries := map[string]string{}
+	for _, f := range zr.File {
+		rc, openErr := f.Open()
+		require.NoError(t, openErr)
+		payload, readErr := io.ReadAll(rc)
+		require.NoError(t, readErr)
+		require.NoError(t, rc.Close())
+		entries[f.Name] = string(payload)
+	}
+
+	assert.Equal(t, "ortho-bytes", entries["odm_orthophoto/odm_orthophoto.tif"])
+	assert.Equal(t, "dsm-bytes", entries["odm_dem/dsm.tif"])
+}
+
+func TestSanitizeZipEntryName_RejectsUnsafePaths(t *testing.T) {
+	prefix := "results/task/"
+
+	name, ok := sanitizeZipEntryName(prefix, "results/task/odm_orthophoto/odm_orthophoto.tif")
+	assert.True(t, ok)
+	assert.Equal(t, "odm_orthophoto/odm_orthophoto.tif", name)
+
+	name, ok = sanitizeZipEntryName(prefix, "results/task/")
+	assert.False(t, ok)
+	assert.Empty(t, name)
+
+	name, ok = sanitizeZipEntryName(prefix, "results/task/../escape.txt")
+	assert.False(t, ok)
+	assert.Empty(t, name)
 }

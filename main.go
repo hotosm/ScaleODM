@@ -113,7 +113,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to initialize Argo Workflows client: %v", err)
 		}
-		log.Printf("Argo Workflows client ready (took %v)", time.Since(k8sStart))
+		log.Printf("Argo Workflows client initialized (availability checked by readiness probe, took %v)", time.Since(k8sStart))
 	}
 
 	// === HUMA CLI ===
