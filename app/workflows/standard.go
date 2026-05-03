@@ -411,6 +411,10 @@ func workflowContainerSecurityContext() *apiv1.SecurityContext {
 // Argo Workflow spec and resolves them only at pod runtime.
 func s3SecretEnvVars(cfg *ODMPipelineConfig) []apiv1.EnvVar {
 	secretName := config.AWS_S3_SECRET_NAME
+	region := cfg.S3Region
+	if region == "" {
+		region = "us-east-1"
+	}
 
 	envVars := []apiv1.EnvVar{
 		{
@@ -437,12 +441,12 @@ func s3SecretEnvVars(cfg *ODMPipelineConfig) []apiv1.EnvVar {
 		},
 		{
 			Name:  "AWS_DEFAULT_REGION",
-			Value: cfg.S3Region,
+			Value: region,
 		},
-	}
-
-	if cfg.S3Region == "" {
-		envVars[2].Value = "us-east-1"
+		{
+			Name:  "AWS_REGION",
+			Value: region,
+		},
 	}
 
 	// If a custom S3 endpoint is specified (e.g., for MinIO), expose it as an env var

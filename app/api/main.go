@@ -116,7 +116,11 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 		}
 	}
 
-	return apiObj, router
+	// withTaskNewErrorLogging wraps the whole router rather than a specific handler
+	// because POST /task/new is registered via Huma, which doesn't expose the
+	// underlying http.Handler for per-route wrapping. The middleware short-circuits
+	// immediately for all other routes, so the overhead is a single conditional.
+	return apiObj, withTaskNewErrorLogging(router)
 }
 
 func has4xxResponse(responses map[string]*huma.Response) bool {
@@ -199,12 +203,7 @@ func (a *API) registerGlobalMRoutes() {
 				s3Ctx, cancel := context.WithTimeout(ctx, timeout)
 				defer cancel()
 
-				s3Client, s3Err := s3.GetS3ClientWithCredentials(
-					config.AWS_S3_ENDPOINT,
-					config.AWS_ACCESS_KEY_ID,
-					config.AWS_SECRET_ACCESS_KEY,
-					"",
-				)
+				s3Client, s3Err := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
 				if s3Err != nil {
 					ready = false
 					reason := "s3_client_init_failed"
