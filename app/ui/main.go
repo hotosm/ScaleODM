@@ -32,11 +32,12 @@ type Handler struct {
 	metadataStore *meta.Store
 	workflow      workflows.WorkflowClient
 	readonly      bool
+	version       string
 	templates     *template.Template
 	static        http.Handler
 }
 
-func NewHandler(metadataStore *meta.Store, workflow workflows.WorkflowClient, readonly bool) (*Handler, error) {
+func NewHandler(metadataStore *meta.Store, workflow workflows.WorkflowClient, readonly bool, version string) (*Handler, error) {
 	templates, err := template.ParseFS(
 		embeddedFiles,
 		"templates/layout.html.tmpl",
@@ -56,6 +57,7 @@ func NewHandler(metadataStore *meta.Store, workflow workflows.WorkflowClient, re
 		metadataStore: metadataStore,
 		workflow:      workflow,
 		readonly:      readonly,
+		version:       version,
 		templates:     templates,
 		static:        http.FileServer(http.FS(staticFS)),
 	}, nil
@@ -115,6 +117,7 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 		ProjectID:  projectID,
 		Limit:      limit,
 		BannerText: "No authentication is enabled. Use this UI only on trusted internal networks.",
+		Version:    h.version,
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	if err := h.templates.ExecuteTemplate(w, "tasks", data); err != nil {
@@ -144,6 +147,7 @@ func (h *Handler) handleTaskDetailPage(w http.ResponseWriter, r *http.Request) {
 		ReadOnly:   h.readonly,
 		Task:       toTaskDetail(job, time.Now().UTC()),
 		BannerText: "No authentication is enabled. Use this UI only on trusted internal networks.",
+		Version:    h.version,
 	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -108,7 +108,7 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	}
 
 	if config.SCALEODM_UI_ENABLED {
-		uiHandler, err := ui.NewHandler(metadataStore, workflowClient, config.SCALEODM_UI_READONLY)
+		uiHandler, err := ui.NewHandler(metadataStore, workflowClient, config.SCALEODM_UI_READONLY, version.Version)
 		if err != nil {
 			log.Printf("ui disabled: failed to initialize handler: %v", err)
 		} else {

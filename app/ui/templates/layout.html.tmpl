@@ -10,7 +10,10 @@
   <body>
     <header class="header">
       <div class="container">
-        <a class="logo" href="/ui">ScaleODM UI</a>
+        <div class="logo-group">
+          <a class="logo" href="/ui">ScaleODM UI</a>
+          <span class="version">v{{ .Version }}</span>
+        </div>
         <span class="badge">{{ if .ReadOnly }}Read-only{{ else }}Writable{{ end }}</span>
       </div>
     </header>

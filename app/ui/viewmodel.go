@@ -60,6 +60,7 @@ type tasksPageData struct {
 	ProjectID  string
 	Limit      int
 	BannerText string
+	Version    string
 }
 
 type taskDetailPageData struct {
@@ -67,6 +68,7 @@ type taskDetailPageData struct {
 	ReadOnly   bool
 	Task       taskDetail
 	BannerText string
+	Version    string
 }
 
 func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {

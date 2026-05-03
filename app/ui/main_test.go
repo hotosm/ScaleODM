@@ -90,7 +90,7 @@ func setupServer(t *testing.T) (*meta.Store, http.Handler) {
 	t.Cleanup(cleanup)
 
 	store := meta.NewStore(database)
-	handler, err := NewHandler(store, &testWorkflowClient{logs: "line0\nline1\nline2\nline3"}, true)
+	handler, err := NewHandler(store, &testWorkflowClient{logs: "line0\nline1\nline2\nline3"}, true, "test")
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
@@ -104,7 +104,7 @@ func setupServerWithoutWorkflowClient(t *testing.T) (*meta.Store, http.Handler) 
 	t.Cleanup(cleanup)
 
 	store := meta.NewStore(database)
-	handler, err := NewHandler(store, nil, true)
+	handler, err := NewHandler(store, nil, true, "test")
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
