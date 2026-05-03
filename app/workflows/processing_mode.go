@@ -101,6 +101,8 @@ var DefaultProjectExcludes = []string{
 	"mapproxy/**",
 	"submodels/**",
 	"*-output/**",
+	"thumbs/**",
+	"**/thumbs/**",
 	"all.zip",
 	"**/all.zip",
 }

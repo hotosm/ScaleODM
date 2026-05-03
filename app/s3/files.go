@@ -8,6 +8,12 @@ import (
 // File handling utilities for S3-based workflows
 // These functions generate shell scripts for use in Argo workflow containers
 
+// alwaysExcludePatterns are unconditionally prepended to both download and
+// image-count filters, regardless of user settings or useDefaultExcludes.
+// They protect ScaleODM's own output directories from being re-ingested on a
+// rerun, and match the paths the upload script writes into the write S3 path.
+var alwaysExcludePatterns = []string{"output/**", "**/output/**"}
+
 // imageIncludePatterns is the canonical rclone filter list for input imagery
 // and supported archive types. Mirrored as `+ <pattern>` lines in the
 // generated --filter-from file.
@@ -87,8 +93,8 @@ fi`
 // `--max-depth N`; values <= 0 mean "no limit" so callers wanting an
 // unbounded scan can opt in explicitly.
 func GenerateDownloadScript(jobID, srcPath string, excludePatterns []string, maxDepth int) string {
-	patterns := make([]string, 0, len(excludePatterns)+2)
-	patterns = append(patterns, "output/**", "**/output/**")
+	patterns := make([]string, 0, len(alwaysExcludePatterns)+len(excludePatterns))
+	patterns = append(patterns, alwaysExcludePatterns...)
 	patterns = append(patterns, excludePatterns...)
 	filterFileContents := renderRcloneFilterFile(patterns)
 

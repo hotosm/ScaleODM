@@ -290,6 +290,40 @@ func TestAccumulateImageStatsFromObjectsWithExcludes_SkipsExcludedPaths(t *testi
 	assert.Equal(t, int64(300), totalBytes)
 }
 
+func TestCountImageStatsInS3PathWithExcludes_AlwaysExcludesOutputDirs(t *testing.T) {
+	// output/** and **/output/** are unconditionally excluded even when the caller
+	// passes no user excludes (alwaysExcludePatterns are prepended internally).
+	objectCh := make(chan minio.ObjectInfo, 4)
+	objectCh <- minio.ObjectInfo{Key: "images/img1.jpg", Size: 100}
+	objectCh <- minio.ObjectInfo{Key: "images/output/odm_orthophoto.tif", Size: 9999}
+	objectCh <- minio.ObjectInfo{Key: "images/nested/output/result.tif", Size: 8888}
+	objectCh <- minio.ObjectInfo{Key: "images/img2.tif", Size: 200}
+	close(objectCh)
+
+	matcher := compileExcludeMatcher(alwaysExcludePatterns)
+	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "images/", matcher)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Equal(t, int64(300), totalBytes)
+}
+
+func TestCountImageStatsInS3PathWithExcludes_ThumbsDirExcludedViaDefaultExcludes(t *testing.T) {
+	// thumbs/** and **/thumbs/** are in DefaultProjectExcludes so thumbnail images
+	// are not counted when useDefaultExcludes is true.
+	objectCh := make(chan minio.ObjectInfo, 4)
+	objectCh <- minio.ObjectInfo{Key: "images/img1.jpg", Size: 100}
+	objectCh <- minio.ObjectInfo{Key: "images/thumbs/img1_thumb.jpg", Size: 20}
+	objectCh <- minio.ObjectInfo{Key: "images/nested/thumbs/img2_thumb.jpg", Size: 30}
+	objectCh <- minio.ObjectInfo{Key: "images/img2.tif", Size: 200}
+	close(objectCh)
+
+	matcher := compileExcludeMatcher([]string{"thumbs/**", "**/thumbs/**"})
+	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "images/", matcher)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Equal(t, int64(300), totalBytes)
+}
+
 func testS3Client(t *testing.T) *minio.Client {
 	t.Helper()
 

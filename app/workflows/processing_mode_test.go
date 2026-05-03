@@ -62,6 +62,8 @@ func TestComposeExcludePatterns_DefaultsOnPrependsCanonicalSet(t *testing.T) {
 	assert.Equal(t, DefaultProjectExcludes[0], got[0])
 	assert.Contains(t, got, "odm_orthophoto/**")
 	assert.Contains(t, got, "submodels/**")
+	assert.Contains(t, got, "thumbs/**")
+	assert.Contains(t, got, "**/thumbs/**")
 	assert.Contains(t, got, "all.zip")
 	assert.Contains(t, got, "scratch/**")
 	assert.Contains(t, got, "*.bak")

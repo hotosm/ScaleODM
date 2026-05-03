@@ -408,7 +408,10 @@ func CountImageStatsInS3PathWithExcludes(ctx context.Context, client *minio.Clie
 		Recursive: true,
 	})
 
-	matcher := compileExcludeMatcher(excludePatterns)
+	allExcludes := make([]string, 0, len(alwaysExcludePatterns)+len(excludePatterns))
+	allExcludes = append(allExcludes, alwaysExcludePatterns...)
+	allExcludes = append(allExcludes, excludePatterns...)
+	matcher := compileExcludeMatcher(allExcludes)
 	return accumulateImageStatsFromObjectsWithExcludes(objectCh, prefix, matcher)
 }
 
