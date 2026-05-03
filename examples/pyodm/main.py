@@ -25,7 +25,17 @@ HOST = os.environ.get("SCALEODM_HOST", "localhost")
 PORT = int(os.environ.get("SCALEODM_PORT", "31100"))
 
 
-def create_s3_task(node, api_base_url, read_s3_path, write_s3_path, s3_endpoint, name="odm-project", options=None):
+def create_s3_task(
+    node,
+    api_base_url,
+    read_s3_path,
+    write_s3_path,
+    s3_endpoint,
+    name="odm-project",
+    options=None,
+    processing_mode="standard",
+    s3_scan_depth=1,
+):
     """Create a ScaleODM task from an S3 path of images.
 
     Args:
@@ -35,6 +45,10 @@ def create_s3_task(node, api_base_url, read_s3_path, write_s3_path, s3_endpoint,
         s3_endpoint: S3-compatible endpoint URL for workflow operations
         name: Project name
         options: Dict of ODM options (e.g. {"dsm": True})
+        processing_mode: ScaleODM pipeline mode (default "standard").
+        s3_scan_depth: Max depth for the rclone scan beneath read_s3_path
+            (default 1 - only the given dir; raise for multi-task layouts
+            like projectid/taskid/images).
 
     Returns:
         pyodm Task object
@@ -50,6 +64,8 @@ def create_s3_task(node, api_base_url, read_s3_path, write_s3_path, s3_endpoint,
         "writeS3Path": write_s3_path,
         "s3Endpoint": s3_endpoint,
         "s3Region": "us-east-1",
+        "processingMode": processing_mode,
+        "s3ScanDepth": s3_scan_depth,
     }
     if odm_options:
         data["options"] = json.dumps(odm_options)
@@ -191,6 +207,8 @@ def main() -> None:
         s3_endpoint,
         name="pyodm-test-project",
         options={"fast-orthophoto": True},
+        processing_mode="standard",
+        s3_scan_depth=1,
     )
 
     # Monitor via polling

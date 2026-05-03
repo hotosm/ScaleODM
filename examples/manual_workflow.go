@@ -66,6 +66,7 @@ func main() {
 	}
 
 	// Create task request
+	scanDepth := 1
 	taskReq := &api.TaskNewRequest{
 		Name:               "test-fast-orthophoto",
 		ReadS3Path:         readS3Path,
@@ -74,6 +75,8 @@ func main() {
 		Options:            string(optionsJSON),
 		SkipPostProcessing: false,
 		S3Region:           "us-east-1",
+		ProcessingMode:     "standard",
+		S3ScanDepth:        &scanDepth,
 	}
 
 	fmt.Println("Creating ODM task via API...")
@@ -157,6 +160,10 @@ func createTask(apiURL string, taskReq *api.TaskNewRequest) (string, error) {
 		"s3Endpoint":         taskReq.S3Endpoint,
 		"s3Region":           taskReq.S3Region,
 		"dateCreated":        taskReq.DateCreated,
+		"processingMode":     taskReq.ProcessingMode,
+	}
+	if taskReq.S3ScanDepth != nil {
+		jsonMap["s3ScanDepth"] = *taskReq.S3ScanDepth
 	}
 	jsonData, err := json.Marshal(jsonMap)
 	if err != nil {

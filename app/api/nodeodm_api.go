@@ -48,6 +48,10 @@ const (
 	metadataImageCountKey            = "image_count"
 	metadataImageTotalBytesKey       = "image_total_bytes"
 	metadataWorkflowMissingFirstSeen = "workflow_missing_first_seen_at"
+	metadataProcessingModeKey        = "processing_mode"
+	metadataExcludePathsKey          = "exclude_paths"
+	metadataUseDefaultExcludesKey    = "use_default_excludes"
+	metadataS3ScanDepthKey           = "s3_scan_depth"
 )
 
 const (
@@ -136,6 +140,59 @@ func metadataImageCount(metadataJSON []byte) int {
 		return n
 	}
 	return 0
+}
+
+func metadataProcessingMode(metadataJSON []byte) string {
+	metaMap := parseMetadataMap(metadataJSON)
+	if mode, ok := metaMap[metadataProcessingModeKey].(string); ok && mode != "" {
+		return mode
+	}
+	return workflows.ProcessingModeStandard
+}
+
+func metadataS3ScanDepth(metadataJSON []byte) int {
+	metaMap := parseMetadataMap(metadataJSON)
+	value, ok := metaMap[metadataS3ScanDepthKey]
+	if !ok {
+		return workflows.DefaultS3ScanDepth
+	}
+	switch n := value.(type) {
+	case float64:
+		return int(n)
+	case int64:
+		return int(n)
+	case int:
+		return n
+	}
+	return workflows.DefaultS3ScanDepth
+}
+
+func metadataExcludePaths(metadataJSON []byte) ([]string, bool) {
+	metaMap := parseMetadataMap(metadataJSON)
+	rawList, ok := metaMap[metadataExcludePathsKey]
+	if !ok {
+		return nil, false
+	}
+	listVal, ok := rawList.([]interface{})
+	if !ok {
+		return nil, false
+	}
+	out := make([]string, 0, len(listVal))
+	for _, item := range listVal {
+		if s, ok := item.(string); ok {
+			out = append(out, s)
+		}
+	}
+	return out, true
+}
+
+func metadataUseDefaultExcludes(metadataJSON []byte) bool {
+	metaMap := parseMetadataMap(metadataJSON)
+	if v, ok := metaMap[metadataUseDefaultExcludesKey].(bool); ok {
+		return v
+	}
+	// Absent/legacy jobs default to true to preserve safer behaviour.
+	return true
 }
 
 func metadataImageTotalBytes(metadataJSON []byte) int64 {
@@ -295,6 +352,47 @@ type TaskNewRequest struct {
 	// Optional override for creation timestamp. If omitted, the server uses the current
 	// time when the job is created.
 	DateCreated int64 `json:"dateCreated,omitempty" form:"dateCreated" doc:"Override creation timestamp (optional; defaults to current time when omitted)"`
+
+	// ProcessingMode selects the pipeline shape. Pick the mode that matches
+	// the post-processing needs; the depth/scope of the input scan is
+	// configured separately via S3ScanDepth.
+	//
+	// Supported today:
+	//   - "standard" (default): the regular ODM pipeline (download → process
+	//     → upload). Imagery under readS3Path is gathered into a single ODM
+	//     run; how deep the scan walks beneath readS3Path is controlled by
+	//     s3ScanDepth.
+	//
+	// Reserved (return 501 today):
+	//   - "merge-existing": stitch already-processed per-task outputs (orthos,
+	//     DEMs, point clouds) into a single set of products via the merge
+	//     half of split-merge. Much cheaper than re-running per-task
+	//     processing.
+	//   - "thermal": thermal imagery pipeline with dedicated pre-processing
+	//     before ODM (radiometric handling, alignment).
+	//   - "city-scale": large-area (>40 km²) projects with iterative
+	//     corrective alignment from a central task using prior LAZ point
+	//     clouds, plus a final alignment pass against a global DEM.
+	ProcessingMode string `json:"processingMode,omitempty" form:"processingMode" doc:"Pipeline mode: 'standard' (default). Reserved: 'merge-existing', 'thermal', 'city-scale'."`
+
+	// S3ScanDepth caps how deep the download stage walks beneath readS3Path.
+	// Defaults to 1 (only files directly under the given path - the right
+	// choice for layouts like '.../task-id/images/'). Use a higher value to
+	// roll up multiple task subdirs under a project root (e.g. depth 3 with
+	// readS3Path 'projectid/' picks up 'projectid/taskid/images/*.jpg').
+	// Range: 1..10. A nil/zero value resolves to the default.
+	S3ScanDepth *int `json:"s3ScanDepth,omitempty" form:"s3ScanDepth" doc:"Max depth for the rclone scan beneath readS3Path (default 1, max 10). Use >1 to pick up imagery under nested task subdirs."`
+
+	// ExcludePaths is an optional JSON array of rclone-style filter patterns
+	// applied to the download stage on top of the default set. Patterns must
+	// be relative (no leading '/'), contain no '..' segments, and use only
+	// glob metacharacters. Example: ["scratch/**", "*.bak"].
+	ExcludePaths string `json:"excludePaths,omitempty" form:"excludePaths" doc:"JSON array of rclone-style exclude patterns appended to the default set"`
+
+	// UseDefaultExcludes controls whether DefaultProjectExcludes is applied.
+	// Defaults to true; set to false only when you genuinely want to
+	// re-process a previous ODM run's output as input.
+	UseDefaultExcludes *bool `json:"useDefaultExcludes,omitempty" form:"useDefaultExcludes" doc:"Apply the built-in ODM-output exclude list (default: true)"`
 }
 
 type Response struct {
@@ -418,7 +516,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		resp := &InfoResponse{}
-		resp.Body.Version = "0.3.1" // The ScaleODM version (normally the NodeODM version)
+		resp.Body.Version = "0.4.0" // The ScaleODM version (normally the NodeODM version)
 		resp.Body.TaskQueueCount = queueCount
 		resp.Body.MaxImages = nil // Unlimited
 		resp.Body.Engine = "odm"
@@ -511,7 +609,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Log incoming task creation request
 		log.Printf(
-			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t webhook_set=%t s3Region=%q s3Endpoint=%q dateCreated=%d token_provided=%t setUUID_set=%t",
+			"POST /task/new: name=%q readS3Path=%q writeS3Path=%q zipurl=%q skipPostProcessing=%t webhook_set=%t s3Region=%q s3Endpoint=%q dateCreated=%d processingMode=%q token_provided=%t setUUID_set=%t",
 			req.Name,
 			req.ReadS3Path,
 			req.WriteS3Path,
@@ -521,9 +619,65 @@ func (a *API) registerNodeODMRoutes() {
 			req.S3Region,
 			req.S3Endpoint,
 			req.DateCreated,
+			req.ProcessingMode,
 			input.Token != "",
 			input.SetUUID != "",
 		)
+
+		// Resolve processing mode + compose exclude list before doing any
+		// expensive work. Reserved modes get 501 so clients can probe support.
+		processingMode := req.ProcessingMode
+		if processingMode == "" {
+			processingMode = workflows.ProcessingModeStandard
+		}
+		if workflows.IsReservedProcessingMode(processingMode) {
+			metricResult = "failure"
+			metricReason = "processing_mode_not_implemented"
+			log.Printf("POST /task/new: processingMode=%q is reserved but not yet implemented", processingMode)
+			return nil, huma.NewError(501, fmt.Sprintf("processingMode %q is reserved for a future pipeline and is not yet implemented", processingMode))
+		}
+		if !workflows.IsImplementedProcessingMode(processingMode) {
+			metricResult = "failure"
+			metricReason = "invalid_processing_mode"
+			log.Printf("POST /task/new: invalid processingMode=%q", processingMode)
+			return nil, huma.NewError(400, fmt.Sprintf("invalid processingMode %q (supported: standard)", processingMode))
+		}
+
+		s3ScanDepth := 0
+		if req.S3ScanDepth != nil {
+			s3ScanDepth = *req.S3ScanDepth
+		}
+		s3ScanDepth, err := workflows.ValidateS3ScanDepth(s3ScanDepth)
+		if err != nil {
+			metricResult = "failure"
+			metricReason = "invalid_s3_scan_depth"
+			log.Printf("POST /task/new: invalid s3ScanDepth: %v", err)
+			return nil, huma.NewError(400, err.Error())
+		}
+
+		var userExcludes []string
+		if strings.TrimSpace(req.ExcludePaths) != "" {
+			if err := json.Unmarshal([]byte(req.ExcludePaths), &userExcludes); err != nil {
+				metricResult = "failure"
+				metricReason = "invalid_exclude_paths"
+				log.Printf("POST /task/new: invalid excludePaths JSON: %v", err)
+				return nil, huma.NewError(400, "Invalid excludePaths JSON (expected an array of strings)", err)
+			}
+			for _, p := range userExcludes {
+				if err := workflows.ValidateExcludePattern(p); err != nil {
+					metricResult = "failure"
+					metricReason = "invalid_exclude_pattern"
+					log.Printf("POST /task/new: invalid exclude pattern %q: %v", p, err)
+					return nil, huma.NewError(400, fmt.Sprintf("invalid exclude pattern %q: %s", p, err.Error()))
+				}
+			}
+		}
+
+		useDefaultExcludes := true
+		if req.UseDefaultExcludes != nil {
+			useDefaultExcludes = *req.UseDefaultExcludes
+		}
+		excludePatterns := workflows.ComposeExcludePatterns(useDefaultExcludes, userExcludes)
 
 		// Parse options if provided
 		var options []TaskOption
@@ -663,7 +817,7 @@ func (a *API) registerNodeODMRoutes() {
 			log.Printf("POST /task/new: failed to construct S3 client for image counting endpoint=%q: %v", s3Endpoint, clientErr)
 			return nil, huma.NewError(500, "Failed to initialize S3 client", clientErr)
 		}
-		imageCount, imageTotalBytes, countErr := s3.CountImageStatsInS3Path(ctx, taskClient, readPath)
+		imageCount, imageTotalBytes, countErr := s3.CountImageStatsInS3PathWithExcludes(ctx, taskClient, readPath, excludePatterns)
 		if countErr != nil {
 			metricResult = "failure"
 			metricReason = "image_count_failed"
@@ -684,6 +838,9 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.S3Endpoint = s3Endpoint
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
+		wfConfig.ProcessingMode = processingMode
+		wfConfig.ExcludePaths = excludePatterns
+		wfConfig.S3ScanDepth = s3ScanDepth
 
 		// Submit workflow to Argo
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
@@ -736,6 +893,10 @@ func (a *API) registerNodeODMRoutes() {
 			metadataImageCountKey:            imageCount,
 			metadataImageTotalBytesKey:       imageTotalBytes,
 			metadataWorkflowMissingFirstSeen: nil,
+			metadataProcessingModeKey:        processingMode,
+			metadataExcludePathsKey:          userExcludes,
+			metadataUseDefaultExcludesKey:    useDefaultExcludes,
+			metadataS3ScanDepthKey:           s3ScanDepth,
 		}
 		if s3Endpoint != "" {
 			metadataUpdates[metadataS3EndpointKey] = s3Endpoint
@@ -1238,6 +1399,15 @@ func (a *API) registerNodeODMRoutes() {
 		}
 		log.Printf("POST /task/restart: endpoint selection endpoint=%q allowlist_enforced=%t", s3Endpoint, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
 
+		processingMode := metadataProcessingMode(metadata.Metadata)
+		userExcludes, _ := metadataExcludePaths(metadata.Metadata)
+		useDefaultExcludes := metadataUseDefaultExcludes(metadata.Metadata)
+		excludePatterns := workflows.ComposeExcludePatterns(useDefaultExcludes, userExcludes)
+		s3ScanDepth, depthErr := workflows.ValidateS3ScanDepth(metadataS3ScanDepth(metadata.Metadata))
+		if depthErr != nil {
+			s3ScanDepth = workflows.DefaultS3ScanDepth
+		}
+
 		imageCount := metadataImageCount(metadata.Metadata)
 		imageTotalBytes := metadataImageTotalBytes(metadata.Metadata)
 		if imageCount == 0 || imageTotalBytes == 0 {
@@ -1246,7 +1416,7 @@ func (a *API) registerNodeODMRoutes() {
 				taskClient, clientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
 			}
 			if clientErr == nil {
-				if counted, totalBytes, countErr := s3.CountImageStatsInS3Path(ctx, taskClient, metadata.ReadS3Path); countErr == nil {
+				if counted, totalBytes, countErr := s3.CountImageStatsInS3PathWithExcludes(ctx, taskClient, metadata.ReadS3Path, excludePatterns); countErr == nil {
 					if imageCount == 0 {
 						imageCount = counted
 					}
@@ -1267,6 +1437,9 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.S3Endpoint = s3Endpoint
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
+		wfConfig.ProcessingMode = processingMode
+		wfConfig.ExcludePaths = excludePatterns
+		wfConfig.S3ScanDepth = s3ScanDepth
 
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
 		if err != nil {
@@ -1313,81 +1486,81 @@ func (a *API) registerNodeODMRoutes() {
 		return &Response{Success: true}, nil
 	})
 
-		// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)
-		// Registered as a raw HTTP handler on the mux for reliable redirect support.
-		// Huma handlers return structured responses which can't express HTTP redirects,
-		// so we handle this endpoint outside Huma.
-		a.downloadHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			uuid := r.PathValue("uuid")
-			asset := r.PathValue("asset")
-			log.Printf("GET /task/%s/download/%s", uuid, asset)
+	// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)
+	// Registered as a raw HTTP handler on the mux for reliable redirect support.
+	// Huma handlers return structured responses which can't express HTTP redirects,
+	// so we handle this endpoint outside Huma.
+	a.downloadHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		uuid := r.PathValue("uuid")
+		asset := r.PathValue("asset")
+		log.Printf("GET /task/%s/download/%s", uuid, asset)
 
-			metadata, err := a.metadataStore.GetJob(r.Context(), uuid)
-			if err != nil {
-				log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", uuid, asset, err)
-				http.Error(w, `{"error":"Failed to retrieve task metadata"}`, http.StatusInternalServerError)
-				return
-			}
-			if metadata == nil {
-				log.Printf("GET /task/%s/download/%s: task not found", uuid, asset)
-				http.Error(w, `{"error":"Task not found"}`, http.StatusNotFound)
-				return
-			}
-			if metadata.WriteS3Path == "" {
-				log.Printf("GET /task/%s/download/%s: write S3 path not available", uuid, asset)
-				http.Error(w, `{"error":"Write S3 path not available for this task"}`, http.StatusBadRequest)
-				return
-			}
+		metadata, err := a.metadataStore.GetJob(r.Context(), uuid)
+		if err != nil {
+			log.Printf("GET /task/%s/download/%s: failed to retrieve metadata: %v", uuid, asset, err)
+			http.Error(w, `{"error":"Failed to retrieve task metadata"}`, http.StatusInternalServerError)
+			return
+		}
+		if metadata == nil {
+			log.Printf("GET /task/%s/download/%s: task not found", uuid, asset)
+			http.Error(w, `{"error":"Task not found"}`, http.StatusNotFound)
+			return
+		}
+		if metadata.WriteS3Path == "" {
+			log.Printf("GET /task/%s/download/%s: write S3 path not available", uuid, asset)
+			http.Error(w, `{"error":"Write S3 path not available for this task"}`, http.StatusBadRequest)
+			return
+		}
 
-			s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(metadata.Metadata)
-			if clientErr != nil {
-				log.Printf("GET /task/%s/download/%s: failed to initialize S3 client endpoint=%q: %v", uuid, asset, selectedEndpoint, clientErr)
-				http.Error(w, `{"error":"Failed to initialize S3 client"}`, http.StatusInternalServerError)
+		s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(metadata.Metadata)
+		if clientErr != nil {
+			log.Printf("GET /task/%s/download/%s: failed to initialize S3 client endpoint=%q: %v", uuid, asset, selectedEndpoint, clientErr)
+			http.Error(w, `{"error":"Failed to initialize S3 client"}`, http.StatusInternalServerError)
+			return
+		}
+
+		requestedAsset := asset
+		if resolvedAsset, isAlias, resolveErr := resolveAssetAliasCandidate(r.Context(), s3Client, metadata.WriteS3Path, requestedAsset); resolveErr != nil {
+			log.Printf("GET /task/%s/download/%s: failed to resolve asset alias: %v", uuid, asset, resolveErr)
+			http.Error(w, `{"error":"Failed to resolve asset alias"}`, http.StatusInternalServerError)
+			return
+		} else if isAlias {
+			if resolvedAsset == "" {
+				log.Printf("GET /task/%s/download/%s: alias requested but no asset found", uuid, asset)
+				http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, asset), http.StatusNotFound)
 				return
 			}
+			asset = resolvedAsset
+		}
 
-			requestedAsset := asset
-			if resolvedAsset, isAlias, resolveErr := resolveAssetAliasCandidate(r.Context(), s3Client, metadata.WriteS3Path, requestedAsset); resolveErr != nil {
-				log.Printf("GET /task/%s/download/%s: failed to resolve asset alias: %v", uuid, asset, resolveErr)
-				http.Error(w, `{"error":"Failed to resolve asset alias"}`, http.StatusInternalServerError)
-				return
-			} else if isAlias {
-				if resolvedAsset == "" {
-					log.Printf("GET /task/%s/download/%s: alias requested but no asset found", uuid, asset)
-					http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, asset), http.StatusNotFound)
+		presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
+		if err == nil {
+			log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL for key=%q (expires in 1 hour)", uuid, requestedAsset, asset)
+			http.Redirect(w, r, presignedURL, http.StatusFound)
+			return
+		}
+
+		if requestedAsset == "all.zip" {
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", `attachment; filename="all.zip"`)
+
+			written, streamErr := s3.StreamS3PathAsZip(r.Context(), s3Client, metadata.WriteS3Path, w)
+			if streamErr != nil {
+				if streamErr == s3.ErrNoObjectsToZip {
+					log.Printf("GET /task/%s/download/%s: no output objects found for synthetic all.zip", uuid, requestedAsset)
+					http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
 					return
 				}
-				asset = resolvedAsset
-			}
-
-			presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
-			if err == nil {
-				log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL for key=%q (expires in 1 hour)", uuid, requestedAsset, asset)
-				http.Redirect(w, r, presignedURL, http.StatusFound)
+				log.Printf("GET /task/%s/download/%s: failed to stream synthetic all.zip: %v", uuid, requestedAsset, streamErr)
 				return
 			}
+			log.Printf("GET /task/%s/download/%s: streamed synthetic all.zip with %d entries", uuid, requestedAsset, written)
+			return
+		}
 
-			if requestedAsset == "all.zip" {
-				w.Header().Set("Content-Type", "application/zip")
-				w.Header().Set("Content-Disposition", `attachment; filename="all.zip"`)
-
-				written, streamErr := s3.StreamS3PathAsZip(r.Context(), s3Client, metadata.WriteS3Path, w)
-				if streamErr != nil {
-					if streamErr == s3.ErrNoObjectsToZip {
-						log.Printf("GET /task/%s/download/%s: no output objects found for synthetic all.zip", uuid, requestedAsset)
-						http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
-						return
-					}
-					log.Printf("GET /task/%s/download/%s: failed to stream synthetic all.zip: %v", uuid, requestedAsset, streamErr)
-					return
-				}
-				log.Printf("GET /task/%s/download/%s: streamed synthetic all.zip with %d entries", uuid, requestedAsset, written)
-				return
-			}
-
-			log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, requestedAsset, err)
-			http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
-		})
+		log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, requestedAsset, err)
+		http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
+	})
 }
 
 // Helper functions

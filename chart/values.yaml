@@ -147,7 +147,7 @@ config:
   observability:
     enabled: false
     serviceName: "scaleodm"
-    serviceVersion: "0.3.1"
+    serviceVersion: "0.4.0"
     otlpEndpoint: ""
     otlpInsecure: false
     metricsEnabled: true

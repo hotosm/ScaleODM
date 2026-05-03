@@ -67,6 +67,18 @@ type ODMPipelineConfig struct {
 	RcloneImage    string
 	ODMImage       string
 
+	// ProcessingMode selects the pipeline shape; see processing_mode.go.
+	// Empty string is treated as ProcessingModeStandard.
+	ProcessingMode string
+	// ExcludePaths is the rclone-style filter pattern list used by the
+	// download stage. Already composed (defaults + user) by the API layer.
+	ExcludePaths []string
+	// S3ScanDepth caps how deep rclone walks beneath ReadS3Path during the
+	// download stage. Defaults to DefaultS3ScanDepth (1) - i.e. only files
+	// directly under the given path. Values > 1 let callers point at a
+	// higher-level project root and pick up imagery in nested task subdirs.
+	S3ScanDepth int
+
 	RuntimeGuardrails WorkflowRuntimeGuardrails
 	Workspace         WorkspaceConfig
 	DownloadResources ContainerResources
@@ -101,6 +113,8 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 		ReadS3Path:     readS3Path,
 		WriteS3Path:    writeS3Path,
 		ODMFlags:       odmFlags,
+		ProcessingMode: ProcessingModeStandard,
+		S3ScanDepth:    DefaultS3ScanDepth,
 		S3Region:       "us-east-1",
 		S3Endpoint:     "",
 		ServiceAccount: "argo-odm",
@@ -400,7 +414,7 @@ func s3SecretEnvVars(cfg *ODMPipelineConfig) []apiv1.EnvVar {
 
 	envVars := []apiv1.EnvVar{
 		{
-			Name: "TMPDIR",
+			Name:  "TMPDIR",
 			Value: "/tmp",
 		},
 		{
@@ -528,7 +542,7 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 			Name:            "download",
 			Image:           cfg.RcloneImage,
 			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{s3.GenerateDownloadScript(jobID, cfg.ReadS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.download.log"},
+			Args:            []string{s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth) + " 2>&1 | tee /workspace/{{workflow.name}}/.download.log"},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
 			SecurityContext: workflowContainerSecurityContext(),

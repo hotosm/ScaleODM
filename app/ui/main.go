@@ -271,7 +271,6 @@ func (h *Handler) loadTaskOutput(ctx context.Context, job *meta.JobMetadata) (st
 	return builder.String(), nil
 }
 
-
 func taskS3Client(metadataJSON []byte) (*minio.Client, error) {
 	metaMap := parseMetadataMap(metadataJSON)
 	endpoint, _ := metaMap["s3_endpoint"].(string)

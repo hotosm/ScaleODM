@@ -174,7 +174,7 @@ Returns node information including queue count and engine version.
 
 ```json
 {
-  "version": "0.3.1",
+  "version": "0.4.0",
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
@@ -203,11 +203,83 @@ Creates a new processing task.
 | `s3Region` | | S3 region. Defaults to `us-east-1`. |
 | `webhook` | | Callback URL on completion. |
 | `skipPostProcessing` | | Skip point cloud tiles. |
+| `processingMode` | | Pipeline mode. See [Processing Modes](#processing-modes). Defaults to `standard`. |
+| `s3ScanDepth` | | Max depth for the rclone scan beneath `readS3Path`. Defaults to `1` (just the given dir). Range: `1`–`10`. See [Scan depth](#scan-depth). |
+| `excludePaths` | | JSON array of rclone-style filter patterns appended to the default exclude set. |
+| `useDefaultExcludes` | | Apply the built-in ODM-output exclude list. Defaults to `true`. |
 
 \* One of `zipurl` or `readS3Path` is required. Both must be `s3://` paths.
 
 When using `zipurl`, outputs are written to `{zipurl}-output/`.
 When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `writeS3Path`).
+
+#### Processing modes
+
+`processingMode` selects the pipeline shape. Today only `standard` is implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).
+
+| Mode | Status | Behaviour |
+|------|--------|-----------|
+| `standard` | implemented (default) | The regular ODM pipeline: download → process → upload. Imagery under `readS3Path` is gathered into a single ODM run. How wide the input scan is is configured separately via [`s3ScanDepth`](#scan-depth) - use depth `1` for one task's images dir, or a higher value to roll up several task subdirs under a project root. |
+| `merge-existing` | reserved (501) | Given a project root that already contains per-task ODM outputs, run only the merge half of split-merge to stitch the existing orthos, DEMs, and point clouds into a single set of products. The "split" half is assumed already complete, which is much cheaper than re-running per-task processing from raw imagery. |
+| `thermal` | reserved (501) | Dedicated pipeline for thermal imagery: applies a thermal-specific pre-processing stage (radiometric handling, alignment) before the ODM run. Implementation deferred. |
+| `city-scale` | reserved (501) | Large-area (>40 km²) projects requiring corrective alignment. The pipeline iteratively fans out from a central anchor task, aligning each subsequent task against prior LAZ point clouds, then runs a final alignment pass against a global DEM. Implementation deferred. |
+
+Reserved modes return HTTP 501 with a clear message so clients can probe support.
+
+#### Scan depth
+
+`s3ScanDepth` caps how deep the download stage walks beneath `readS3Path`. It maps directly to rclone's `--max-depth N`.
+
+| `s3ScanDepth` | Behaviour | When to use |
+|---------------|-----------|-------------|
+| `1` (default) | Only files in the given directory itself. | `readS3Path` already points at the imagery dir, e.g. `s3://bucket/project-id/task-id/images/`. |
+| `2`–`10` | Walks N levels of subdirectories. | `readS3Path` points at a higher-level prefix that contains nested task layouts. For DroneTM-style `projectid/taskid/images/*.jpg`, a depth of `3` against `s3://bucket/projectid/` will pick up imagery in every task subdir in one run. |
+| `0`/unset | Resolved to the default (`1`). | - |
+
+Values outside `1`–`10` are rejected with HTTP 400.
+
+#### Exclude patterns
+
+The download stage applies a default exclude list when `useDefaultExcludes` is `true` (the default). The current default set is:
+
+```
+odm_orthophoto/**
+odm_dem/**
+odm_dem_tiles/**
+odm_texturing/**
+odm_texturing_25d/**
+odm_meshing/**
+odm_filterpoints/**
+odm_georeferencing/**
+odm_report/**
+images_resize/**
+entwine_pointcloud/**
+mapproxy/**
+submodels/**
+*-output/**
+all.zip
+**/all.zip
+```
+
+These are rclone filter patterns: `dir/**` matches the directory at any depth and excludes its contents. The `all.zip` entries are critical - the download stage auto-extracts archives with junk-paths, so a stray `all.zip` from a prior run would otherwise dump every flattened orthophoto/DSM/log file into the input image dir.
+
+Set `useDefaultExcludes: false` only if you genuinely want to re-process a prior run's output as input.
+
+`excludePaths` accepts a JSON array of additional patterns, validated for path traversal (`..`), absolute paths (leading `/`), embedded newlines, and shell metacharacters. Patterns are written to a `--filter-from` file at workflow runtime, so they never touch a shell.
+
+Example - roll up every task under a project root into one run, deeper scan, and ignore a custom scratch dir:
+
+```bash
+curl -X POST http://scaleodm:31100/task/new \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "project-123",
+    "readS3Path": "s3://mybucket/project-123/",
+    "processingMode": "standard",
+    "s3ScanDepth": 3,
+    "excludePaths": "[\"scratch/**\", \"*.bak\"]"
+  }'
+```
 
 If `s3Endpoint` is provided, ScaleODM applies that endpoint to workflow pods and API-side
 S3 operations (image counting, log fallback, and pre-signed downloads). Endpoints are
@@ -349,6 +421,8 @@ helm install scaleodm ./chart -n scaleodm -f values-production.yaml
 
 ### S3 Structure
 
+Single-task layout (default - `s3ScanDepth: 1`):
+
 ```
 s3://mybucket/
   └── project-123/
@@ -363,6 +437,23 @@ s3://mybucket/
           │   ├── dsm.tif
           │   └── dtm.tif
           └── ...
+```
+
+Multi-task layout (set `s3ScanDepth` deep enough to reach the imagery - typically `3` for `projectid/taskid/images/*.jpg`) - point `readS3Path` at the project root and ScaleODM gathers every task's imagery into one run:
+
+```
+s3://mybucket/project-123/   ← readS3Path points here
+  ├── task-a/
+  │   ├── images/
+  │   │   ├── DJI_0001.jpg
+  │   │   └── DJI_0002.jpg
+  │   └── output/            ← excluded by default
+  │       └── odm_orthophoto/odm_orthophoto.tif
+  ├── task-b/
+  │   └── images/
+  │       ├── DJI_0101.jpg
+  │       └── DJI_0102.jpg
+  └── output/                ← project-level output written here
 ```
 
 ### Testing

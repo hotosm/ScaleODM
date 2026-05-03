@@ -381,6 +381,23 @@ func ProbeS3Path(ctx context.Context, client *minio.Client, s3Path string) error
 
 // CountImageStatsInS3Path counts supported image files and sums their object sizes under an S3 path recursively.
 func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Path string) (int, int64, error) {
+	return CountImageStatsInS3PathWithExcludes(ctx, client, readS3Path, nil)
+}
+
+// CountImageStatsInS3PathWithExcludes is like CountImageStatsInS3Path but
+// applies a best-effort filter that mirrors the rclone --filter-from set used
+// by the download stage. It is intentionally approximate: rclone is the
+// authoritative filter at workflow runtime, and a small mismatch here only
+// affects pre-flight resource sizing, never final output correctness.
+//
+// Patterns supported (covers everything in DefaultProjectExcludes):
+//   - "name/**" or "**/name/**"   → exclude any path with `name` as a directory segment
+//   - "name" or "**/name"         → exclude exact basename match
+//   - "*.ext"                     → exclude by extension
+//
+// Patterns this function doesn't recognise are ignored at the API layer; rclone
+// will still apply them in-pod.
+func CountImageStatsInS3PathWithExcludes(ctx context.Context, client *minio.Client, readS3Path string, excludePatterns []string) (int, int64, error) {
 	bucket, prefix, err := parseS3Path(readS3Path)
 	if err != nil {
 		return 0, 0, err
@@ -391,7 +408,8 @@ func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Pa
 		Recursive: true,
 	})
 
-	return accumulateImageStatsFromObjects(objectCh)
+	matcher := compileExcludeMatcher(excludePatterns)
+	return accumulateImageStatsFromObjectsWithExcludes(objectCh, prefix, matcher)
 }
 
 // CountImageFilesInS3Path counts image files under an S3 path recursively.
@@ -404,6 +422,10 @@ func CountImageFilesInS3Path(ctx context.Context, client *minio.Client, readS3Pa
 }
 
 func accumulateImageStatsFromObjects(objectCh <-chan minio.ObjectInfo) (int, int64, error) {
+	return accumulateImageStatsFromObjectsWithExcludes(objectCh, "", excludeMatcher{})
+}
+
+func accumulateImageStatsFromObjectsWithExcludes(objectCh <-chan minio.ObjectInfo, prefix string, matcher excludeMatcher) (int, int64, error) {
 	count := 0
 	totalBytes := int64(0)
 	for object := range objectCh {
@@ -416,6 +438,9 @@ func accumulateImageStatsFromObjects(objectCh <-chan minio.ObjectInfo) (int, int
 		if !isSupportedImageKey(object.Key) {
 			continue
 		}
+		if matcher.matches(object.Key, prefix) {
+			continue
+		}
 		count++
 		if object.Size > 0 {
 			totalBytes += object.Size
@@ -423,6 +448,85 @@ func accumulateImageStatsFromObjects(objectCh <-chan minio.ObjectInfo) (int, int
 	}
 
 	return count, totalBytes, nil
+}
+
+// excludeMatcher is a small, exact-match-only pattern matcher used for
+// pre-flight image counting. It is not a full rclone filter implementation;
+// see CountImageStatsInS3PathWithExcludes for the supported subset.
+type excludeMatcher struct {
+	dirs       map[string]struct{}
+	basenames  map[string]struct{}
+	extensions map[string]struct{}
+}
+
+func compileExcludeMatcher(patterns []string) excludeMatcher {
+	m := excludeMatcher{
+		dirs:       map[string]struct{}{},
+		basenames:  map[string]struct{}{},
+		extensions: map[string]struct{}{},
+	}
+	for _, raw := range patterns {
+		p := strings.TrimSpace(raw)
+		if p == "" {
+			continue
+		}
+		// Directory pattern: "name/**" or "**/name/**" → exclude segment "name"
+		trimmed := strings.TrimPrefix(p, "**/")
+		if strings.HasSuffix(trimmed, "/**") {
+			name := strings.TrimSuffix(trimmed, "/**")
+			if name != "" && !strings.ContainsAny(name, "*?[]/") {
+				m.dirs[name] = struct{}{}
+				continue
+			}
+		}
+		// Trailing-slash directory form: "name/" → exclude segment "name"
+		if strings.HasSuffix(trimmed, "/") {
+			name := strings.TrimSuffix(trimmed, "/")
+			if name != "" && !strings.ContainsAny(name, "*?[]/") {
+				m.dirs[name] = struct{}{}
+				continue
+			}
+		}
+		// Extension: "*.ext"
+		if strings.HasPrefix(trimmed, "*.") && !strings.ContainsAny(trimmed[2:], "*?[]/") {
+			m.extensions[strings.ToLower(trimmed[1:])] = struct{}{}
+			continue
+		}
+		// Plain basename: "name.ext" or "name"
+		if !strings.ContainsAny(trimmed, "*?[]/") {
+			m.basenames[trimmed] = struct{}{}
+		}
+	}
+	return m
+}
+
+func (m excludeMatcher) matches(objectKey, prefix string) bool {
+	rel := strings.TrimPrefix(objectKey, prefix)
+	rel = strings.TrimPrefix(rel, "/")
+	if rel == "" {
+		return false
+	}
+
+	parts := strings.Split(rel, "/")
+	if len(parts) > 1 {
+		for _, segment := range parts[:len(parts)-1] {
+			if _, ok := m.dirs[segment]; ok {
+				return true
+			}
+		}
+	}
+
+	base := parts[len(parts)-1]
+	if _, ok := m.basenames[base]; ok {
+		return true
+	}
+	if len(m.extensions) > 0 {
+		ext := strings.ToLower(filepath.Ext(base))
+		if _, ok := m.extensions[ext]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func isSupportedImageKey(objectKey string) bool {

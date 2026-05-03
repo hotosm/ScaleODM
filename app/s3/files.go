@@ -1,7 +1,52 @@
 package s3
 
+import (
+	"fmt"
+	"strings"
+)
+
 // File handling utilities for S3-based workflows
 // These functions generate shell scripts for use in Argo workflow containers
+
+// imageIncludePatterns is the canonical rclone filter list for input imagery
+// and supported archive types. Mirrored as `+ <pattern>` lines in the
+// generated --filter-from file.
+var imageIncludePatterns = []string{
+	"*.jpg",
+	"*.jpeg",
+	"*.JPG",
+	"*.JPEG",
+	"*.tiff",
+	"*.tif",
+	"*.TIFF",
+	"*.TIF",
+	"*.zip",
+	"*.ZIP",
+	"*.tar.gz",
+	"*.tar",
+	"*.TAR.GZ",
+	"*.TAR",
+}
+
+// renderRcloneFilterFile builds the contents of a rclone --filter-from file.
+// Order matters: excludes go first (so they win over the catch-all includes
+// below), then includes for image/archive extensions, then a final catch-all
+// that drops everything else.
+func renderRcloneFilterFile(excludePatterns []string) string {
+	var b strings.Builder
+	for _, p := range excludePatterns {
+		b.WriteString("- ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	for _, p := range imageIncludePatterns {
+		b.WriteString("+ ")
+		b.WriteString(p)
+		b.WriteString("\n")
+	}
+	b.WriteString("- *\n")
+	return b.String()
+}
 
 func rcloneS3ConfigSnippet() string {
 	return `PROVIDER="AWS"
@@ -29,7 +74,29 @@ fi`
 // GenerateDownloadScript generates a shell script for downloading and processing imagery from S3
 // Credentials are injected via Kubernetes Secret references in the workflow spec
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
-func GenerateDownloadScript(jobID, srcPath string) string {
+//
+// excludePatterns are rclone-style filter patterns (relative paths, no leading
+// "/", validated by the API layer). They are written verbatim to a
+// --filter-from file in the workspace, so user input never touches the shell.
+// The default set always includes "output/**" and "**/output/**" so prior
+// ScaleODM auto-output dirs are skipped even when the caller supplies no
+// excludes; the API layer is responsible for prepending the broader
+// DefaultProjectExcludes set when useDefaultExcludes is true.
+//
+// maxDepth caps how deep rclone walks beneath srcPath. A value > 0 maps to
+// `--max-depth N`; values <= 0 mean "no limit" so callers wanting an
+// unbounded scan can opt in explicitly.
+func GenerateDownloadScript(jobID, srcPath string, excludePatterns []string, maxDepth int) string {
+	patterns := make([]string, 0, len(excludePatterns)+2)
+	patterns = append(patterns, "output/**", "**/output/**")
+	patterns = append(patterns, excludePatterns...)
+	filterFileContents := renderRcloneFilterFile(patterns)
+
+	maxDepthFlag := ""
+	if maxDepth > 0 {
+		maxDepthFlag = fmt.Sprintf(" --max-depth %d", maxDepth)
+	}
+
 	return `set -e
 echo "Downloading imagery from S3..."
 JOB_ID="` + jobID + `"
@@ -56,27 +123,16 @@ else
   S3_REMOTE="$SRC_PATH"
 fi
 
+# Write rclone filter file. Excludes win over the include patterns below
+# because rclone applies filter rules top-to-bottom.
+FILTER_FILE="$RCLONE_DIR/filters.txt"
+cat > "$FILTER_FILE" <<'RCLONE_FILTER_EOF'
+` + filterFileContents + `RCLONE_FILTER_EOF
+
 echo "Downloading files with filters..."
-# Use --filter instead of --include/--exclude for deterministic ordering
-# Order matters: exclusions first, then inclusions, then exclude everything else
-rclone copy "$S3_REMOTE" "$DEST_DIR" \
-  --filter "- output/**" \
-  --filter "- **/output/**" \
-  --filter "+ *.jpg" \
-  --filter "+ *.jpeg" \
-  --filter "+ *.JPG" \
-  --filter "+ *.JPEG" \
-  --filter "+ *.tiff" \
-  --filter "+ *.tif" \
-  --filter "+ *.TIFF" \
-  --filter "+ *.TIF" \
-  --filter "+ *.zip" \
-  --filter "+ *.ZIP" \
-  --filter "+ *.tar.gz" \
-  --filter "+ *.tar" \
-  --filter "+ *.TAR.GZ" \
-  --filter "+ *.TAR" \
-  --filter "- *" \
+echo "Filter file contents:"
+cat "$FILTER_FILE"
+rclone copy "$S3_REMOTE" "$DEST_DIR" --filter-from "$FILTER_FILE"` + maxDepthFlag + `
 
 cd "$DEST_DIR"
 

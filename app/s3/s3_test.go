@@ -156,14 +156,14 @@ func TestRcloneS3ConfigSnippet_NoEndpointKeepsAWSProvider(t *testing.T) {
 }
 
 func TestGenerateDownloadScript_FailsOnExtractionErrors(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/")
+	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
 	assert.NotContains(t, script, "|| true")
 	assert.Contains(t, script, "ERROR: Failed to extract zip archive")
 	assert.Contains(t, script, "ERROR: Failed to extract tar archive")
 }
 
 func TestGenerateDownloadScript_DeletesArchivesOnlyAfterSuccess(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/")
+	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
 	zipExtract := "if ! unzip -q -o -j \"$zipfile\" -d \"$(dirname \"$zipfile\")\"; then"
 	zipDelete := "rm -f \"$zipfile\""
 	assert.Greater(t, strings.Index(script, zipDelete), strings.Index(script, zipExtract))
@@ -174,11 +174,120 @@ func TestGenerateDownloadScript_DeletesArchivesOnlyAfterSuccess(t *testing.T) {
 }
 
 func TestGenerateDownloadScript_AvoidsFindPipeSubshellForArchiveDetection(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/")
+	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
 	assert.Contains(t, script, "while IFS= read -r zipfile;")
 	assert.Contains(t, script, "while IFS= read -r tarfile;")
 	assert.NotContains(t, script, "| while read zipfile")
 	assert.NotContains(t, script, "| while read tarfile")
+}
+
+func TestGenerateDownloadScript_UsesFilterFromFile(t *testing.T) {
+	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
+
+	// rclone is invoked with --filter-from, not a long --filter chain.
+	assert.Contains(t, script, "--filter-from \"$FILTER_FILE\"")
+	assert.NotContains(t, script, "--filter \"+ *.jpg\"")
+
+	// Built-in output excludes are still present even with no user excludes.
+	assert.Contains(t, script, "- output/**")
+	assert.Contains(t, script, "- **/output/**")
+
+	// Includes are emitted in the filter file.
+	for _, ext := range []string{"+ *.jpg", "+ *.tif", "+ *.zip", "+ *.tar.gz"} {
+		assert.Contains(t, script, ext)
+	}
+
+	// Final catch-all drops everything else.
+	assert.Contains(t, script, "\n- *\n")
+}
+
+func TestGenerateDownloadScript_EmbedsUserExcludesBeforeIncludes(t *testing.T) {
+	excludes := []string{"odm_orthophoto/**", "submodels/**", "all.zip"}
+	script := GenerateDownloadScript("job-1", "s3://bucket/input/", excludes, 1)
+
+	for _, p := range excludes {
+		assert.Contains(t, script, "- "+p+"\n")
+	}
+
+	// Excludes must appear before `+ *.jpg` so they win over the include rules.
+	excludeIdx := strings.Index(script, "- odm_orthophoto/**")
+	includeIdx := strings.Index(script, "+ *.jpg")
+	require.Greater(t, excludeIdx, 0)
+	require.Greater(t, includeIdx, 0)
+	assert.Less(t, excludeIdx, includeIdx, "excludes must precede includes in filter file")
+}
+
+func TestGenerateDownloadScript_MaxDepthFlag(t *testing.T) {
+	withDepth := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 3)
+	assert.Contains(t, withDepth, "--max-depth 3")
+
+	defaultDepth := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
+	assert.Contains(t, defaultDepth, "--max-depth 1")
+
+	unlimited := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 0)
+	assert.NotContains(t, unlimited, "--max-depth")
+}
+
+func TestRenderRcloneFilterFile_OrderingAndFormat(t *testing.T) {
+	out := renderRcloneFilterFile([]string{"odm_orthophoto/**", "all.zip"})
+
+	lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+	require.GreaterOrEqual(t, len(lines), 4)
+	assert.Equal(t, "- odm_orthophoto/**", lines[0])
+	assert.Equal(t, "- all.zip", lines[1])
+	assert.Equal(t, "- *", lines[len(lines)-1])
+
+	// Every line is one of: "- pattern", "+ pattern", or "- *".
+	for _, line := range lines {
+		require.True(t, strings.HasPrefix(line, "- ") || strings.HasPrefix(line, "+ "), "unexpected filter line: %q", line)
+	}
+}
+
+func TestExcludeMatcher_DirectoryNamePatterns(t *testing.T) {
+	m := compileExcludeMatcher([]string{"odm_orthophoto/**", "**/odm_dem/**", "submodels/**"})
+	prefix := "project-123/"
+
+	assert.True(t, m.matches("project-123/task-a/odm_orthophoto/odm_orthophoto.tif", prefix))
+	assert.True(t, m.matches("project-123/task-b/odm_dem/dsm.tif", prefix))
+	assert.True(t, m.matches("project-123/submodels/000/images/img.jpg", prefix))
+	assert.False(t, m.matches("project-123/task-a/images/img.jpg", prefix))
+}
+
+func TestExcludeMatcher_BasenameAndExtensionPatterns(t *testing.T) {
+	m := compileExcludeMatcher([]string{"all.zip", "**/all.zip", "*.bak"})
+	prefix := "project/"
+
+	assert.True(t, m.matches("project/all.zip", prefix))
+	assert.True(t, m.matches("project/task-a/all.zip", prefix))
+	assert.True(t, m.matches("project/task-a/scratch.bak", prefix))
+	assert.False(t, m.matches("project/task-a/img.jpg", prefix))
+}
+
+func TestExcludeMatcher_IgnoresUnrecognisedPatterns(t *testing.T) {
+	// `task-*/odm_*` isn't in our supported subset; matcher should treat it as
+	// inert (rclone is authoritative). No false positives on plain inputs.
+	m := compileExcludeMatcher([]string{"task-*/odm_*"})
+	assert.False(t, m.matches("project/task-a/odm_orthophoto.tif", "project/"))
+	assert.False(t, m.matches("project/task-a/images/img.jpg", "project/"))
+}
+
+func TestAccumulateImageStatsFromObjectsWithExcludes_SkipsExcludedPaths(t *testing.T) {
+	objectCh := make(chan minio.ObjectInfo, 6)
+	objectCh <- minio.ObjectInfo{Key: "project/task-a/images/img1.jpg", Size: 100}
+	objectCh <- minio.ObjectInfo{Key: "project/task-b/images/img2.jpg", Size: 200}
+	objectCh <- minio.ObjectInfo{Key: "project/task-a/odm_orthophoto/odm_orthophoto.tif", Size: 9999}
+	objectCh <- minio.ObjectInfo{Key: "project/task-b/odm_dem/dsm.tif", Size: 9999}
+	objectCh <- minio.ObjectInfo{Key: "project/submodels/000/images/sub.jpg", Size: 50}
+	objectCh <- minio.ObjectInfo{Key: "project/all.zip", Size: 7777}
+	close(objectCh)
+
+	matcher := compileExcludeMatcher([]string{
+		"odm_orthophoto/**", "odm_dem/**", "submodels/**", "all.zip", "**/all.zip",
+	})
+	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "project/", matcher)
+	require.NoError(t, err)
+	assert.Equal(t, 2, count)
+	assert.Equal(t, int64(300), totalBytes)
 }
 
 func testS3Client(t *testing.T) *minio.Client {

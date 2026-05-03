@@ -6,8 +6,8 @@ import (
 	"os"
 )
 
-// TestStandardWorkflow creates and monitors a standard ODM workflow
-// This is used for testing the workflow creation directly
+// TestStandardWorkflow creates and monitors a standard ODM workflow.
+// This is used for testing the workflow creation directly.
 func TestStandardWorkflow(ctx context.Context, client *Client) error {
 	// Define parameters - using test S3 paths from drone-tm-public bucket
 	odmProjectID := "test-fast-orthophoto"

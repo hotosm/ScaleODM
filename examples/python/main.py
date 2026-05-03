@@ -48,6 +48,8 @@ def create_task() -> str:
         "writeS3Path": write_s3_path,
         "s3Endpoint": s3_endpoint,
         "s3Region": "us-east-1",
+        "processingMode": "standard",
+        "s3ScanDepth": 1,
         "options": json.dumps(options),
     }
 

@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -48,7 +49,7 @@ func TestInfoEndpoint(t *testing.T) {
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, "0.3.1", response.Version)
+	assert.Equal(t, "0.4.0", response.Version)
 	assert.Equal(t, "odm", response.Engine)
 }
 
@@ -121,6 +122,166 @@ func TestTaskNewEndpoint(t *testing.T) {
 	// Should succeed (or fail with 400 if credentials are required)
 	// The actual behavior depends on S3 credential resolution
 	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest)
+}
+
+func TestTaskNew_AcceptsStandardProcessingMode(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	ctx := context.Background()
+	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
+	require.NoError(t, err, "Failed to set up test S3 bucket")
+
+	depth := 3
+	body, err := json.Marshal(TaskNewRequest{
+		Name:           "standard-project",
+		ReadS3Path:     "s3://test-bucket/images/",
+		WriteS3Path:    "s3://test-bucket/output/",
+		ProcessingMode: workflows.ProcessingModeStandard,
+		S3ScanDepth:    &depth,
+		S3Region:       "us-east-1",
+		S3Endpoint:     "http://" + testutil.TestS3Endpoint(),
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusBadRequest,
+		"unexpected status %d body=%s", w.Code, w.Body.String())
+	assert.NotContains(t, w.Body.String(), "invalid processingMode")
+	assert.NotContains(t, w.Body.String(), "reserved")
+	assert.NotContains(t, w.Body.String(), "s3ScanDepth")
+}
+
+func TestTaskNew_RejectsInvalidS3ScanDepth(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	for _, depth := range []int{-1, workflows.MaxS3ScanDepth + 1} {
+		t.Run(fmt.Sprintf("depth=%d", depth), func(t *testing.T) {
+			d := depth
+			body, err := json.Marshal(TaskNewRequest{
+				ReadS3Path:  "s3://test-bucket/images/",
+				S3ScanDepth: &d,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusBadRequest, w.Code)
+			assert.Contains(t, w.Body.String(), "s3ScanDepth")
+		})
+	}
+}
+
+func TestTaskNew_RejectsReservedProcessingMode(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	for _, mode := range []string{"merge-existing", "thermal", "city-scale"} {
+		t.Run(mode, func(t *testing.T) {
+			body, err := json.Marshal(TaskNewRequest{
+				ReadS3Path:     "s3://test-bucket/images/",
+				ProcessingMode: mode,
+			})
+			require.NoError(t, err)
+
+			req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			assert.Equal(t, http.StatusNotImplemented, w.Code)
+			assert.Contains(t, w.Body.String(), "reserved")
+		})
+	}
+}
+
+func TestTaskNew_RejectsUnknownProcessingMode(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	body, err := json.Marshal(TaskNewRequest{
+		ReadS3Path:     "s3://test-bucket/images/",
+		ProcessingMode: "definitely-not-a-mode",
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "invalid processingMode")
+}
+
+func TestTaskNew_RejectsMalformedExcludePathsJSON(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	body, err := json.Marshal(TaskNewRequest{
+		ReadS3Path:   "s3://test-bucket/images/",
+		ExcludePaths: `not-a-json-array`,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "excludePaths")
+}
+
+func TestTaskNew_RejectsUnsafeExcludePattern(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := testWorkflowClient(t)
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	body, err := json.Marshal(TaskNewRequest{
+		ReadS3Path:   "s3://test-bucket/images/",
+		ExcludePaths: `["../etc/passwd"]`,
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "exclude pattern")
 }
 
 func TestTaskListEndpoint(t *testing.T) {

@@ -312,8 +312,10 @@ example-curl:
     --arg writeS3Path "$WRITE_S3_PATH" \
     --arg s3Endpoint "$SCALEODM_WORKFLOW_S3_ENDPOINT" \
     --arg s3Region "us-east-1" \
+    --arg processingMode "standard" \
+    --argjson s3ScanDepth 1 \
     --arg options '[{"name":"fast-orthophoto","value":true}]' \
-    '{name: $name, readS3Path: $readS3Path, writeS3Path: $writeS3Path, s3Endpoint: $s3Endpoint, s3Region: $s3Region, options: $options}')
+    '{name: $name, readS3Path: $readS3Path, writeS3Path: $writeS3Path, s3Endpoint: $s3Endpoint, s3Region: $s3Region, processingMode: $processingMode, s3ScanDepth: $s3ScanDepth, options: $options}')
 
   echo "Creating task with curl..."
   CREATE_RESPONSE=$(curl -fsS \
