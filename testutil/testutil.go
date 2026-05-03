@@ -60,13 +60,13 @@ func TestS3Endpoint() string {
 }
 
 // TestS3AccessKey returns the S3 access key for tests.
-// This is hard-coded to match the local Garage test instance credentials.
+// This is hard-coded to match the local RustFS test instance credentials.
 func TestS3AccessKey() string {
-	return "odm"
+	return "admin"
 }
 
 // TestS3SecretKey returns the S3 secret key for tests.
-// This is hard-coded to match the local Garage test instance credentials.
+// This is hard-coded to match the local RustFS test instance credentials.
 func TestS3SecretKey() string {
 	return "somelongpassword"
 }

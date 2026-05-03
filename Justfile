@@ -270,7 +270,7 @@ _seed-example-imagery:
   docker compose up --detach s3
 
   echo "Initializing RustFS bucket/credentials..."
-  AWS_ACCESS_KEY_ID=odm \
+  AWS_ACCESS_KEY_ID=admin \
   AWS_SECRET_ACCESS_KEY=somelongpassword \
   docker compose run --rm s3-init
 
@@ -278,7 +278,7 @@ _seed-example-imagery:
   docker run --rm \
     --network host \
     -e AWS_S3_ENDPOINT=${SCALEODM_LOCAL_S3_ENDPOINT:-http://localhost:31102} \
-    -e AWS_ACCESS_KEY_ID=odm \
+    -e AWS_ACCESS_KEY_ID=admin \
     -e AWS_SECRET_ACCESS_KEY=somelongpassword \
     --entrypoint /bin/sh \
     docker.io/rclone/rclone:1.69 \
@@ -302,7 +302,7 @@ _seed-example-imagery:
   docker run --rm \
     --network host \
     -e AWS_S3_ENDPOINT=${SCALEODM_LOCAL_S3_ENDPOINT:-http://localhost:31102} \
-    -e AWS_ACCESS_KEY_ID=odm \
+    -e AWS_ACCESS_KEY_ID=admin \
     -e AWS_SECRET_ACCESS_KEY=somelongpassword \
     --entrypoint /bin/sh \
     docker.io/rclone/rclone:1.69 \
@@ -345,10 +345,10 @@ example-curl:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
   just test build-api-image
   docker compose down --remove-orphans
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
 
   if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
     TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | jq -r '.[0].IPAM.Config[0].Gateway // ""' 2>/dev/null || true)
@@ -369,7 +369,7 @@ example-curl:
 
   echo "Ensuring workflow S3 secret uses local test credentials..."
   kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
-    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_ACCESS_KEY_ID=admin \
     --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
     --from-literal=AWS_DEFAULT_REGION=us-east-1 \
     --dry-run=client -o yaml | kubectl apply -f -
@@ -462,10 +462,10 @@ example-python:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
   just test build-api-image
   docker compose down --remove-orphans
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
 
   if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
     TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data[0].get("IPAM",{}).get("Config",[{}])[0].get("Gateway", "")) if data else "", end="")' 2>/dev/null || true)
@@ -480,7 +480,7 @@ example-python:
 
   echo "Ensuring workflow S3 secret uses local test credentials..."
   kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
-    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_ACCESS_KEY_ID=admin \
     --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
     --from-literal=AWS_DEFAULT_REGION=us-east-1 \
     --dry-run=client -o yaml | kubectl apply -f -
@@ -515,10 +515,10 @@ example-pyodm:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
   just test build-api-image
   docker compose down --remove-orphans
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=odm AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
 
   if [ -z "${SCALEODM_WORKFLOW_S3_ENDPOINT:-}" ]; then
     TALOS_GATEWAY_IP=$(docker network inspect scaleodm-test 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data[0].get("IPAM",{}).get("Config",[{}])[0].get("Gateway", "")) if data else "", end="")' 2>/dev/null || true)
@@ -533,7 +533,7 @@ example-pyodm:
 
   echo "Ensuring workflow S3 secret uses local test credentials..."
   kubectl create secret generic scaleodm-secrets -n ${K8S_NAMESPACE:-argo} \
-    --from-literal=AWS_ACCESS_KEY_ID=odm \
+    --from-literal=AWS_ACCESS_KEY_ID=admin \
     --from-literal=AWS_SECRET_ACCESS_KEY=somelongpassword \
     --from-literal=AWS_DEFAULT_REGION=us-east-1 \
     --dry-run=client -o yaml | kubectl apply -f -

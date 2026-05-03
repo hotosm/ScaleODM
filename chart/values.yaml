@@ -94,7 +94,7 @@ s3:
     endpoint: ""
     port: 9000
     auth:
-      accessKey: "odm"
+      accessKey: "admin"
       secretKey: "somelongpassword"
     region: "us-east-1"
 

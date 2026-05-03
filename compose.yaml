@@ -35,7 +35,7 @@ services:
       SCALEODM_DATABASE_URL: ${SCALEODM_DATABASE_URL:-postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable}
       # Keep local compose S3 settings fixed for repeatable test runs.
       AWS_S3_ENDPOINT: http://localhost:31102
-      AWS_ACCESS_KEY_ID: odm
+      AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: somelongpassword
     volumes:
       # Mount local files
@@ -82,7 +82,7 @@ services:
     image: rustfs/rustfs:1.0.0-alpha.90
     environment:
       # Keep local test credentials fixed to avoid dotenv/.env drift.
-      RUSTFS_ACCESS_KEY: odm
+      RUSTFS_ACCESS_KEY: admin
       RUSTFS_SECRET_KEY: somelongpassword
     volumes:
       - rustfs_data:/data
@@ -108,7 +108,7 @@ services:
       - net
     environment:
       AWS_ENDPOINT_URL: http://s3:9000
-      AWS_ACCESS_KEY_ID: odm
+      AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: somelongpassword
       AWS_DEFAULT_REGION: us-east-1
     restart: "on-failure:2"

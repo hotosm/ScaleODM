@@ -229,7 +229,7 @@ To deploy in-cluster RustFS for local chart testing:
 ```bash
 --set s3.external.enabled=false \
 --set s3.rustfs.enabled=true \
---set s3.rustfs.auth.accessKey="odm" \
+--set s3.rustfs.auth.accessKey="admin" \
 --set s3.rustfs.auth.secretKey="somelongpassword"
 ```
 
@@ -352,7 +352,7 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `s3.rustfs.enabled` | Deploy RustFS subchart for in-cluster S3 | `false` |
 | `s3.rustfs.endpoint` | Optional override for RustFS service host used in runtime secret | `""` |
 | `s3.rustfs.port` | RustFS service port used in runtime secret | `9000` |
-| `s3.rustfs.auth.accessKey` | RustFS access key for synthesized runtime secret | `"odm"` |
+| `s3.rustfs.auth.accessKey` | RustFS access key for synthesized runtime secret | `"admin"` |
 | `s3.rustfs.auth.secretKey` | RustFS secret key for synthesized runtime secret | `"somelongpassword"` |
 | `s3.rustfs.region` | Region value written to runtime secret in RustFS mode | `"us-east-1"` |
 | `secrets.runtime.keys.s3Endpoint` | Key in runtime Secret for S3 endpoint | `"AWS_S3_ENDPOINT"` |
