@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -1534,18 +1535,27 @@ func (a *API) registerNodeODMRoutes() {
 			asset = resolvedAsset
 		}
 
-		presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
-		if err == nil {
+		assetExists, err := s3.ObjectExistsInS3Path(r.Context(), s3Client, metadata.WriteS3Path, asset)
+		if err != nil {
+			log.Printf("GET /task/%s/download/%s: failed to check asset existence: %v", uuid, requestedAsset, err)
+			http.Error(w, `{"error":"Failed to query task asset"}`, http.StatusInternalServerError)
+			return
+		}
+		if assetExists {
+			presignedURL, err := s3.GeneratePresignedURL(r.Context(), s3Client, metadata.WriteS3Path, asset, 1*time.Hour)
+			if err != nil {
+				log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, requestedAsset, err)
+				http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
+				return
+			}
 			log.Printf("GET /task/%s/download/%s: redirecting to pre-signed URL for key=%q (expires in 1 hour)", uuid, requestedAsset, asset)
 			http.Redirect(w, r, presignedURL, http.StatusFound)
 			return
 		}
 
 		if requestedAsset == "all.zip" {
-			w.Header().Set("Content-Type", "application/zip")
-			w.Header().Set("Content-Disposition", `attachment; filename="all.zip"`)
-
-			written, streamErr := s3.StreamS3PathAsZip(r.Context(), s3Client, metadata.WriteS3Path, w)
+			var zipBuffer bytes.Buffer
+			written, streamErr := s3.StreamS3PathAsZip(r.Context(), s3Client, metadata.WriteS3Path, &zipBuffer)
 			if streamErr != nil {
 				if streamErr == s3.ErrNoObjectsToZip {
 					log.Printf("GET /task/%s/download/%s: no output objects found for synthetic all.zip", uuid, requestedAsset)
@@ -1553,13 +1563,20 @@ func (a *API) registerNodeODMRoutes() {
 					return
 				}
 				log.Printf("GET /task/%s/download/%s: failed to stream synthetic all.zip: %v", uuid, requestedAsset, streamErr)
+				http.Error(w, `{"error":"Failed to stream task output"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", `attachment; filename="all.zip"`)
+			if _, writeErr := zipBuffer.WriteTo(w); writeErr != nil {
+				log.Printf("GET /task/%s/download/%s: failed to write synthetic all.zip response: %v", uuid, requestedAsset, writeErr)
 				return
 			}
 			log.Printf("GET /task/%s/download/%s: streamed synthetic all.zip with %d entries", uuid, requestedAsset, written)
 			return
 		}
 
-		log.Printf("GET /task/%s/download/%s: failed to generate pre-signed URL: %v", uuid, requestedAsset, err)
+		log.Printf("GET /task/%s/download/%s: asset not found", uuid, requestedAsset)
 		http.Error(w, fmt.Sprintf(`{"error":"File not found: %s"}`, requestedAsset), http.StatusNotFound)
 	})
 }

@@ -692,7 +692,7 @@ func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
 	defer cleanup()
 	ctx := context.Background()
 
-	bucket := "test-bucket-download-allzip-stream"
+	bucket := fmt.Sprintf("test-bucket-download-allzip-stream-%d", time.Now().UnixNano())
 	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
 
 	metadataStore := meta.NewStore(db)
@@ -738,6 +738,41 @@ func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
 
 	assert.Equal(t, "ortho-bytes", entries["odm_orthophoto/odm_orthophoto.tif"])
 	assert.Equal(t, "dsm-bytes", entries["odm_dem/dsm.tif"])
+}
+
+func TestDownloadEndpoint_AllZipMissingWithoutOutputsReturns404(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := fmt.Sprintf("test-bucket-download-allzip-empty-%d", time.Now().UnixNano())
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	metadataStore := meta.NewStore(db)
+	workflowName := "download-allzip-empty"
+	_, err := metadataStore.CreateJob(
+		ctx,
+		workflowName,
+		"test-project",
+		"s3://"+bucket+"/images/",
+		"s3://"+bucket+"/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
+		"s3_endpoint": "http://" + testutil.TestS3Endpoint(),
+	}))
+
+	_, handler := NewAPI(metadataStore, &recordingWorkflowClient{})
+
+	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/download/all.zip", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusNotFound, w.Code)
+	assert.NotEqual(t, "application/zip", w.Header().Get("Content-Type"))
+	assert.Contains(t, w.Body.String(), "File not found: all.zip")
 }
 
 func TestNormalizeOptionalS3Endpoint(t *testing.T) {
