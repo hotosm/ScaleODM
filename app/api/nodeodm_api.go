@@ -21,6 +21,7 @@ import (
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
+	"github.com/hotosm/scaleodm/app/version"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -516,7 +517,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		resp := &InfoResponse{}
-		resp.Body.Version = "0.4.0" // The ScaleODM version (normally the NodeODM version)
+		resp.Body.Version = version.Version // The ScaleODM version (normally the NodeODM version)
 		resp.Body.TaskQueueCount = queueCount
 		resp.Body.MaxImages = nil // Unlimited
 		resp.Body.Engine = "odm"

@@ -10,7 +10,17 @@ permissions:
   packages: write
 
 jobs:
+  version-check:
+    # Skip the drift guard on workflow_dispatch since there's no triggering
+    # tag to compare against; the release path always triggers it.
+    if: github.event_name == 'release'
+    uses: ./.github/workflows/version_check.yml
+
   publish:
+    needs: [version-check]
+    if: |
+      always() &&
+      (needs.version-check.result == 'success' || needs.version-check.result == 'skipped')
     uses: hotosm/gh-workflows/.github/workflows/just.yml@4.0.1
     with:
       environment: "test"

@@ -8,7 +8,11 @@ permissions:
   contents: write  # To add binaries to release
 
 jobs:
+  version-check:
+    uses: ./.github/workflows/version_check.yml
+
   binaries:
+    needs: version-check
     runs-on: ubuntu-latest
 
     container:

@@ -147,7 +147,9 @@ config:
   observability:
     enabled: false
     serviceName: "scaleodm"
-    serviceVersion: "0.4.0"
+    # Leave empty to inherit the chart's appVersion (recommended); set only
+    # to override the version reported by the observability layer.
+    serviceVersion: ""
     otlpEndpoint: ""
     otlpInsecure: false
     metricsEnabled: true

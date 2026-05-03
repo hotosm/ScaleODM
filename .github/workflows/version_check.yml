@@ -1,0 +1,17 @@
+name: 🔒 Version Drift Check
+
+on:
+  release:
+    types: [published]
+  push:
+    tags:
+      - 'v*'
+  workflow_call:
+
+jobs:
+  check:
+    uses: hotosm/gh-workflows/.github/workflows/just.yml@4.0.1
+    with:
+      environment: "test"
+      command: "check-versions"
+    secrets: inherit

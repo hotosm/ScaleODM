@@ -17,6 +17,7 @@ import (
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/s3"
+	"github.com/hotosm/scaleodm/app/version"
 	"github.com/hotosm/scaleodm/app/workflows"
 	"github.com/hotosm/scaleodm/testutil"
 	"github.com/minio/minio-go/v7"
@@ -49,7 +50,7 @@ func TestInfoEndpoint(t *testing.T) {
 	}
 	err := json.Unmarshal(w.Body.Bytes(), &response)
 	require.NoError(t, err)
-	assert.Equal(t, "0.4.0", response.Version)
+	assert.Equal(t, version.Version, response.Version)
 	assert.Equal(t, "odm", response.Engine)
 }
 

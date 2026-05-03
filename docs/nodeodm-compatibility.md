@@ -174,7 +174,7 @@ Returns node information including queue count and engine version.
 
 ```json
 {
-  "version": "0.4.0",
+  "version": "<chart appVersion>",
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",

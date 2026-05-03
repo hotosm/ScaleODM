@@ -189,6 +189,77 @@ dev:
   just test cluster-init
   just start
 
+# Verify chart version, appVersion, and any literal x.y.z strings in source
+# files are aligned. Run before tagging a release. Pass an expected version
+# (e.g. `just check-versions 0.4.0`) to compare against; in CI, the recipe
+# also auto-derives the expected version from $GITHUB_REF when it points at
+# a tag of the form `refs/tags/vX.Y.Z`. With no argument and no triggering
+# tag the recipe just compares chart version vs appVersion and scans for
+# stray literals.
+check-versions expected="":
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  # Extract the two top-level fields without requiring yq on the PATH; both
+  # `version` and `appVersion` are simple scalars at column 0 of Chart.yaml.
+  read_top_yaml_field() {
+    awk -v key="$1" '
+      $0 ~ "^" key ":" {
+        sub("^" key ":[[:space:]]*", "", $0)
+        gsub(/^["'\'']|["'\'']$/, "", $0)
+        print
+        exit
+      }
+    ' chart/Chart.yaml
+  }
+  CHART_VERSION="$(read_top_yaml_field version)"
+  CHART_APP_VERSION="$(read_top_yaml_field appVersion)"
+
+  EXPECTED="{{ expected }}"
+  if [ -z "$EXPECTED" ] && [ -n "${GITHUB_REF:-}" ]; then
+    case "$GITHUB_REF" in
+      refs/tags/v*) EXPECTED="${GITHUB_REF#refs/tags/v}" ;;
+      refs/tags/*)  EXPECTED="${GITHUB_REF#refs/tags/}" ;;
+    esac
+  fi
+
+  echo "chart version:    $CHART_VERSION"
+  echo "chart appVersion: $CHART_APP_VERSION"
+  if [ -n "$EXPECTED" ]; then
+    echo "expected:         $EXPECTED"
+  fi
+
+  fail=0
+  if [ "$CHART_VERSION" != "$CHART_APP_VERSION" ]; then
+    echo "drift: chart version != appVersion"
+    fail=1
+  fi
+
+  if [ -n "$EXPECTED" ] && [ "$CHART_VERSION" != "$EXPECTED" ]; then
+    echo "drift: chart version $CHART_VERSION != expected $EXPECTED"
+    fail=1
+  fi
+
+  # Hunt stray x.y.z literals in source. The version package, ldflags, and
+  # generated/lock files are excluded from the search.
+  echo
+  echo "Scanning source for stray x.y.z version literals..."
+  hits="$(grep -RnE '"[0-9]+\.[0-9]+\.[0-9]+"' \
+    --include='*.go' --include='*.yaml' --include='*.yml' --include='*.md' --include='Justfile' \
+    --exclude-dir='.git' --exclude-dir='charts' --exclude-dir='vendor' --exclude-dir='site' \
+    --exclude='Chart.yaml' --exclude='Chart.lock' --exclude='go.sum' --exclude='uv.lock' \
+    . || true)"
+
+  if [ -n "$hits" ]; then
+    echo "$hits"
+    echo
+    echo "Review the above hits. If any are version strings that should be derived"
+    echo "from the chart appVersion or the version package, update them or add an"
+    echo "exclude to this recipe."
+  fi
+
+  exit "$fail"
+
 # Seed local RustFS with example imagery from public bucket
 [private]
 _seed-example-imagery:

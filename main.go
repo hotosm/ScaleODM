@@ -1,13 +1,9 @@
-// REST API for job queue management
-// @title           ScaleODM Job Queue API
-// @version         0.4.0
-// @description     NodeODM-compatible API for managing distributed ODM jobs via Argo Workflows
-// @contact.name    Sam Woodcock
-// @contact.url     https://slack.hotosm.org
-// @license.name    AGPL-3.0-only
-// @license.url     https://opensource.org/licenses/agpl-v3
-// @host            localhost:31100
-// @BasePath        /api/v1
+// REST API for job queue management.
+//
+// The OpenAPI document is generated at runtime by Huma in app/api; the
+// version surfaced there is injected via -ldflags into
+// github.com/hotosm/scaleodm/app/version.Version (see .goreleaser.yaml).
+// No swag-style annotations are consumed here.
 
 package main
 

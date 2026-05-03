@@ -8,6 +8,8 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/hotosm/scaleodm/app/version"
 )
 
 func envBool(key string, fallback bool) bool {
@@ -126,7 +128,7 @@ var SCALEODM_OBSERVABILITY_SERVICE_NAME = cmp.Or(
 )
 var SCALEODM_OBSERVABILITY_SERVICE_VERSION = cmp.Or(
 	strings.TrimSpace(os.Getenv("SCALEODM_OBSERVABILITY_SERVICE_VERSION")),
-	"0.4.0",
+	version.Version,
 )
 var SCALEODM_OBSERVABILITY_OTLP_ENDPOINT = strings.TrimSpace(os.Getenv("SCALEODM_OBSERVABILITY_OTLP_ENDPOINT"))
 var SCALEODM_OBSERVABILITY_OTLP_INSECURE = envBool("SCALEODM_OBSERVABILITY_OTLP_INSECURE", false)

@@ -22,6 +22,7 @@ import (
 	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/ui"
+	"github.com/hotosm/scaleodm/app/version"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -36,7 +37,7 @@ type API struct {
 // NewAPI creates the Huma API and registers routes.
 // It returns the API object and the HTTP handler (stdlib mux) that should be served.
 func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) (*API, http.Handler) {
-	apiConfig := huma.DefaultConfig("ScaleODM API", "0.4.0")
+	apiConfig := huma.DefaultConfig("ScaleODM API", version.Version)
 	apiConfig.DocsPath = "/"
 	apiConfig.OpenAPIPath = "/openapi.json"
 	apiConfig.Servers = []*huma.Server{

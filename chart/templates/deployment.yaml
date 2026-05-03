@@ -100,7 +100,10 @@ spec:
             - name: SCALEODM_OBSERVABILITY_SERVICE_NAME
               value: {{ .Values.config.observability.serviceName | quote }}
             - name: SCALEODM_OBSERVABILITY_SERVICE_VERSION
-              value: {{ .Values.config.observability.serviceVersion | quote }}
+              # Falls back to the chart appVersion (which CI guards to match
+              # the git tag) so observability stays in lockstep with the
+              # binary's ldflag-injected version.
+              value: {{ default .Chart.AppVersion .Values.config.observability.serviceVersion | quote }}
             - name: SCALEODM_OBSERVABILITY_OTLP_ENDPOINT
               value: {{ .Values.config.observability.otlpEndpoint | quote }}
             - name: SCALEODM_OBSERVABILITY_OTLP_INSECURE
