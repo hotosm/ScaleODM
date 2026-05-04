@@ -1,0 +1,16 @@
+{{- if .Values.workspaceStorageClass.create }}
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: {{ .Values.workspaceStorageClass.name }}
+  labels:
+    {{- include "scaleodm.labels" . | nindent 4 }}
+provisioner: {{ .Values.workspaceStorageClass.provisioner }}
+reclaimPolicy: {{ .Values.workspaceStorageClass.reclaimPolicy }}
+volumeBindingMode: {{ .Values.workspaceStorageClass.volumeBindingMode }}
+allowVolumeExpansion: {{ .Values.workspaceStorageClass.allowVolumeExpansion }}
+{{- with .Values.workspaceStorageClass.parameters }}
+parameters:
+  {{- toYaml . | nindent 2 }}
+{{- end }}
+{{- end }}

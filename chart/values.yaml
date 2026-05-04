@@ -118,6 +118,21 @@ kubernetes:
     # Role permissions needed for Argo Workflows
     # The service account needs permissions to create/list/watch workflows
 
+# Optional StorageClass for workflow workspace PVCs.
+# Useful when the cluster default StorageClass has reclaimPolicy: Retain but
+# you want ephemeral workspace volumes to be deleted automatically.
+workspaceStorageClass:
+  create: false
+  name: "scaleodm-workspace"
+  provisioner: "ebs.csi.aws.com"
+  reclaimPolicy: Delete
+  volumeBindingMode: WaitForFirstConsumer
+  allowVolumeExpansion: true
+  parameters:
+    type: gp3
+    fsType: ext4
+    encrypted: "true"
+
 # Configuration (non-sensitive)
 config:
   # ODM image to use in workflows
