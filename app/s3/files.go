@@ -66,6 +66,7 @@ type = s3
 provider = ${PROVIDER}
 env_auth = true
 region = ${AWS_DEFAULT_REGION:-us-east-1}
+no_check_bucket = true
 EOF
 
 if [ -n "${AWS_S3_ENDPOINT:-}" ]; then
