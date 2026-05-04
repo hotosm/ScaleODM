@@ -20,6 +20,7 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/config"
+	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/version"
@@ -997,6 +998,7 @@ func (a *API) registerNodeODMRoutes() {
 			// Reconcile infra/runtime pod failures (for example missing secrets,
 			// image pull backoff, or container config errors) into failed status
 			// without waiting for Argo to eventually mark the whole workflow phase.
+			infraFailureReconciled := false
 			if statusCode == StatusCodeRunning {
 				failureMsg := detectWorkflowInfraFailure(wf)
 				if failureMsg != "" {
@@ -1007,6 +1009,23 @@ func (a *API) registerNodeODMRoutes() {
 					log.Printf("reconciliation transition uuid=%s source=argo transition=running_to_failed reason=infra_failure", input.UUID)
 					if err := a.metadataStore.UpdateJobStatus(ctx, input.UUID, "failed", &failureMsg); err != nil {
 						log.Printf("GET /task/%s/info: failed to persist reconciled failure status: %v", input.UUID, err)
+					}
+					infraFailureReconciled = true
+				}
+			}
+
+			// Sync DB status with live Argo phase so the UI (which reads from the
+			// DB) reflects running/completed/failed without a separate reconciler.
+			if !infraFailureReconciled {
+				liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
+				dbStatus := strings.ToLower(strings.TrimSpace(job.JobStatus))
+				if dbStatus != liveStatus {
+					var errPtr *string
+					if errorMessage != "" {
+						errPtr = &errorMessage
+					}
+					if err := a.metadataStore.UpdateJobStatus(ctx, input.UUID, liveStatus, errPtr); err != nil {
+						log.Printf("GET /task/%s/info: failed to sync status db=%q argo=%q: %v", input.UUID, dbStatus, liveStatus, err)
 					}
 				}
 			}
