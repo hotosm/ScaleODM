@@ -12,7 +12,10 @@ import (
 // image-count filters, regardless of user settings or useDefaultExcludes.
 // They protect ScaleODM's own output directories from being re-ingested on a
 // rerun, and match the paths the upload script writes into the write S3 path.
-var alwaysExcludePatterns = []string{"output/**", "**/output/**"}
+var alwaysExcludePatterns = []string{
+	"output/**", "**/output/**",
+	"odm/**", "**/odm/**",
+}
 
 // imageIncludePatterns is the canonical rclone filter list for input imagery
 // and supported archive types. Mirrored as `+ <pattern>` lines in the
@@ -212,25 +215,25 @@ echo "Extracting archives..."
 extract_and_clean "$DEST_DIR"
 
 echo "Cleaning up non-image files..."
-# Delete non-image files, but skip anything in output directories
+# Delete non-image files, but skip anything in output/odm directories
 find "$DEST_DIR" -type f ! \( \
   -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \
-\) ! -path "*/output/*" -delete
+\) ! -path "*/output/*" ! -path "*/odm/*" -delete
 
-# Remove empty directories, but skip output directories entirely
-find "$DEST_DIR" -type d ! -path "*/output/*" -empty -delete
+# Remove empty directories, but skip output/odm directories entirely
+find "$DEST_DIR" -type d ! -path "*/output/*" ! -path "*/odm/*" -empty -delete
 
 echo "Flattening directory structure..."
 FLAT_DIR="$DEST_DIR"
 TEMP_LIST="$DEST_DIR/.flatten-list.txt"
 
-# Find image files, excluding any in output directories
+# Find image files, excluding any in output/odm directories
 find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) \
-  ! -path "*/output/*" > "$TEMP_LIST"
+  ! -path "*/output/*" ! -path "*/odm/*" > "$TEMP_LIST"
 
 while IFS= read -r imgfile; do
-  # Skip files in output directories (defensive check)
-  if echo "$imgfile" | grep -q "/output/"; then
+  # Skip files in output/odm directories (defensive check)
+  if echo "$imgfile" | grep -qE "/(output|odm)/"; then
     continue
   fi
 

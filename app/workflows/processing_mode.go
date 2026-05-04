@@ -87,6 +87,8 @@ func IsReservedProcessingMode(mode string) bool {
 // archive-extraction step from re-ingesting a prior all.zip (which would be
 // flattened with junk-paths into the input dir and ruin the run).
 var DefaultProjectExcludes = []string{
+	"odm/**",
+	"**/odm/**",
 	"odm_orthophoto/**",
 	"odm_dem/**",
 	"odm_dem_tiles/**",
