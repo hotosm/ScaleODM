@@ -25,6 +25,7 @@ import (
 	"github.com/hotosm/scaleodm/app/db"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/observability"
+	"github.com/hotosm/scaleodm/app/reconciler"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -111,6 +112,9 @@ func main() {
 		}
 		log.Printf("Argo Workflows client initialized (availability checked by readiness probe, took %v)", time.Since(k8sStart))
 	}
+
+	// Start background reconciler. Does not run when wfClient is nil (docs-only mode).
+	reconciler.Start(ctx, metadataStore, wfClient, config.SCALEODM_RECONCILER_INTERVAL_SECONDS)
 
 	// === HUMA CLI ===
 	// Channel to communicate the *http.Server back from the OnStart hook so

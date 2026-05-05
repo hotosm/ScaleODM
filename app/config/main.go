@@ -109,6 +109,13 @@ var SCALEODM_ALLOWED_S3_ENDPOINTS = strings.TrimSpace(os.Getenv("SCALEODM_ALLOWE
 
 var SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS = envInt("SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS", 300)
 
+// SCALEODM_RECONCILER_INTERVAL_SECONDS controls how often the background
+// reconciler syncs live Argo workflow status into the DB. 30 s is short enough
+// to catch completions well before the default Argo GC TTL (24 h for success,
+// 7 days for failure), while the idle cost is just one cheap DB query per tick.
+// Set to 0 or negative to use the default.
+var SCALEODM_RECONCILER_INTERVAL_SECONDS = envInt("SCALEODM_RECONCILER_INTERVAL_SECONDS", 30)
+
 var SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS = envInt("SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS", 10)
 var SCALEODM_SERVER_READ_TIMEOUT_SECONDS = envInt("SCALEODM_SERVER_READ_TIMEOUT_SECONDS", 30)
 var SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS = envInt("SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS", 300)

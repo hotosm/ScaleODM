@@ -451,6 +451,62 @@ func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit in
 	return jobs, nil
 }
 
+// ListActiveJobs returns jobs that are not yet in a terminal state and were
+// created on or after since. Used by the background reconciler to keep the DB
+// scan bounded: filtering at the SQL level means the query cost stays
+// proportional to genuinely active jobs rather than growing with all-time
+// history.
+func (s *Store) ListActiveJobs(ctx context.Context, since time.Time) ([]*JobMetadata, error) {
+	query := `
+		SELECT id, workflow_name, odm_project_id, read_s3_path, write_s3_path,
+		       odm_flags, s3_region, job_status, created_at, started_at, completed_at,
+		       error_message, metadata
+		FROM scaleodm_job_metadata
+		WHERE job_status NOT IN ('completed', 'failed', 'canceled')
+		  AND created_at >= $1
+		ORDER BY created_at DESC
+	`
+	rows, err := s.db.Pool.Query(ctx, query, since)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list active jobs: %w", err)
+	}
+	defer rows.Close()
+
+	jobs := []*JobMetadata{}
+	for rows.Next() {
+		job := &JobMetadata{}
+		var startedAt, completedAt sql.NullTime
+		var errorMsg sql.NullString
+		var metadataJSON []byte
+
+		err := rows.Scan(
+			&job.ID, &job.WorkflowName, &job.ODMProjectID, &job.ReadS3Path,
+			&job.WriteS3Path, &job.ODMFlags, &job.S3Region, &job.JobStatus,
+			&job.CreatedAt, &startedAt, &completedAt, &errorMsg, &metadataJSON,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan job: %w", err)
+		}
+
+		if startedAt.Valid {
+			job.StartedAt = &startedAt.Time
+		}
+		if completedAt.Valid {
+			job.CompletedAt = &completedAt.Time
+		}
+		if errorMsg.Valid {
+			job.ErrorMessage = &errorMsg.String
+		}
+		if len(metadataJSON) > 0 {
+			job.Metadata = metadataJSON
+		}
+
+		jobs = append(jobs, job)
+	}
+
+	return jobs, nil
+}
+
 // DeleteJob removes job metadata
 func (s *Store) DeleteJob(ctx context.Context, workflowName string) error {
 	query := `DELETE FROM scaleodm_job_metadata WHERE workflow_name = $1`
