@@ -2,8 +2,8 @@ apiVersion: v2
 type: application
 name: scaleodm
 description: Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
-version: "0.4.8"
-appVersion: "0.4.8"
+version: "0.4.9"
+appVersion: "0.4.9"
 maintainers:
 - email: sam.woodcock@hotosm.org
   name: Sam Woodcock

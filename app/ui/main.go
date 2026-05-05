@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/minio/minio-go/v7"
@@ -103,6 +104,8 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.reconcileNonTerminalJobs(r.Context(), jobs)
+
 	now := time.Now().UTC()
 	tasks := make([]taskSummary, 0, len(jobs))
 	for _, job := range jobs {
@@ -137,6 +140,25 @@ func (h *Handler) reconcileJobFromArgo(ctx context.Context, job *meta.JobMetadat
 		}
 		job.JobStatus = liveStatus
 	}
+}
+
+// reconcileNonTerminalJobs syncs Argo status into the DB for all jobs that are
+// not yet in a terminal state (completed/failed/canceled). Calls run concurrently
+// so the list page doesn't serialize N Argo round-trips.
+func (h *Handler) reconcileNonTerminalJobs(ctx context.Context, jobs []*meta.JobMetadata) {
+	var wg sync.WaitGroup
+	for _, job := range jobs {
+		switch strings.ToLower(strings.TrimSpace(job.JobStatus)) {
+		case "completed", "failed", "canceled":
+			continue
+		}
+		wg.Add(1)
+		go func(j *meta.JobMetadata) {
+			defer wg.Done()
+			h.reconcileJobFromArgo(ctx, j)
+		}(job)
+	}
+	wg.Wait()
 }
 
 func (h *Handler) handleTaskDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -186,6 +208,8 @@ func (h *Handler) handleTasksJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list jobs"})
 		return
 	}
+
+	h.reconcileNonTerminalJobs(r.Context(), jobs)
 
 	now := time.Now().UTC()
 	tasks := make([]taskSummary, 0, len(jobs))
