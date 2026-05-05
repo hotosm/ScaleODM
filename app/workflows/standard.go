@@ -201,7 +201,7 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 	}
 
 	if cfg.ImageCount > 0 {
-		cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ProcessResources)
+		cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ODMFlags, cfg.ProcessResources)
 	}
 
 	applyDynamicWorkspaceSize(cfg)
@@ -223,8 +223,27 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 	return created, nil
 }
 
-func estimateProcessResourcesFromImageCount(imageCount int, fallback ContainerResources) ContainerResources {
-	estimatedRAMGiB := estimateMemoryGiB(imageCount)
+// flagMemoryMultiplier returns a scaling factor for the RAM estimate based on
+// which ODM flags are active. --fast-orthophoto skips dense reconstruction
+// (the most memory-intensive step), while --dsm/--dtm require it and then
+// add surface-model generation on top.
+func flagMemoryMultiplier(odmFlags []string) float64 {
+	for _, f := range odmFlags {
+		if f == "--fast-orthophoto" {
+			return config.SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER
+		}
+	}
+	for _, f := range odmFlags {
+		if f == "--dsm" || f == "--dtm" {
+			return config.SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
+		}
+	}
+	return 1.0
+}
+
+func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, fallback ContainerResources) ContainerResources {
+	baseRAMGiB := estimateMemoryGiB(imageCount)
+	estimatedRAMGiB := clamp(baseRAMGiB*flagMemoryMultiplier(odmFlags), config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
 	marginMultiplier := 1 + (config.SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT / 100)
 	if marginMultiplier < 1 {
 		marginMultiplier = 1

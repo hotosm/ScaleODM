@@ -135,13 +135,44 @@ func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
 
 func TestEstimateProcessResourcesFromImageCount_SetsMarginLimit(t *testing.T) {
 	fallback := ContainerResources{}
-	resources := estimateProcessResourcesFromImageCount(250, fallback)
+	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
 	assert.Equal(t, "16384Mi", resources.Requests.Memory)
 	assert.Equal(t, "19661Mi", resources.Limits.Memory)
 	assert.NotEmpty(t, resources.Requests.CPU)
 	assert.NotEmpty(t, resources.Limits.CPU)
 	assert.NotEmpty(t, resources.Requests.EphemeralStorage)
 	assert.NotEmpty(t, resources.Limits.EphemeralStorage)
+}
+
+func TestFlagMemoryMultiplier(t *testing.T) {
+	assert.Equal(t, 1.0, flagMemoryMultiplier(nil))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--orthophoto-resolution=5"}))
+	assert.Equal(t, 0.5, flagMemoryMultiplier([]string{"--fast-orthophoto"}))
+	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dsm"}))
+	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dtm"}))
+	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dsm", "--dtm"}))
+	// fast-orthophoto takes precedence even if dsm/dtm are also set
+	assert.Equal(t, 0.5, flagMemoryMultiplier([]string{"--fast-orthophoto", "--dsm"}))
+}
+
+func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing.T) {
+	fallback := ContainerResources{}
+
+	// --fast-orthophoto halves the request; limit = request * 1.2
+	fast := estimateProcessResourcesFromImageCount(250, []string{"--fast-orthophoto"}, fallback)
+	assert.Equal(t, "8192Mi", fast.Requests.Memory) // 16 GiB * 0.5
+	assert.Equal(t, "9831Mi", fast.Limits.Memory)   // 8 GiB * 1.2
+
+	// --dsm scales up by 1.5x
+	dsm := estimateProcessResourcesFromImageCount(250, []string{"--dsm"}, fallback)
+	assert.Equal(t, "24576Mi", dsm.Requests.Memory) // 16 GiB * 1.5
+	assert.Equal(t, "29492Mi", dsm.Limits.Memory)   // 24 GiB * 1.2
+
+	// small job with --dsm must not fall below memoryMinGiB (4 GiB)
+	small := estimateProcessResourcesFromImageCount(7, []string{"--dsm"}, fallback)
+	assert.Equal(t, "6144Mi", small.Requests.Memory) // 4 GiB * 1.5 = 6 GiB
+	assert.Equal(t, "7373Mi", small.Limits.Memory)   // 6 GiB * 1.2
 }
 
 func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
@@ -152,7 +183,7 @@ func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
 		[]string{"--fast-orthophoto"},
 	)
 	cfg.ImageCount = 500
-	cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ProcessResources)
+	cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ODMFlags, cfg.ProcessResources)
 
 	client := &Client{namespace: "test-namespace"}
 	wf := client.buildODMWorkflow(cfg)

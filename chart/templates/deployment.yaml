@@ -212,6 +212,10 @@ spec:
               value: {{ .Values.config.processSizing.ephemeralGiBPerGiBRAM | quote }}
             - name: SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER
               value: {{ .Values.config.processSizing.ephemeralLimitMultiplier | quote }}
+            - name: SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER
+              value: {{ .Values.config.processSizing.fastOrthoMemoryMultiplier | quote }}
+            - name: SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
+              value: {{ .Values.config.processSizing.dsmDtmMemoryMultiplier | quote }}
             {{- if .Values.kubernetes.kubeconfigPath }}
             - name: KUBECONFIG_PATH
               value: {{ .Values.kubernetes.kubeconfigPath | quote }}
