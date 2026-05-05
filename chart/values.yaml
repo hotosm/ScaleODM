@@ -237,7 +237,10 @@ config:
     memoryLimitMarginPercent: 20
     memoryMinGiB: 4
     memoryMaxGiB: 256
-    cpuPerGiB: 0.25
+    # ODM processing is usually constrained by RAM, temporary storage, and I/O
+    # before it scales linearly with CPU. Requesting 1 core per 8GiB keeps large
+    # jobs schedulable while still giving bigger RAM estimates more CPU.
+    cpuPerGiB: 0.125
     cpuLimitMultiplier: 1.5
     ephemeralGiBPerGiBRAM: 1
     ephemeralLimitMultiplier: 1.2

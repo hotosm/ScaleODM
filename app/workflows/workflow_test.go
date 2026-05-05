@@ -138,10 +138,19 @@ func TestEstimateProcessResourcesFromImageCount_SetsMarginLimit(t *testing.T) {
 	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
 	assert.Equal(t, "16384Mi", resources.Requests.Memory)
 	assert.Equal(t, "19661Mi", resources.Limits.Memory)
-	assert.NotEmpty(t, resources.Requests.CPU)
-	assert.NotEmpty(t, resources.Limits.CPU)
+	assert.Equal(t, "2", resources.Requests.CPU)
+	assert.Equal(t, "3", resources.Limits.CPU)
 	assert.NotEmpty(t, resources.Requests.EphemeralStorage)
 	assert.NotEmpty(t, resources.Limits.EphemeralStorage)
+}
+
+func TestEstimateProcessResourcesFromImageCount_CapsLargeJobCPUByRAMRatio(t *testing.T) {
+	fallback := ContainerResources{}
+	resources := estimateProcessResourcesFromImageCount(5000, nil, fallback)
+
+	assert.Equal(t, "262144Mi", resources.Requests.Memory)
+	assert.Equal(t, "32", resources.Requests.CPU)
+	assert.Equal(t, "48", resources.Limits.CPU)
 }
 
 func TestFlagMemoryMultiplier(t *testing.T) {
