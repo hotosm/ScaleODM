@@ -398,8 +398,8 @@ func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit in
 
 	if projectID != "" {
 		argCount++
-		query += fmt.Sprintf(" AND odm_project_id = $%d", argCount)
-		args = append(args, projectID)
+		query += fmt.Sprintf(" AND odm_project_id ILIKE $%d", argCount)
+		args = append(args, "%"+projectID+"%")
 	}
 
 	query += " ORDER BY created_at DESC"
