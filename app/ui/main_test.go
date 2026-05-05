@@ -23,7 +23,8 @@ import (
 )
 
 type testWorkflowClient struct {
-	logs string
+	logs   string
+	phases map[string]wfv1.WorkflowPhase
 }
 
 func (c *testWorkflowClient) CreateODMWorkflow(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error) {
@@ -31,7 +32,11 @@ func (c *testWorkflowClient) CreateODMWorkflow(ctx context.Context, cfg *workflo
 }
 
 func (c *testWorkflowClient) GetWorkflow(ctx context.Context, name string) (*wfv1.Workflow, error) {
-	return &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: name}}, nil
+	phase := c.phases[name]
+	return &wfv1.Workflow{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status:     wfv1.WorkflowStatus{Phase: phase},
+	}, nil
 }
 
 func (c *testWorkflowClient) ListWorkflows(ctx context.Context, labelSelector string) (*wfv1.WorkflowList, error) {
@@ -86,11 +91,16 @@ func testDB(t *testing.T) (*db.DB, func()) {
 
 func setupServer(t *testing.T) (*meta.Store, http.Handler) {
 	t.Helper()
+	return setupServerWithWorkflowClient(t, &testWorkflowClient{logs: "line0\nline1\nline2\nline3"})
+}
+
+func setupServerWithWorkflowClient(t *testing.T, workflow workflows.WorkflowClient) (*meta.Store, http.Handler) {
+	t.Helper()
 	database, cleanup := testDB(t)
 	t.Cleanup(cleanup)
 
 	store := meta.NewStore(database)
-	handler, err := NewHandler(store, &testWorkflowClient{logs: "line0\nline1\nline2\nline3"}, true, "test")
+	handler, err := NewHandler(store, workflow, true, "test")
 	require.NoError(t, err)
 
 	mux := http.NewServeMux()
@@ -157,6 +167,37 @@ func TestTasksJSONFiltersAndLimit(t *testing.T) {
 	assert.Equal(t, 1, payload.Count)
 	assert.Equal(t, "wf-ui-2", payload.Tasks[0].UUID)
 	assert.Equal(t, "running", payload.Tasks[0].Status)
+}
+
+func TestTasksJSONStatusFilterIsAppliedAfterReconcile(t *testing.T) {
+	store, server := setupServerWithWorkflowClient(t, &testWorkflowClient{
+		logs: "line0\nline1",
+		phases: map[string]wfv1.WorkflowPhase{
+			"wf-ui-reconcile-filter": wfv1.WorkflowRunning,
+		},
+	})
+	ctx := context.Background()
+
+	_, err := store.CreateJob(ctx, "wf-ui-reconcile-filter", "project-a", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks?status=queued&projectID=project-a&limit=25", nil)
+	w := httptest.NewRecorder()
+	server.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	var payload struct {
+		Tasks []taskSummary `json:"tasks"`
+		Count int           `json:"count"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &payload))
+	assert.Empty(t, payload.Tasks)
+	assert.Equal(t, 0, payload.Count)
+
+	job, err := store.GetJob(ctx, "wf-ui-reconcile-filter")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, "running", job.JobStatus)
 }
 
 func TestTaskDetailEndpoints(t *testing.T) {

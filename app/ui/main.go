@@ -105,6 +105,7 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.reconcileNonTerminalJobs(r.Context(), jobs)
+	jobs = filterJobsByStatus(jobs, status)
 
 	now := time.Now().UTC()
 	tasks := make([]taskSummary, 0, len(jobs))
@@ -134,7 +135,8 @@ func (h *Handler) reconcileJobFromArgo(ctx context.Context, job *meta.JobMetadat
 		return
 	}
 	liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
-	if strings.ToLower(strings.TrimSpace(job.JobStatus)) != liveStatus {
+	dbStatus := strings.ToLower(strings.TrimSpace(job.JobStatus))
+	if dbStatus != liveStatus && meta.IsForwardJobStatusTransition(dbStatus, liveStatus) {
 		if updateErr := h.metadataStore.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, nil); updateErr != nil {
 			log.Printf("UI reconcile: failed to sync status for %s: %v", job.WorkflowName, updateErr)
 		}
@@ -159,6 +161,22 @@ func (h *Handler) reconcileNonTerminalJobs(ctx context.Context, jobs []*meta.Job
 		}(job)
 	}
 	wg.Wait()
+}
+
+func filterJobsByStatus(jobs []*meta.JobMetadata, status string) []*meta.JobMetadata {
+	status = strings.ToLower(strings.TrimSpace(status))
+	if status == "" {
+		return jobs
+	}
+	// Reapply the requested DB status filter after Argo reconciliation, since
+	// reconciliation can advance the in-memory job status before rendering.
+	filtered := make([]*meta.JobMetadata, 0, len(jobs))
+	for _, job := range jobs {
+		if strings.ToLower(strings.TrimSpace(job.JobStatus)) == status {
+			filtered = append(filtered, job)
+		}
+	}
+	return filtered
 }
 
 func (h *Handler) handleTaskDetailPage(w http.ResponseWriter, r *http.Request) {
@@ -210,6 +228,7 @@ func (h *Handler) handleTasksJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.reconcileNonTerminalJobs(r.Context(), jobs)
+	jobs = filterJobsByStatus(jobs, status)
 
 	now := time.Now().UTC()
 	tasks := make([]taskSummary, 0, len(jobs))

@@ -127,7 +127,7 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 		}
 
 		// Only advance forward through the state machine; never regress.
-		if !isForwardTransition(job.JobStatus, liveStatus) {
+		if !meta.IsForwardJobStatusTransition(job.JobStatus, liveStatus) {
 			skipped++
 			continue
 		}
@@ -151,23 +151,4 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 	if synced > 0 || errors > 0 {
 		log.Printf("reconciler: cycle done synced=%d skipped=%d errors=%d total_checked=%d", synced, skipped, errors, len(jobs))
 	}
-}
-
-// isForwardTransition returns true when moving from src to dst is a valid
-// forward progression (prevents accidental regressions like completed→running).
-func isForwardTransition(src, dst string) bool {
-	order := map[string]int{
-		"queued":    0,
-		"claimed":   1,
-		"running":   2,
-		"completed": 3,
-		"failed":    3,
-		"canceled":  3,
-	}
-	s, sOk := order[src]
-	d, dOk := order[dst]
-	if !sOk || !dOk {
-		return false
-	}
-	return d > s
 }

@@ -375,6 +375,47 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	assert.Empty(t, response.Status.ErrorMessage)
 }
 
+func TestTaskInfoDoesNotRegressPersistedStatusFromLiveUnknownPhase(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	ctx := context.Background()
+
+	workflowName := "wf-info-guard"
+	_, err := metadataStore.CreateJob(
+		ctx,
+		workflowName,
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+		"us-east-1",
+	)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.UpdateJobStatus(ctx, workflowName, "running", nil))
+
+	wfClient := &recordingWorkflowClient{
+		getFn: func(ctx context.Context, name string) (*wfv1.Workflow, error) {
+			return &wfv1.Workflow{
+				ObjectMeta: metav1.ObjectMeta{Name: name},
+				Status:     wfv1.WorkflowStatus{Phase: ""},
+			}, nil
+		},
+	}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/info", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusOK, w.Code)
+	job, err := metadataStore.GetJob(ctx, workflowName)
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, "running", job.JobStatus)
+}
+
 func TestTaskCancelEndpoint(t *testing.T) {
 	db, cleanup := testDB(t)
 	defer cleanup()
@@ -895,6 +936,7 @@ func TestMetadataImageTotalBytes(t *testing.T) {
 
 type recordingWorkflowClient struct {
 	createFn func(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error)
+	getFn    func(ctx context.Context, name string) (*wfv1.Workflow, error)
 	deleteFn func(ctx context.Context, name string) error
 
 	createdNames []string
@@ -915,6 +957,9 @@ func (c *recordingWorkflowClient) CreateODMWorkflow(ctx context.Context, cfg *wo
 }
 
 func (c *recordingWorkflowClient) GetWorkflow(ctx context.Context, name string) (*wfv1.Workflow, error) {
+	if c.getFn != nil {
+		return c.getFn(ctx, name)
+	}
 	return nil, errors.New("not implemented")
 }
 

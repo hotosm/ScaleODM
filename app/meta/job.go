@@ -211,6 +211,28 @@ func MapArgoPhaseToJobStatus(phase string) string {
 	}
 }
 
+// IsForwardJobStatusTransition returns true when moving from src to dst is a
+// valid forward progression. Reconciliation callers use this to avoid
+// regressing a persisted job status from a later state to an earlier one.
+func IsForwardJobStatusTransition(src, dst string) bool {
+	order := map[string]int{
+		"queued":    0,
+		"claimed":   1,
+		"running":   2,
+		"completed": 3,
+		"failed":    3,
+		"canceled":  3,
+	}
+	src = strings.ToLower(strings.TrimSpace(src))
+	dst = strings.ToLower(strings.TrimSpace(dst))
+	s, sOk := order[src]
+	d, dOk := order[dst]
+	if !sOk || !dOk {
+		return false
+	}
+	return d > s
+}
+
 // UpdateJobMetadata stores additional workflow metadata
 func (s *Store) UpdateJobMetadata(ctx context.Context, workflowName string, metadata map[string]interface{}) error {
 	metadataJSON, err := json.Marshal(metadata)

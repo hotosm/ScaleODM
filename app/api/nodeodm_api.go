@@ -1019,7 +1019,7 @@ func (a *API) registerNodeODMRoutes() {
 			if !infraFailureReconciled {
 				liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
 				dbStatus := strings.ToLower(strings.TrimSpace(job.JobStatus))
-				if dbStatus != liveStatus {
+				if dbStatus != liveStatus && meta.IsForwardJobStatusTransition(dbStatus, liveStatus) {
 					var errPtr *string
 					if errorMessage != "" {
 						errPtr = &errorMessage

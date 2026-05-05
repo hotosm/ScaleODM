@@ -180,6 +180,32 @@ func TestMapArgoPhaseToJobStatus(t *testing.T) {
 	}
 }
 
+func TestIsForwardJobStatusTransition(t *testing.T) {
+	tests := []struct {
+		name string
+		src  string
+		dst  string
+		want bool
+	}{
+		{name: "queued to running", src: "queued", dst: "running", want: true},
+		{name: "running to completed", src: "running", dst: "completed", want: true},
+		{name: "running to failed", src: "running", dst: "failed", want: true},
+		{name: "claimed to queued is not forward", src: "claimed", dst: "queued", want: false},
+		{name: "running to queued is not forward", src: "running", dst: "queued", want: false},
+		{name: "terminal to terminal is not forward", src: "failed", dst: "completed", want: false},
+		{name: "same status is not forward", src: "running", dst: "running", want: false},
+		{name: "normalizes whitespace and case", src: " Queued ", dst: "Running", want: true},
+		{name: "unknown source", src: "unknown", dst: "running", want: false},
+		{name: "unknown destination", src: "running", dst: "unknown", want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, IsForwardJobStatusTransition(tt.src, tt.dst))
+		})
+	}
+}
+
 func TestUpdateJobMetadata(t *testing.T) {
 	db, cleanup := testDB(t)
 	defer cleanup()
