@@ -83,7 +83,7 @@ func (h *Handler) withSecurityHeaders(next http.Handler) http.Handler {
 		w.Header().Set("X-Frame-Options", "DENY")
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Referrer-Policy", "no-referrer")
-		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'")
+		w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'")
 		next.ServeHTTP(w, r)
 	})
 }
@@ -125,6 +125,20 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (h *Handler) reconcileJobFromArgo(ctx context.Context, job *meta.JobMetadata) {
+	wf, err := h.workflow.GetWorkflow(ctx, job.WorkflowName)
+	if err != nil {
+		return
+	}
+	liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
+	if strings.ToLower(strings.TrimSpace(job.JobStatus)) != liveStatus {
+		if updateErr := h.metadataStore.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, nil); updateErr != nil {
+			log.Printf("UI reconcile: failed to sync status for %s: %v", job.WorkflowName, updateErr)
+		}
+		job.JobStatus = liveStatus
+	}
+}
+
 func (h *Handler) handleTaskDetailPage(w http.ResponseWriter, r *http.Request) {
 	uuid := strings.TrimSpace(r.PathValue("uuid"))
 	if uuid == "" {
@@ -141,6 +155,8 @@ func (h *Handler) handleTaskDetailPage(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+
+	h.reconcileJobFromArgo(r.Context(), job)
 
 	data := taskDetailPageData{
 		Title:      "Task " + uuid,
@@ -198,6 +214,8 @@ func (h *Handler) handleTaskDetailJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
 		return
 	}
+
+	h.reconcileJobFromArgo(r.Context(), job)
 
 	writeJSON(w, http.StatusOK, toTaskDetail(job, time.Now().UTC()))
 }

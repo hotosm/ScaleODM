@@ -701,7 +701,7 @@ func (a *API) registerNodeODMRoutes() {
 					if boolVal, ok := opt.Value.(bool); ok && boolVal {
 						odmFlags = append(odmFlags, flag)
 					} else {
-						odmFlags = append(odmFlags, flag, fmt.Sprintf("%v", opt.Value))
+						odmFlags = append(odmFlags, fmt.Sprintf("%s=%v", flag, opt.Value))
 					}
 				}
 			}
@@ -1099,11 +1099,22 @@ func (a *API) registerNodeODMRoutes() {
 			var flags []string
 			if err := json.Unmarshal(job.ODMFlags, &flags); err == nil {
 				info.Options = make([]TaskOption, 0, len(flags))
-				for _, flag := range flags {
-					info.Options = append(info.Options, TaskOption{
-						Name:  strings.TrimPrefix(flag, "--"),
-						Value: true,
-					})
+				for i := 0; i < len(flags); i++ {
+					flag := flags[i]
+					if !strings.HasPrefix(flag, "--") {
+						// Bare value from old pair-format storage: attach to previous option.
+						if len(info.Options) > 0 {
+							info.Options[len(info.Options)-1].Value = flag
+						}
+						continue
+					}
+					name := strings.TrimPrefix(flag, "--")
+					var value interface{} = true
+					if key, val, ok := strings.Cut(name, "="); ok {
+						name = key
+						value = val
+					}
+					info.Options = append(info.Options, TaskOption{Name: name, Value: value})
 				}
 			} else {
 				log.Printf("GET /task/%s/info: failed to unmarshal stored ODM flags: %v", input.UUID, err)
@@ -1396,7 +1407,7 @@ func (a *API) registerNodeODMRoutes() {
 					if boolVal, ok := opt.Value.(bool); ok && boolVal {
 						odmFlags = append(odmFlags, flag)
 					} else {
-						odmFlags = append(odmFlags, flag, fmt.Sprintf("%v", opt.Value))
+						odmFlags = append(odmFlags, fmt.Sprintf("%s=%v", flag, opt.Value))
 					}
 				}
 			}

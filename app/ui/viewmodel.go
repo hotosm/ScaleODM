@@ -153,6 +153,13 @@ func parseOptions(raw json.RawMessage) []taskOption {
 	}
 	options := make([]taskOption, 0, len(flags))
 	for _, flag := range flags {
+		if !strings.HasPrefix(flag, "--") {
+			// Bare value from old pair-format storage: attach to previous option.
+			if len(options) > 0 {
+				options[len(options)-1].Value = strings.TrimSpace(flag)
+			}
+			continue
+		}
 		normalized := strings.TrimSpace(strings.TrimPrefix(flag, "--"))
 		if normalized == "" {
 			continue
