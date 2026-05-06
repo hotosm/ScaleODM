@@ -121,6 +121,11 @@ kubernetes:
 # Optional StorageClass for workflow workspace PVCs.
 # Useful when the cluster default StorageClass has reclaimPolicy: Retain but
 # you want ephemeral workspace volumes to be deleted automatically.
+#
+# IMPORTANT: setting config.workflow.workspace.storageClass (or creating this
+# StorageClass and referencing it) switches the workspace from emptyDir to PVC
+# mode. In PVC mode the process container's ephemeral storage requirement drops
+# significantly - see the ephemeralGiBPerGiBRAM note under config.processSizing.
 workspaceStorageClass:
   create: false
   name: "scaleodm-workspace"
@@ -242,7 +247,26 @@ config:
     # jobs schedulable while still giving bigger RAM estimates more CPU.
     cpuPerGiB: 0.125
     cpuLimitMultiplier: 1.5
-    ephemeralGiBPerGiBRAM: 1
+
+    # Ephemeral storage for the process container. The formula is:
+    #   request = max(10 GiB, estimatedRAM * ephemeralGiBPerGiBRAM)
+    #   limit   = request * ephemeralLimitMultiplier
+    #
+    # Default (0.3) is sized for PVC-backed workspaces (cloud/gp3 or any StorageClass).
+    # When config.workflow.workspace.storageClass is set, ODM writes all project data
+    # to the workspace PVC. Ephemeral storage then only covers:
+    #   - /tmp emptyDir (~1-5 GiB typical, 20 GiB hard limit)
+    #   - container overlay (~2 GiB)
+    # At 0.3 this yields ~10-15 GiB for most jobs, flooring at 10 GiB for small ones.
+    # On-prem recommendation: provision a local StorageClass (e.g. rancher.io/local-path)
+    # and set config.workflow.workspace.storageClass to keep this default.
+    #
+    # WARNING: if no storageClass is set the workspace falls back to an emptyDir volume,
+    # which counts against the pod's ephemeral storage limit. In that mode ODM's full
+    # working tree (point clouds, meshes, outputs) sits on ephemeral disk and 0.3 will
+    # be far too low. Set this to 1.0 or higher for emptyDir deployments, or better:
+    # configure a StorageClass so the workspace uses a PVC.
+    ephemeralGiBPerGiBRAM: 0.3
     ephemeralLimitMultiplier: 1.2
     fastOrthoMemoryMultiplier: 0.5
     dsmDtmMemoryMultiplier: 1.5
