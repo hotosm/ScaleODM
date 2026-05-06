@@ -150,6 +150,8 @@ spec:
               value: {{ .Values.config.workflow.podGCStrategy | quote }}
             - name: SCALEODM_WORKFLOW_POD_GC_DELETE_DELAY_SECONDS
               value: {{ .Values.config.workflow.podGCDeleteDelaySeconds | quote }}
+            - name: SCALEODM_WORKFLOW_CAPACITY_TYPE
+              value: {{ .Values.config.workflow.capacityType | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU
               value: {{ .Values.config.workflow.resources.download.requests.cpu | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY

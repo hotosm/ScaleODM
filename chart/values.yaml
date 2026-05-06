@@ -197,6 +197,10 @@ config:
     ttlFailureSeconds: 604800
     podGCStrategy: "OnWorkflowSuccess"
     podGCDeleteDelaySeconds: 300
+    # Default Karpenter node pool for workflow pods.
+    # "spot" is cheapest; use "on-demand" for stable capacity.
+    # Individual submissions can override this via the capacityType API field.
+    capacityType: "spot"
 
     # These limits are not used in reality, but only the edge case when 0 images are counted.
     # We use a dynamic pod resource estimator, based on number of images to process.

@@ -31,6 +31,19 @@ const (
 	ProcessingModeCityScale     = "city-scale"
 )
 
+// CapacityType controls which Karpenter node pool workflow pods land on.
+// "spot" is the default and cheapest; "on-demand" pins to stable capacity for
+// VIP or time-sensitive jobs that cannot tolerate spot interruption.
+const (
+	CapacityTypeSpot     = "spot"
+	CapacityTypeOnDemand = "on-demand"
+)
+
+// IsValidCapacityType reports whether ct is a recognised capacity type.
+func IsValidCapacityType(ct string) bool {
+	return ct == CapacityTypeSpot || ct == CapacityTypeOnDemand
+}
+
 // S3 scan-depth controls how deep the rclone download walks beneath
 // readS3Path. Depth 1 only matches files in the given directory itself -
 // the default and right choice for inputs like

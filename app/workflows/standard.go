@@ -70,6 +70,9 @@ type ODMPipelineConfig struct {
 	// ProcessingMode selects the pipeline shape; see processing_mode.go.
 	// Empty string is treated as ProcessingModeStandard.
 	ProcessingMode string
+	// CapacityType controls node selection: "spot" (default) or "on-demand".
+	// See processing_mode.go for constants.
+	CapacityType string
 	// ExcludePaths is the rclone-style filter pattern list used by the
 	// download stage. Already composed (defaults + user) by the API layer.
 	ExcludePaths []string
@@ -114,6 +117,7 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 		WriteS3Path:    writeS3Path,
 		ODMFlags:       odmFlags,
 		ProcessingMode: ProcessingModeStandard,
+		CapacityType:   config.SCALEODM_WORKFLOW_CAPACITY_TYPE,
 		S3ScanDepth:    DefaultS3ScanDepth,
 		S3Region:       "us-east-1",
 		S3Endpoint:     "",
@@ -719,6 +723,21 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 		cleanupTemplate.Volumes = append(cleanupTemplate.Volumes, emptyDirWorkspace)
 	}
 
+	capacityType := cfg.CapacityType
+	if !IsValidCapacityType(capacityType) {
+		capacityType = CapacityTypeSpot
+	}
+
+	tolerations := []apiv1.Toleration{}
+	if capacityType == CapacityTypeSpot {
+		tolerations = append(tolerations, apiv1.Toleration{
+			Key:      "spot",
+			Operator: apiv1.TolerationOpEqual,
+			Value:    "true",
+			Effect:   apiv1.TaintEffectPreferNoSchedule,
+		})
+	}
+
 	// Create workflow
 	wf := &wfv1.Workflow{
 		ObjectMeta: metav1.ObjectMeta{
@@ -737,6 +756,11 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 			},
 			PodGC:     toPodGC(cfg.RuntimeGuardrails.PodGCStrategy, cfg.RuntimeGuardrails.PodGCDeleteDelaySecond),
 			Templates: []wfv1.Template{mainTemplate, cleanupTemplate},
+			NodeSelector: map[string]string{
+				"node-type":                  "cpu",
+				"karpenter.sh/capacity-type": capacityType,
+			},
+			Tolerations: tolerations,
 		},
 	}
 

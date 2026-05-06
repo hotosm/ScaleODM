@@ -55,6 +55,7 @@ const (
 	metadataExcludePathsKey          = "exclude_paths"
 	metadataUseDefaultExcludesKey    = "use_default_excludes"
 	metadataS3ScanDepthKey           = "s3_scan_depth"
+	metadataCapacityTypeKey          = "capacity_type"
 )
 
 const (
@@ -151,6 +152,14 @@ func metadataProcessingMode(metadataJSON []byte) string {
 		return mode
 	}
 	return workflows.ProcessingModeStandard
+}
+
+func metadataCapacityType(metadataJSON []byte) string {
+	metaMap := parseMetadataMap(metadataJSON)
+	if ct, ok := metaMap[metadataCapacityTypeKey].(string); ok && workflows.IsValidCapacityType(ct) {
+		return ct
+	}
+	return config.SCALEODM_WORKFLOW_CAPACITY_TYPE
 }
 
 func metadataS3ScanDepth(metadataJSON []byte) int {
@@ -377,6 +386,11 @@ type TaskNewRequest struct {
 	//     corrective alignment from a central task using prior LAZ point
 	//     clouds, plus a final alignment pass against a global DEM.
 	ProcessingMode string `json:"processingMode,omitempty" form:"processingMode" doc:"Pipeline mode: 'standard' (default). Reserved: 'merge-existing', 'thermal', 'city-scale'."`
+
+	// CapacityType selects the Karpenter node pool for workflow pods.
+	// Use "on-demand" for VIP or time-sensitive jobs that cannot tolerate spot
+	// interruption. Defaults to "spot" when omitted.
+	CapacityType string `json:"capacityType,omitempty" form:"capacityType" doc:"Node capacity type for workflow pods: 'spot' (default) or 'on-demand' for VIP jobs."`
 
 	// S3ScanDepth caps how deep the download stage walks beneath readS3Path.
 	// Defaults to 1 (only files directly under the given path - the right
@@ -646,6 +660,17 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, fmt.Sprintf("invalid processingMode %q (supported: standard)", processingMode))
 		}
 
+		capacityType := req.CapacityType
+		if capacityType == "" {
+			capacityType = config.SCALEODM_WORKFLOW_CAPACITY_TYPE
+		}
+		if !workflows.IsValidCapacityType(capacityType) {
+			metricResult = "failure"
+			metricReason = "invalid_capacity_type"
+			log.Printf("POST /task/new: invalid capacityType=%q", capacityType)
+			return nil, huma.NewError(400, fmt.Sprintf("invalid capacityType %q (supported: spot, on-demand)", capacityType))
+		}
+
 		s3ScanDepth := 0
 		if req.S3ScanDepth != nil {
 			s3ScanDepth = *req.S3ScanDepth
@@ -842,6 +867,7 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
 		wfConfig.ProcessingMode = processingMode
+		wfConfig.CapacityType = capacityType
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
 
@@ -897,6 +923,7 @@ func (a *API) registerNodeODMRoutes() {
 			metadataImageTotalBytesKey:       imageTotalBytes,
 			metadataWorkflowMissingFirstSeen: nil,
 			metadataProcessingModeKey:        processingMode,
+			metadataCapacityTypeKey:          capacityType,
 			metadataExcludePathsKey:          userExcludes,
 			metadataUseDefaultExcludesKey:    useDefaultExcludes,
 			metadataS3ScanDepthKey:           s3ScanDepth,
@@ -1432,6 +1459,7 @@ func (a *API) registerNodeODMRoutes() {
 		log.Printf("POST /task/restart: endpoint selection endpoint=%q allowlist_enforced=%t", s3Endpoint, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
 
 		processingMode := metadataProcessingMode(metadata.Metadata)
+		capacityType := metadataCapacityType(metadata.Metadata)
 		userExcludes, _ := metadataExcludePaths(metadata.Metadata)
 		useDefaultExcludes := metadataUseDefaultExcludes(metadata.Metadata)
 		excludePatterns := workflows.ComposeExcludePatterns(useDefaultExcludes, userExcludes)
@@ -1470,6 +1498,7 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
 		wfConfig.ProcessingMode = processingMode
+		wfConfig.CapacityType = capacityType
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
 

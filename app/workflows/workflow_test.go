@@ -464,6 +464,45 @@ func TestEstimateWorkspacePVCSize_ClampsToMinAndMax(t *testing.T) {
 	assert.Equal(t, "100Gi", maxSize)
 }
 
+func TestBuildODMWorkflow_SpotNodeSelector(t *testing.T) {
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	cfg.CapacityType = CapacityTypeSpot
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf)
+	assert.Equal(t, "spot", wf.Spec.NodeSelector["karpenter.sh/capacity-type"])
+	assert.Equal(t, "cpu", wf.Spec.NodeSelector["node-type"])
+	require.Len(t, wf.Spec.Tolerations, 1)
+	assert.Equal(t, "spot", wf.Spec.Tolerations[0].Key)
+	assert.Equal(t, apiv1.TaintEffectPreferNoSchedule, wf.Spec.Tolerations[0].Effect)
+}
+
+func TestBuildODMWorkflow_OnDemandNodeSelector(t *testing.T) {
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	cfg.CapacityType = CapacityTypeOnDemand
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf)
+	assert.Equal(t, "on-demand", wf.Spec.NodeSelector["karpenter.sh/capacity-type"])
+	assert.Equal(t, "cpu", wf.Spec.NodeSelector["node-type"])
+	assert.Empty(t, wf.Spec.Tolerations)
+}
+
+func TestBuildODMWorkflow_InvalidCapacityTypeFallsBackToSpot(t *testing.T) {
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	cfg.CapacityType = "invalid"
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf)
+	assert.Equal(t, "spot", wf.Spec.NodeSelector["karpenter.sh/capacity-type"])
+}
+
 func TestApplyDynamicWorkspaceSize_EmptyDirUnaffected(t *testing.T) {
 	prevEnabled := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_ENABLED
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_ENABLED = true
