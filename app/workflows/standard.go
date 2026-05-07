@@ -318,22 +318,35 @@ func applyDynamicWorkspaceSize(cfg *ODMPipelineConfig) {
 	if !config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_ENABLED || !shouldUseWorkspacePVC(cfg.Workspace) {
 		return
 	}
-	if estimatedSize, ok := estimateWorkspacePVCSize(cfg.ImageTotalBytes, cfg.ImageCount); ok {
+	if estimatedSize, ok := estimateWorkspacePVCSize(cfg.ImageTotalBytes, cfg.ImageCount, cfg.ODMFlags); ok {
 		cfg.Workspace.Size = estimatedSize
 	}
 }
 
-func estimateWorkspacePVCSize(imageTotalBytes int64, imageCount int) (string, bool) {
-	estimatedGiB := estimateWorkspaceGiB(imageTotalBytes, imageCount)
+func estimateWorkspacePVCSize(imageTotalBytes int64, imageCount int, odmFlags []string) (string, bool) {
+	estimatedGiB := estimateWorkspaceGiB(imageTotalBytes, imageCount, odmFlags)
 	if estimatedGiB <= 0 || math.IsNaN(estimatedGiB) || math.IsInf(estimatedGiB, 0) {
 		return "", false
 	}
 	return fmt.Sprintf("%dGi", int64(math.Ceil(estimatedGiB))), true
 }
 
-func estimateWorkspaceGiB(imageTotalBytes int64, imageCount int) float64 {
-	multiplier := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MULTIPLIER
-	minGiB := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MIN_GIB
+// flagWorkspaceProfile returns the (multiplier, minGiB) pair for workspace sizing.
+// --fast-orthophoto skips dense reconstruction and has a much smaller disk footprint;
+// everything else (including DSM/DTM) uses the standard profile.
+func flagWorkspaceProfile(odmFlags []string) (multiplier, minGiB float64) {
+	for _, f := range odmFlags {
+		if f == "--fast-orthophoto" {
+			return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER,
+				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
+		}
+	}
+	return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER,
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
+}
+
+func estimateWorkspaceGiB(imageTotalBytes int64, imageCount int, odmFlags []string) float64 {
+	multiplier, minGiB := flagWorkspaceProfile(odmFlags)
 	maxGiB := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
 	if multiplier <= 0 || maxGiB <= 0 || maxGiB < minGiB {
 		return 0

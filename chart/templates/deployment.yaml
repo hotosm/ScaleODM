@@ -126,14 +126,18 @@ spec:
               value: {{ .Values.config.workflow.workspace.accessMode | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_ENABLED
               value: {{ .Values.config.workflow.workspace.dynamicSize.enabled | quote }}
-            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MULTIPLIER
-              value: {{ .Values.config.workflow.workspace.dynamicSize.multiplier | quote }}
-            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MIN_GIB
-              value: {{ .Values.config.workflow.workspace.dynamicSize.minGiB | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
               value: {{ .Values.config.workflow.workspace.dynamicSize.maxGiB | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE
               value: {{ .Values.config.workflow.workspace.dynamicSize.fallbackMBPerImage | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER
+              value: {{ .Values.config.workflow.workspace.dynamicSize.fastOrtho.multiplier | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
+              value: {{ .Values.config.workflow.workspace.dynamicSize.fastOrtho.minGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
+              value: {{ .Values.config.workflow.workspace.dynamicSize.standard.multiplier | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
+              value: {{ .Values.config.workflow.workspace.dynamicSize.standard.minGiB | quote }}
             - name: SCALEODM_WORKFLOW_RETRY_LIMIT
               value: {{ .Values.config.workflow.retryLimit | quote }}
             - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_DURATION

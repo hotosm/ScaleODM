@@ -184,15 +184,20 @@ config:
       storageClass: ""
       accessMode: ReadWriteOnce
       dynamicSize:
-        enabled: false
-        multiplier: 4
-        minGiB: 30
+        enabled: true
         maxGiB: 1024
         fallbackMBPerImage: 20
+        # --fast-orthophoto skips dense reconstruction; everything else uses standard.
+        fastOrtho:
+          multiplier: 3
+          minGiB: 30
+        standard:
+          multiplier: 6
+          minGiB: 50
     retryLimit: 1
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"
-    retryBackoffMaxDuration: "10m"
+    retryBackoffMaxDuration: "6h"
     ttlSuccessSeconds: 86400
     ttlFailureSeconds: 604800
     podGCStrategy: "OnWorkflowSuccess"

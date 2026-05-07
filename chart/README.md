@@ -150,7 +150,7 @@ Workflow workspace storage is configurable through `config.workflow.workspace.*`
 - `size`: workspace PVC size request when PVC mode is used (default `30Gi`)
 - `storageClass`: optional storage class (for example `gp3`, Ceph class)
 - `accessMode`: PVC access mode (default `ReadWriteOnce`)
-- `dynamicSize.*`: opt-in dynamic PVC estimation knobs (`enabled`, `multiplier`, `minGiB`, `maxGiB`, `fallbackMBPerImage`)
+- `dynamicSize.*`: flag-aware dynamic PVC sizing (enabled by default). Selects a workspace profile based on ODM flags, then scales by input image bytes.
 
 Behavior matrix:
 
@@ -159,13 +159,24 @@ Behavior matrix:
 - `mode=auto` + `storageClass` set: request a PVC
 - `mode=auto` + empty `storageClass`: fall back to `emptyDir`
 
-Dynamic workspace sizing precedence:
+Dynamic workspace sizing:
 
-1. Workspace mode resolves whether PVC is used
+Dynamic sizing is enabled by default and selects a profile based on ODM flags (mirrors the flag-aware RAM sizing logic):
+
+| Profile | Trigger | Default multiplier | Default min |
+|---|---|---|---|
+| `fastOrtho` | `--fast-orthophoto` | 3× | 30 GiB |
+| `standard` | everything else (including DSM/DTM) | 6× | 50 GiB |
+
+Sizing precedence:
+
+1. Workspace mode resolves whether a PVC is used
 2. If workspace is not PVC, dynamic sizing is ignored
-3. If dynamic sizing is disabled, static `workspace.size` is used
-4. If enabled, ScaleODM estimates from `image_total_bytes` first, then `image_count * fallbackMBPerImage` (default `20`)
-5. Result is multiplied, clamped to `minGiB/maxGiB`, rounded up to whole `Gi`, and falls back to static size on invalid inputs
+3. If dynamic sizing is disabled, the static `workspace.size` value is used
+4. If enabled, ScaleODM estimates from `image_total_bytes` first, then `image_count × fallbackMBPerImage` (default `20`) as fallback
+5. The profile multiplier is applied, clamped to the profile's `minGiB` and the global `maxGiB`, rounded up to whole GiB
+
+> **Note on retries and disk-full failures:** workflow retries reuse the same PVC. If ODM fills the volume on the first attempt, the retry will also fail at the download step. Dynamic sizing is the primary mitigation - size the workspace correctly upfront.
 
 Recommended profiles:
 
@@ -363,11 +374,18 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.workspace.size` | Workspace PVC size request | `"30Gi"` |
 | `config.workflow.workspace.storageClass` | Workspace PVC storage class (empty = unset) | `""` |
 | `config.workflow.workspace.accessMode` | Workspace PVC access mode | `"ReadWriteOnce"` |
-| `config.workflow.workspace.dynamicSize.enabled` | Enable dynamic PVC sizing (PVC mode only) | `false` |
-| `config.workflow.workspace.dynamicSize.multiplier` | Workspace estimate multiplier | `4` |
-| `config.workflow.workspace.dynamicSize.minGiB` | Dynamic workspace minimum GiB clamp | `30` |
-| `config.workflow.workspace.dynamicSize.maxGiB` | Dynamic workspace maximum GiB clamp | `1024` |
+| `config.workflow.workspace.dynamicSize.enabled` | Enable flag-aware dynamic PVC sizing (PVC mode only) | `true` |
+| `config.workflow.workspace.dynamicSize.maxGiB` | Global maximum GiB clamp across all profiles | `1024` |
 | `config.workflow.workspace.dynamicSize.fallbackMBPerImage` | Fallback MB/image when byte totals unavailable | `20` |
+| `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `3` |
+| `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `30` |
+| `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs (including DSM/DTM) | `6` |
+| `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `50` |
+| `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `21600` |
+| `config.workflow.retryLimit` | Number of retry attempts on failure | `1` |
+| `config.workflow.retryBackoffDuration` | Initial backoff wait between retries | `"60s"` |
+| `config.workflow.retryBackoffFactor` | Exponential backoff factor | `"2"` |
+| `config.workflow.retryBackoffMaxDuration` | Total time window from workflow start in which retries are allowed | `"6h"` |
 | `config.ui.enabled` | Enable built-in `/ui` operator pages | `false` |
 | `config.ui.readOnly` | Keep UI in read-only mode | `true` |
 | `config.observability.enabled` | Enable OpenTelemetry bootstrap | `false` |
