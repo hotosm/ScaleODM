@@ -192,8 +192,8 @@ config:
           multiplier: 3
           minGiB: 30
         standard:
-          multiplier: 6
-          minGiB: 50
+          multiplier: 8
+          minGiB: 70
     retryLimit: 1
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"
