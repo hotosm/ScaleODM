@@ -141,7 +141,7 @@ workspaceStorageClass:
 # Configuration (non-sensitive)
 config:
   # ODM image to use in workflows
-  odmImage: "docker.io/opendronemap/odm:3.5.6"
+  odmImage: "docker.io/opendronemap/odm:3.6.0"
 
   s3EndpointPolicy:
     enforceAllowlist: false
