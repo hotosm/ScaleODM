@@ -608,6 +608,7 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 			Args: []string{
 				fmt.Sprintf(`
 set -e
+set -o pipefail
 JOB_ID="{{workflow.name}}"
 LOG_FILE="/workspace/$JOB_ID/.process.log"
 echo "Running ODM processing..." | tee -a "$LOG_FILE"

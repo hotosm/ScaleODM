@@ -108,6 +108,7 @@ func GenerateDownloadScript(jobID, srcPath string, excludePatterns []string, max
 	}
 
 	return `set -e
+set -o pipefail
 echo "Downloading imagery from S3..."
 JOB_ID="` + jobID + `"
 SRC_PATH="` + srcPath + `"
@@ -265,6 +266,7 @@ find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff"
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
 func GenerateUploadScript(destPath string) string {
 	return `set -e
+set -o pipefail
 echo "Running final upload..."
 
 DEST_PATH="` + destPath + `"
@@ -350,6 +352,7 @@ echo "Upload complete."`
 // Collects logs from download, process, and upload stages, plus any ODM-generated log files
 func GenerateLogUploadScript(destPath string) string {
 	return `set -e
+set -o pipefail
 echo "Collecting workflow logs..."
 
 DEST_PATH="` + destPath + `"
