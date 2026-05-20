@@ -198,6 +198,13 @@ config:
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"
     retryBackoffMaxDuration: "6h"
+    # Argo retryStrategy.retryPolicy. Which non-success phases trigger a retry:
+    #   OnFailure        - phase=Failed (container exit != 0, e.g. ODM crash)
+    #   OnError          - phase=Error  (infra: node loss, image pull)
+    #   Always           - both
+    #   OnTransientError - either, but only if Argo's IsTransientErr matches
+    # OnError is the most reliable choice for retrying spot evictions only.
+    retryPolicy: "OnTransientError"
     ttlSuccessSeconds: 86400
     ttlFailureSeconds: 604800
     podGCStrategy: "OnWorkflowSuccess"

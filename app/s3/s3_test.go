@@ -228,6 +228,15 @@ func TestGenerateDownloadScript_MaxDepthFlag(t *testing.T) {
 	assert.NotContains(t, unlimited, "--max-depth")
 }
 
+func TestGenerateUploadScript_TestWriteFailureSurvivesErrexit(t *testing.T) {
+	script := GenerateUploadScript("s3://bucket/output/")
+
+	assert.Contains(t, script, `if TEST_OUTPUT=$(rclone copyto "$TEST_FILE" "$TEST_OBJECT" 2>&1); then`)
+	assert.Contains(t, script, "else\n  TEST_EXIT_CODE=$?")
+	assert.Contains(t, script, "This might be a false positive. Continuing with actual upload...")
+	assert.NotContains(t, script, "TEST_OUTPUT=$(rclone copyto \"$TEST_FILE\" \"$TEST_OBJECT\" 2>&1)\nTEST_EXIT_CODE=$?")
+}
+
 func TestRenderRcloneFilterFile_OrderingAndFormat(t *testing.T) {
 	out := renderRcloneFilterFile([]string{"odm_orthophoto/**", "all.zip"})
 

@@ -84,6 +84,72 @@ func TestBuildODMWorkflow_CleanupRunsOnTerminalUploadStates(t *testing.T) {
 	assert.Equal(t, "cleanup", cleanupTemplate.Container.Name)
 }
 
+func TestBuildODMWorkflow_DownloadUploadCreateWorkspaceBeforeTee(t *testing.T) {
+	cfg := NewDefaultODMConfig(
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+	)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotEmpty(t, wf.Spec.Templates)
+	require.NotNil(t, wf.Spec.Templates[0].ContainerSet)
+
+	tests := []struct {
+		name    string
+		logPath string
+	}{
+		{name: "download", logPath: "/workspace/{{workflow.name}}/.download.log"},
+		{name: "upload", logPath: "/workspace/{{workflow.name}}/.upload.log"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var container *wfv1.ContainerNode
+			for i := range wf.Spec.Templates[0].ContainerSet.Containers {
+				if wf.Spec.Templates[0].ContainerSet.Containers[i].Name == tt.name {
+					container = &wf.Spec.Templates[0].ContainerSet.Containers[i]
+					break
+				}
+			}
+			require.NotNil(t, container)
+			require.Len(t, container.Args, 1)
+
+			script := container.Args[0]
+			mkdirIndex := strings.Index(script, "mkdir -p /workspace/{{workflow.name}}")
+			teeIndex := strings.Index(script, "tee "+tt.logPath)
+			require.GreaterOrEqual(t, mkdirIndex, 0)
+			require.GreaterOrEqual(t, teeIndex, 0)
+			assert.Less(t, mkdirIndex, teeIndex)
+		})
+	}
+}
+
+func TestToRetryStrategy_RetryPolicy(t *testing.T) {
+	cases := []struct {
+		name   string
+		policy string
+		want   wfv1.RetryPolicy
+	}{
+		{name: "default empty -> OnTransientError", policy: "", want: wfv1.RetryPolicyOnTransientError},
+		{name: "explicit OnTransientError", policy: "OnTransientError", want: wfv1.RetryPolicyOnTransientError},
+		{name: "Always", policy: "Always", want: wfv1.RetryPolicyAlways},
+		{name: "OnFailure", policy: "OnFailure", want: wfv1.RetryPolicyOnFailure},
+		{name: "OnError", policy: "OnError", want: wfv1.RetryPolicyOnError},
+		{name: "garbage falls back to OnTransientError", policy: "Sometimes", want: wfv1.RetryPolicyOnTransientError},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rs := toRetryStrategy(RetryConfig{Limit: 1, Policy: tc.policy})
+			require.NotNil(t, rs)
+			assert.Equal(t, tc.want, rs.RetryPolicy)
+		})
+	}
+}
+
 func TestBuildODMWorkflow_UsesSecretKeyRef(t *testing.T) {
 	cfg := NewDefaultODMConfig(
 		"test-project",

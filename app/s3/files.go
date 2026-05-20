@@ -310,10 +310,12 @@ echo "s3 write test $(date)" > "$TEST_FILE"
 TEST_OBJECT="$S3_REMOTE/.s3-write-test-$(date +%s)"
 
 echo "Testing write to: $TEST_OBJECT"
-TEST_OUTPUT=$(rclone copyto "$TEST_FILE" "$TEST_OBJECT" 2>&1)
-TEST_EXIT_CODE=$?
-
-if [ $TEST_EXIT_CODE -ne 0 ]; then
+if TEST_OUTPUT=$(rclone copyto "$TEST_FILE" "$TEST_OBJECT" 2>&1); then
+  echo "Test write successful, cleaning up test object..."
+  rclone deletefile "$TEST_OBJECT" 2>&1 || echo "Warning: Failed to delete test object (non-fatal)"
+  echo "S3 write access confirmed."
+else
+  TEST_EXIT_CODE=$?
   echo ""
   echo "Warning: Test write failed (exit code: $TEST_EXIT_CODE)"
   echo "Test output: $TEST_OUTPUT"
@@ -321,10 +323,6 @@ if [ $TEST_EXIT_CODE -ne 0 ]; then
   echo "This might be a false positive. Continuing with actual upload..."
   echo "The upload will fail if there are real permission issues."
   echo ""
-else
-  echo "Test write successful, cleaning up test object..."
-  rclone deletefile "$TEST_OBJECT" 2>&1 || echo "Warning: Failed to delete test object (non-fatal)"
-  echo "S3 write access confirmed."
 fi
 
 rm -f "$TEST_FILE"

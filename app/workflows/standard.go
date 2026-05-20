@@ -36,6 +36,9 @@ type RetryConfig struct {
 	BackoffDuration    string
 	BackoffFactor      string
 	BackoffMaxDuration string
+	// Policy maps to Argo's retryStrategy.retryPolicy. Empty defaults to
+	// OnTransientError. See chart values.yaml for the trade-offs.
+	Policy string
 }
 
 // WorkflowRuntimeGuardrails defines workflow-level runtime controls.
@@ -135,6 +138,7 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 				BackoffDuration:    config.SCALEODM_WORKFLOW_RETRY_BACKOFF_DURATION,
 				BackoffFactor:      config.SCALEODM_WORKFLOW_RETRY_BACKOFF_FACTOR,
 				BackoffMaxDuration: config.SCALEODM_WORKFLOW_RETRY_BACKOFF_MAX_DURATION,
+				Policy:             config.SCALEODM_WORKFLOW_RETRY_POLICY,
 			},
 		},
 		Workspace: WorkspaceConfig{
@@ -509,12 +513,30 @@ func toRetryStrategy(cfg RetryConfig) *wfv1.RetryStrategy {
 	factor := intstr.FromInt(factorInt)
 
 	return &wfv1.RetryStrategy{
-		Limit: &limit,
+		Limit:       &limit,
+		RetryPolicy: parseRetryPolicy(cfg.Policy),
 		Backoff: &wfv1.Backoff{
 			Duration:    cfg.BackoffDuration,
 			Factor:      &factor,
 			MaxDuration: cfg.BackoffMaxDuration,
 		},
+	}
+}
+
+// parseRetryPolicy maps a string to Argo's RetryPolicy.
+// Unknown or empty values fall back to OnTransientError.
+func parseRetryPolicy(policy string) wfv1.RetryPolicy {
+	switch strings.TrimSpace(policy) {
+	case string(wfv1.RetryPolicyAlways):
+		return wfv1.RetryPolicyAlways
+	case string(wfv1.RetryPolicyOnFailure):
+		return wfv1.RetryPolicyOnFailure
+	case string(wfv1.RetryPolicyOnError):
+		return wfv1.RetryPolicyOnError
+	case string(wfv1.RetryPolicyOnTransientError), "":
+		return wfv1.RetryPolicyOnTransientError
+	default:
+		return wfv1.RetryPolicyOnTransientError
 	}
 }
 
@@ -579,14 +601,17 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	// Logs are written to shared workspace for later collection
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:            "download",
-			Image:           cfg.RcloneImage,
-			Command:         []string{"/bin/sh", "-c"},
+			Name:    "download",
+			Image:   cfg.RcloneImage,
+			Command: []string{"/bin/sh", "-c"},
 			// Brace-wrap so tee captures the whole script's output, not just the last command.
 			// Outer set -e/pipefail propagates failures from the brace group through the pipeline,
 			// since the left side runs in a subshell and the script's own settings can't escape it.
+			// mkdir before the pipeline: tee opens the log file at fork time, racing the
+			// brace group's own mkdir - without this, tee loses on a fresh PVC.
 			Args: []string{fmt.Sprintf(`set -e
 set -o pipefail
+mkdir -p /workspace/{{workflow.name}}
 {
 %s
 } 2>&1 | tee /workspace/{{workflow.name}}/.download.log`, s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth))},
@@ -635,11 +660,12 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 	// Logs are written to shared workspace for later collection
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:            "upload",
-			Image:           cfg.RcloneImage,
-			Command:         []string{"/bin/sh", "-c"},
+			Name:    "upload",
+			Image:   cfg.RcloneImage,
+			Command: []string{"/bin/sh", "-c"},
 			Args: []string{fmt.Sprintf(`set -e
 set -o pipefail
+mkdir -p /workspace/{{workflow.name}}
 {
 %s
 } 2>&1 | tee /workspace/{{workflow.name}}/.upload.log`, s3.GenerateUploadScript(cfg.WriteS3Path))},

@@ -146,6 +146,8 @@ spec:
               value: {{ .Values.config.workflow.retryBackoffFactor | quote }}
             - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_MAX_DURATION
               value: {{ .Values.config.workflow.retryBackoffMaxDuration | quote }}
+            - name: SCALEODM_WORKFLOW_RETRY_POLICY
+              value: {{ .Values.config.workflow.retryPolicy | quote }}
             - name: SCALEODM_WORKFLOW_TTL_SUCCESS_SECONDS
               value: {{ .Values.config.workflow.ttlSuccessSeconds | quote }}
             - name: SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS
