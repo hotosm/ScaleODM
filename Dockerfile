@@ -3,11 +3,14 @@ FROM golang:1.26 AS base
 
 # Build statically compiled binary
 FROM base AS build
+ARG APP_VERSION=dev
 WORKDIR /code
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux go build -o /code/scaleodm
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags "-X github.com/hotosm/scaleodm/app/version.Version=${APP_VERSION}" \
+    -o /code/scaleodm
 
 
 # Run the tests in the container
