@@ -352,6 +352,34 @@ func putTestObject(t *testing.T, client *minio.Client, bucket, key, content stri
 	require.NoError(t, err)
 }
 
+func TestDeleteWorkflowLogsFromS3(t *testing.T) {
+	ctx := context.Background()
+	bucket := "test-bucket-delete-logs"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	client := testS3Client(t)
+	prefix := "results/task-delete-logs/"
+	putTestObject(t, client, bucket, prefix+".workflow-logs.txt", "stale logs")
+	putTestObject(t, client, bucket, prefix+"orthophoto.tif", "keep me")
+
+	writePath := "s3://" + bucket + "/" + prefix
+	require.NoError(t, DeleteWorkflowLogsFromS3(ctx, client, writePath))
+
+	exists, err := ObjectExistsInS3Path(ctx, client, writePath, ".workflow-logs.txt")
+	require.NoError(t, err)
+	assert.False(t, exists, "log object should be removed")
+
+	exists, err = ObjectExistsInS3Path(ctx, client, writePath, "orthophoto.tif")
+	require.NoError(t, err)
+	assert.True(t, exists, "sibling objects should be untouched")
+
+	// Deleting again should be a no-op.
+	require.NoError(t, DeleteWorkflowLogsFromS3(ctx, client, writePath))
+
+	// Missing prefix should also be a no-op.
+	require.NoError(t, DeleteWorkflowLogsFromS3(ctx, client, "s3://"+bucket+"/never/created/"))
+}
+
 func TestObjectExistsInS3Path(t *testing.T) {
 	ctx := context.Background()
 	bucket := "test-bucket-object-exists"

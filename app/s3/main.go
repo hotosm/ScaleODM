@@ -175,6 +175,26 @@ func GetWorkflowLogsFromS3(ctx context.Context, client *minio.Client, writeS3Pat
 	return string(content), nil
 }
 
+// DeleteWorkflowLogsFromS3 removes the aggregated .workflow-logs.txt object at
+// writeS3Path if it exists. A missing object is treated as success so callers
+// can invoke this safely before starting a (re)run without checking existence.
+func DeleteWorkflowLogsFromS3(ctx context.Context, client *minio.Client, writeS3Path string) error {
+	bucket, prefix, err := parseS3Path(writeS3Path)
+	if err != nil {
+		return err
+	}
+
+	logObjectKey := prefix + ".workflow-logs.txt"
+	if err := client.RemoveObject(ctx, bucket, logObjectKey, minio.RemoveObjectOptions{}); err != nil {
+		errResp := minio.ToErrorResponse(err)
+		if errResp.Code == "NoSuchKey" || errResp.Code == "NoSuchBucket" {
+			return nil
+		}
+		return fmt.Errorf("failed to delete workflow logs from S3: %w", err)
+	}
+	return nil
+}
+
 // ObjectExistsInS3Path checks if an exact object exists under writeS3Path.
 // writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
 // fileName is the exact object key suffix under the prefix.

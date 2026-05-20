@@ -853,6 +853,13 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, "Unable to read imagery from readS3Path", countErr)
 		}
 
+		// Best-effort: remove any prior run's aggregated log so the UI doesn't
+		// show stale output while this run is Pending. The workflow's log
+		// upload step will recreate this object once the run completes.
+		if err := s3.DeleteWorkflowLogsFromS3(ctx, taskClient, writePath); err != nil {
+			log.Printf("POST /task/new: failed to clear stale workflow logs at %q: %v", writePath, err)
+		}
+
 		// S3 credentials are configured at the server level and injected into
 		// workflow pods via Kubernetes Secret references (secretKeyRef).
 		// No per-request credential handling needed.
@@ -1468,14 +1475,15 @@ func (a *API) registerNodeODMRoutes() {
 			s3ScanDepth = workflows.DefaultS3ScanDepth
 		}
 
+		taskClient, taskClientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
+		if s3Endpoint != "" {
+			taskClient, taskClientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
+		}
+
 		imageCount := metadataImageCount(metadata.Metadata)
 		imageTotalBytes := metadataImageTotalBytes(metadata.Metadata)
 		if imageCount == 0 || imageTotalBytes == 0 {
-			taskClient, clientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
-			if s3Endpoint != "" {
-				taskClient, clientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
-			}
-			if clientErr == nil {
+			if taskClientErr == nil {
 				if counted, totalBytes, countErr := s3.CountImageStatsInS3PathWithExcludes(ctx, taskClient, metadata.ReadS3Path, excludePatterns); countErr == nil {
 					if imageCount == 0 {
 						imageCount = counted
@@ -1485,6 +1493,15 @@ func (a *API) registerNodeODMRoutes() {
 					}
 				}
 			}
+		}
+
+		// Best-effort: remove the prior run's aggregated log so the UI doesn't
+		// show stale output while the restarted run is Pending. The workflow's
+		// log upload step will recreate this object once the run completes.
+		if taskClientErr != nil {
+			log.Printf("POST /task/restart: skipping stale log cleanup, S3 client init failed endpoint=%q: %v", s3Endpoint, taskClientErr)
+		} else if err := s3.DeleteWorkflowLogsFromS3(ctx, taskClient, metadata.WriteS3Path); err != nil {
+			log.Printf("POST /task/restart: failed to clear stale workflow logs at %q: %v", metadata.WriteS3Path, err)
 		}
 
 		wfConfig := workflows.NewDefaultODMConfig(
