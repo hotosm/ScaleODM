@@ -582,7 +582,14 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 			Name:            "download",
 			Image:           cfg.RcloneImage,
 			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth) + " 2>&1 | tee /workspace/{{workflow.name}}/.download.log"},
+			// Brace-wrap so tee captures the whole script's output, not just the last command.
+			// Outer set -e/pipefail propagates failures from the brace group through the pipeline,
+			// since the left side runs in a subshell and the script's own settings can't escape it.
+			Args: []string{fmt.Sprintf(`set -e
+set -o pipefail
+{
+%s
+} 2>&1 | tee /workspace/{{workflow.name}}/.download.log`, s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth))},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
 			SecurityContext: workflowContainerSecurityContext(),
@@ -631,7 +638,11 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 			Name:            "upload",
 			Image:           cfg.RcloneImage,
 			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{s3.GenerateUploadScript(cfg.WriteS3Path) + " 2>&1 | tee /workspace/{{workflow.name}}/.upload.log"},
+			Args: []string{fmt.Sprintf(`set -e
+set -o pipefail
+{
+%s
+} 2>&1 | tee /workspace/{{workflow.name}}/.upload.log`, s3.GenerateUploadScript(cfg.WriteS3Path))},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.UploadResources),
 			SecurityContext: workflowContainerSecurityContext(),

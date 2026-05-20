@@ -258,7 +258,7 @@ find "$DEST_DIR" -type d -empty -delete
 
 echo "Download and extraction complete. Image files in $DEST_DIR:"
 find "$DEST_DIR" -type f | wc -l | xargs echo "Total image files:"
-find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) | head -10 || true`
+find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff" -o -iname "*.tif" \) | awk 'NR<=10'`
 }
 
 // GenerateUploadScript generates a shell script for uploading ODM results to S3
