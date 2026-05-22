@@ -63,6 +63,53 @@ cluster-init:
   WORKFLOW_S3_ACCESS_KEY="${AWS_ACCESS_KEY_ID:-admin}"
   WORKFLOW_S3_SECRET_KEY="${AWS_SECRET_ACCESS_KEY:-somelongpassword}"
   WORKFLOW_S3_REGION="${AWS_DEFAULT_REGION:-us-east-1}"
+  ARGO_ARCHIVE_LOG_BUCKET="${SCALEODM_ARGO_ARCHIVE_LOG_BUCKET:-argo-logs}"
+  ARGO_ARCHIVE_S3_ENDPOINT="${SCALEODM_ARGO_ARCHIVE_S3_ENDPOINT:-${SCALEODM_WORKFLOW_S3_ENDPOINT:-}}"
+  ARGO_ARCHIVE_S3_INSECURE="${SCALEODM_ARGO_ARCHIVE_S3_INSECURE:-true}"
+
+  configure_argo_archive_logs() {
+      local endpoint="$ARGO_ARCHIVE_S3_ENDPOINT"
+      if [ -z "$endpoint" ]; then
+          local talos_gateway_ip
+          talos_gateway_ip=$(docker network inspect "$CLUSTER_NAME" 2>/dev/null | python3 -c 'import json,sys; data=json.load(sys.stdin); print((data[0].get("IPAM",{}).get("Config",[{}])[0].get("Gateway", "")) if data else "", end="")' 2>/dev/null || true)
+          if [ -n "$talos_gateway_ip" ]; then
+              endpoint="http://${talos_gateway_ip}:31102"
+          else
+              endpoint="http://host.docker.internal:31102"
+          fi
+      fi
+
+      local endpoint_hostport="${endpoint#http://}"
+      endpoint_hostport="${endpoint_hostport#https://}"
+
+      echo "📦 Configuring Argo archived logs..."
+      kubectl apply -n "$NAMESPACE" -f - <<EOF
+  apiVersion: v1
+  kind: ConfigMap
+  metadata:
+    name: workflow-controller-configmap
+  data:
+    config: |
+      artifactRepository:
+        archiveLogs: true
+        s3:
+          bucket: ${ARGO_ARCHIVE_LOG_BUCKET}
+          endpoint: ${endpoint_hostport}
+          insecure: ${ARGO_ARCHIVE_S3_INSECURE}
+          keyFormat: "{{ "{{" }}workflow.namespace{{ "}}" }}/{{ "{{" }}workflow.name{{ "}}" }}/{{ "{{" }}pod.name{{ "}}" }}"
+          accessKeySecret:
+            name: ${WORKFLOW_S3_SECRET_NAME}
+            key: AWS_ACCESS_KEY_ID
+          secretKeySecret:
+            name: ${WORKFLOW_S3_SECRET_NAME}
+            key: AWS_SECRET_ACCESS_KEY
+      workflowDefaults:
+        spec:
+          archiveLogs: true
+  EOF
+      kubectl rollout restart deployment/workflow-controller -n "$NAMESPACE" >/dev/null 2>&1 || true
+      echo "✓ Argo archived logs configured for s3://${ARGO_ARCHIVE_LOG_BUCKET}"
+  }
   
   echo "🚀 Setting up Talos cluster for ScaleODM testing..."
   echo "   Cluster name: $CLUSTER_NAME"
@@ -156,6 +203,7 @@ cluster-init:
                       --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
                       --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
                   echo "✓ Workflow S3 credentials secret verified"
+                  configure_argo_archive_logs
                   echo ""
                   exit 0
               fi
@@ -242,6 +290,7 @@ cluster-init:
       --from-literal=AWS_SECRET_ACCESS_KEY="$WORKFLOW_S3_SECRET_KEY" \
       --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
       --dry-run=client -o yaml | kubectl apply -f -
+  configure_argo_archive_logs
 
   echo ""
   echo "✅ Talos cluster setup complete!"

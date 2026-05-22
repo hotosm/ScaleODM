@@ -318,10 +318,9 @@ func (h *Handler) loadTaskOutput(ctx context.Context, job *meta.JobMetadata) (st
 			return "", err
 		}
 
-		if archivedLogs, err := s3.GetWorkflowLogsFromS3(ctx, client, job.WriteS3Path); err == nil {
-			return archivedLogs, nil
-		}
-
+		// Try live pods first, then fall back to Argo's archived logs in S3.
+		// The fallback is handled inside GetWorkflowLogsWithS3Path - no need
+		// to pre-fetch a separate aggregated artifact anymore.
 		var builder strings.Builder
 		if err := h.workflow.GetWorkflowLogsWithS3Path(ctx, job.WorkflowName, job.WriteS3Path, client, &builder); err != nil {
 			return "", err

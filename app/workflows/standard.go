@@ -596,33 +596,30 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	// Generate unique job ID for this workflow instance
 	jobID := "{{workflow.name}}"
 
-	// Download container - downloads from readS3Path and extracts zips
-	// Uses include filters to only download image files and archives
-	// Logs are written to shared workspace for later collection
+	// Download container - downloads from readS3Path and extracts zips, using
+	// include filters so only image files and supported archives are pulled.
+	//
+	// Stdout is captured by Argo's executor (see chart artifactRepository
+	// + workflowDefaults.spec.archiveLogs); no in-pod tee/log-file machinery.
+	// The attempt marker disambiguates retries in the archived stream.
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "download",
 			Image:   cfg.RcloneImage,
 			Command: []string{"/bin/sh", "-c"},
-			// Brace-wrap so tee captures the whole script's output, not just the last command.
-			// Outer set -e/pipefail propagates failures from the brace group through the pipeline,
-			// since the left side runs in a subshell and the script's own settings can't escape it.
-			// mkdir before the pipeline: tee opens the log file at fork time, racing the
-			// brace group's own mkdir - without this, tee loses on a fresh PVC.
 			Args: []string{fmt.Sprintf(`set -e
 set -o pipefail
-mkdir -p /workspace/{{workflow.name}}
-{
-%s
-} 2>&1 | tee /workspace/{{workflow.name}}/.download.log`, s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth))},
+echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
+%s`, s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth))},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
 			SecurityContext: workflowContainerSecurityContext(),
 		},
 	}
 
-	// ODM processing container
-	// Logs are written to shared workspace for later collection
+	// ODM processing container. python3 -u keeps Python's stdout line-buffered
+	// so partial output survives SIGKILL/OOM and reaches Argo's log archive
+	// (or kubectl logs --previous within the workflow's TTL).
 	odmFlagsStr := strings.Join(cfg.ODMFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
@@ -642,22 +639,22 @@ mkdir -p /workspace/{{workflow.name}}
 set -e
 set -o pipefail
 JOB_ID="{{workflow.name}}"
-LOG_FILE="/workspace/$JOB_ID/.process.log"
-echo "Running ODM processing..." | tee -a "$LOG_FILE"
-echo "Processing job: $JOB_ID" | tee -a "$LOG_FILE"
-echo "ODM Project ID: %s" | tee -a "$LOG_FILE"
+echo "=== process attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
+echo "Running ODM processing..."
+echo "Processing job: $JOB_ID"
+echo "ODM Project ID: %s"
 odm_args="%s --project-path /workspace $JOB_ID"
-echo "Executing: python3 run.py $odm_args" | tee -a "$LOG_FILE"
-python3 run.py $odm_args 2>&1 | tee -a "$LOG_FILE"
-echo "ODM processing complete" | tee -a "$LOG_FILE"
+echo "Executing: python3 -u run.py $odm_args"
+python3 -u run.py $odm_args
+echo "ODM processing complete"
 				`, cfg.ODMProjectID, odmFlagsStr),
 			},
 		},
 		Dependencies: []string{"download"},
 	}
 
-	// Upload container - uploads results to writeS3Path
-	// Logs are written to shared workspace for later collection
+	// Upload container - uploads results to writeS3Path. Stdout captured by
+	// Argo archive same as the other stage containers.
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "upload",
@@ -665,10 +662,8 @@ echo "ODM processing complete" | tee -a "$LOG_FILE"
 			Command: []string{"/bin/sh", "-c"},
 			Args: []string{fmt.Sprintf(`set -e
 set -o pipefail
-mkdir -p /workspace/{{workflow.name}}
-{
-%s
-} 2>&1 | tee /workspace/{{workflow.name}}/.upload.log`, s3.GenerateUploadScript(cfg.WriteS3Path))},
+echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
+%s`, s3.GenerateUploadScript(cfg.WriteS3Path))},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.UploadResources),
 			SecurityContext: workflowContainerSecurityContext(),
@@ -676,31 +671,56 @@ mkdir -p /workspace/{{workflow.name}}
 		Dependencies: []string{"process"},
 	}
 
-	// Cleanup template runs as workflow onExit so it executes after terminal outcome
-	// (succeeded/failed/error), preserving log archival on failure paths.
+	// Cleanup template runs as workflow onExit so it executes after the
+	// workflow's terminal outcome. Its job is *only* to dump the workspace
+	// diagnostic snapshot to stdout - log capture is owned by Argo's archive
+	// (configured at the chart level) and job-level status persistence is
+	// owned by the reconciler writing to the ScaleODM job DB row.
+	//
+	// Consequently the cleanup container needs no S3 credentials, no /tmp
+	// scratch volume, and no rclone - just the workspace PVC mount and the
+	// {{workflow.*}} globals Argo substitutes before pod creation.
+	cleanupEnv := []apiv1.EnvVar{
+		{
+			Name:  "WORKFLOW_STATUS",
+			Value: "{{workflow.status}}",
+		},
+		{
+			Name:  "WORKFLOW_FAILURES",
+			Value: "{{workflow.failures}}",
+		},
+		{
+			Name:  "WORKFLOW_DURATION",
+			Value: "{{workflow.duration}}",
+		},
+		{
+			Name:  "WORKFLOW_NAME",
+			Value: "{{workflow.name}}",
+		},
+		{
+			Name:  "WORKFLOW_UID",
+			Value: "{{workflow.uid}}",
+		},
+		{
+			Name:  "WORKFLOW_CREATION_TIMESTAMP",
+			Value: "{{workflow.creationTimestamp}}",
+		},
+	}
+
 	cleanupTemplate := wfv1.Template{
 		Name: "cleanup",
 		Container: &apiv1.Container{
 			Name:            "cleanup",
 			Image:           cfg.RcloneImage,
 			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{s3.GenerateLogUploadScript(cfg.WriteS3Path)},
+			Args:            []string{s3.GenerateWorkspaceSnapshotScript()},
 			Resources:       containerRequirements(cfg.CleanupResources),
 			SecurityContext: workflowContainerSecurityContext(),
-			Env: append(awsEnv,
-				apiv1.EnvVar{
-					Name:  "ARGO_NAMESPACE",
-					Value: c.namespace,
-				},
-			),
+			Env:             cleanupEnv,
 			VolumeMounts: []apiv1.VolumeMount{
 				{
 					Name:      "workspace",
 					MountPath: "/workspace",
-				},
-				{
-					Name:      "tmp",
-					MountPath: "/tmp",
 				},
 			},
 		},
@@ -761,7 +781,9 @@ mkdir -p /workspace/{{workflow.name}}
 		},
 	}
 	mainTemplate.Volumes = []apiv1.Volume{tmpVolume}
-	cleanupTemplate.Volumes = []apiv1.Volume{tmpVolume}
+	// Cleanup container only reads the workspace - no /tmp scratch needed
+	// since it doesn't run rclone or any tool that writes outside the mount.
+	cleanupTemplate.Volumes = nil
 
 	if !useWorkspacePVC {
 		emptyDirWorkspace := apiv1.Volume{

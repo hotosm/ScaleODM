@@ -84,7 +84,9 @@ func TestBuildODMWorkflow_CleanupRunsOnTerminalUploadStates(t *testing.T) {
 	assert.Equal(t, "cleanup", cleanupTemplate.Container.Name)
 }
 
-func TestBuildODMWorkflow_DownloadUploadCreateWorkspaceBeforeTee(t *testing.T) {
+// Stage containers no longer write log files - stdout is captured by Argo's
+// archive. Guard against tee/log-file machinery sneaking back in.
+func TestBuildODMWorkflow_StageContainersDoNotWriteLogFiles(t *testing.T) {
 	cfg := NewDefaultODMConfig(
 		"test-project",
 		"s3://bucket/images/",
@@ -98,33 +100,112 @@ func TestBuildODMWorkflow_DownloadUploadCreateWorkspaceBeforeTee(t *testing.T) {
 	require.NotEmpty(t, wf.Spec.Templates)
 	require.NotNil(t, wf.Spec.Templates[0].ContainerSet)
 
-	tests := []struct {
-		name    string
-		logPath string
-	}{
-		{name: "download", logPath: "/workspace/{{workflow.name}}/.download.log"},
-		{name: "upload", logPath: "/workspace/{{workflow.name}}/.upload.log"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
+	for _, stage := range []string{"download", "process", "upload"} {
+		t.Run(stage, func(t *testing.T) {
 			var container *wfv1.ContainerNode
 			for i := range wf.Spec.Templates[0].ContainerSet.Containers {
-				if wf.Spec.Templates[0].ContainerSet.Containers[i].Name == tt.name {
+				if wf.Spec.Templates[0].ContainerSet.Containers[i].Name == stage {
 					container = &wf.Spec.Templates[0].ContainerSet.Containers[i]
 					break
 				}
 			}
 			require.NotNil(t, container)
 			require.Len(t, container.Args, 1)
-
 			script := container.Args[0]
-			mkdirIndex := strings.Index(script, "mkdir -p /workspace/{{workflow.name}}")
-			teeIndex := strings.Index(script, "tee "+tt.logPath)
-			require.GreaterOrEqual(t, mkdirIndex, 0)
-			require.GreaterOrEqual(t, teeIndex, 0)
-			assert.Less(t, mkdirIndex, teeIndex)
+
+			assert.NotContains(t, script, "tee -a", "no tee chain; Argo archives stdout")
+			assert.NotContains(t, script, ".download.log", "stage log files removed")
+			assert.NotContains(t, script, ".process.log", "stage log files removed")
+			assert.NotContains(t, script, ".upload.log", "stage log files removed")
+			// Per-retry attempt marker stays on stdout for diagnostic clarity.
+			assert.Contains(t, script, "{{retries}}")
 		})
+	}
+}
+
+func TestBuildODMWorkflow_ProcessContainerUsesUnbufferedPython(t *testing.T) {
+	cfg := NewDefaultODMConfig(
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+	)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf.Spec.Templates[0].ContainerSet)
+
+	var process *wfv1.ContainerNode
+	for i := range wf.Spec.Templates[0].ContainerSet.Containers {
+		if wf.Spec.Templates[0].ContainerSet.Containers[i].Name == "process" {
+			process = &wf.Spec.Templates[0].ContainerSet.Containers[i]
+			break
+		}
+	}
+	require.NotNil(t, process)
+	require.Len(t, process.Args, 1)
+
+	// python3 -u keeps stdout line-buffered so partial logs survive
+	// SIGKILL/OOM and reach Argo's log archive.
+	assert.Contains(t, process.Args[0], "python3 -u run.py")
+}
+
+// Cleanup pod is now a stdout-only diagnostic dump - it must not carry AWS
+// credentials, must not mount /tmp (no rclone), and must forward only the
+// {{workflow.*}} env vars its snapshot script uses.
+func TestBuildODMWorkflow_CleanupMinimalAndForwardsStatus(t *testing.T) {
+	cfg := NewDefaultODMConfig(
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+	)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	var cleanup *wfv1.Template
+	for i := range wf.Spec.Templates {
+		if wf.Spec.Templates[i].Name == "cleanup" {
+			cleanup = &wf.Spec.Templates[i]
+			break
+		}
+	}
+	require.NotNil(t, cleanup)
+	require.NotNil(t, cleanup.Container)
+
+	// Cleanup script writes only to stdout - no rclone, no AWS creds needed.
+	for _, env := range cleanup.Container.Env {
+		assert.NotContains(t, env.Name, "AWS_", "cleanup must not carry AWS creds (no rclone uploads)")
+		assert.NotEqual(t, "TMPDIR", env.Name, "no TMPDIR; cleanup doesn't need /tmp scratch")
+	}
+
+	// No /tmp mount either.
+	for _, vm := range cleanup.Container.VolumeMounts {
+		assert.NotEqual(t, "tmp", vm.Name, "cleanup must not mount /tmp")
+	}
+	// Only the workspace mount is needed for the snapshot.
+	require.Len(t, cleanup.Container.VolumeMounts, 1)
+	assert.Equal(t, "workspace", cleanup.Container.VolumeMounts[0].Name)
+
+	// Argo globals forwarded for the snapshot script.
+	expected := map[string]string{
+		"WORKFLOW_STATUS":             "{{workflow.status}}",
+		"WORKFLOW_FAILURES":           "{{workflow.failures}}",
+		"WORKFLOW_DURATION":           "{{workflow.duration}}",
+		"WORKFLOW_NAME":               "{{workflow.name}}",
+		"WORKFLOW_UID":                "{{workflow.uid}}",
+		"WORKFLOW_CREATION_TIMESTAMP": "{{workflow.creationTimestamp}}",
+	}
+	found := map[string]string{}
+	for _, env := range cleanup.Container.Env {
+		if _, want := expected[env.Name]; want {
+			found[env.Name] = env.Value
+		}
+	}
+	for k, v := range expected {
+		assert.Equal(t, v, found[k], "cleanup env %s should forward Argo global", k)
 	}
 }
 

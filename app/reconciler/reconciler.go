@@ -43,7 +43,9 @@ package reconciler
 
 import (
 	"context"
+	"encoding/json"
 	"log"
+	"sort"
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
@@ -133,13 +135,28 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 		}
 
 		var errMsg *string
+		var failureDetails json.RawMessage
 		if wf.Status.Phase == wfv1.WorkflowFailed || wf.Status.Phase == wfv1.WorkflowError {
 			if wf.Status.Message != "" {
 				msg := wf.Status.Message
 				errMsg = &msg
 			}
+			// Persist per-failed-node detail so diagnosis survives Argo CR
+			// TTL and log archive expiry. error_message is just the top-level
+			// summary; failure_details captures which pod, which exit code.
+			if details, marshalErr := buildFailureDetails(wf); marshalErr != nil {
+				log.Printf("reconciler: failed to marshal failure details for %q: %v", job.WorkflowName, marshalErr)
+			} else {
+				failureDetails = details
+			}
 		}
-		if updateErr := store.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, errMsg); updateErr != nil {
+		var updateErr error
+		if failureDetails != nil {
+			updateErr = store.UpdateJobStatusWithFailureDetails(ctx, job.WorkflowName, liveStatus, errMsg, failureDetails)
+		} else {
+			updateErr = store.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, errMsg)
+		}
+		if updateErr != nil {
 			log.Printf("reconciler: failed to update job %q %s→%s: %v", job.WorkflowName, job.JobStatus, liveStatus, updateErr)
 			errors++
 		} else {
@@ -151,4 +168,65 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 	if synced > 0 || errors > 0 {
 		log.Printf("reconciler: cycle done synced=%d skipped=%d errors=%d total_checked=%d", synced, skipped, errors, len(jobs))
 	}
+}
+
+// failedNode is the slimmed-down representation of an Argo node we persist to
+// the DB on terminal failure. We include only the fields useful for
+// post-mortem diagnosis - exit code, message, host node, finished timestamp -
+// not the full Argo node struct (which is large and embeds parent/child
+// references that would balloon the JSON).
+type failedNode struct {
+	Name         string `json:"name"`
+	DisplayName  string `json:"displayName,omitempty"`
+	TemplateName string `json:"templateName,omitempty"`
+	Phase        string `json:"phase"`
+	Message      string `json:"message,omitempty"`
+	ExitCode     string `json:"exitCode,omitempty"`
+	HostNodeName string `json:"hostNodeName,omitempty"`
+	FinishedAt   string `json:"finishedAt,omitempty"`
+}
+
+// buildFailureDetails extracts the failed pod nodes from a workflow's status
+// and marshals them as a JSON array, sorted by FinishedAt then Name so the
+// oldest failure (usually the root cause on retries) appears first. Returns
+// (nil, nil) when there are no failed pod nodes - the caller treats that as
+// "leave failure_details unchanged".
+func buildFailureDetails(wf *wfv1.Workflow) (json.RawMessage, error) {
+	if wf == nil {
+		return nil, nil
+	}
+	var nodes []failedNode
+	for _, n := range wf.Status.Nodes {
+		if n.Type != wfv1.NodeTypePod {
+			continue
+		}
+		if n.Phase != wfv1.NodeFailed && n.Phase != wfv1.NodeError {
+			continue
+		}
+		fn := failedNode{
+			Name:         n.Name,
+			DisplayName:  n.DisplayName,
+			TemplateName: n.TemplateName,
+			Phase:        string(n.Phase),
+			Message:      n.Message,
+			HostNodeName: n.HostNodeName,
+		}
+		if n.Outputs != nil && n.Outputs.ExitCode != nil {
+			fn.ExitCode = *n.Outputs.ExitCode
+		}
+		if !n.FinishedAt.IsZero() {
+			fn.FinishedAt = n.FinishedAt.UTC().Format(time.RFC3339)
+		}
+		nodes = append(nodes, fn)
+	}
+	if len(nodes) == 0 {
+		return nil, nil
+	}
+	sort.Slice(nodes, func(i, j int) bool {
+		if nodes[i].FinishedAt != nodes[j].FinishedAt {
+			return nodes[i].FinishedAt < nodes[j].FinishedAt
+		}
+		return nodes[i].Name < nodes[j].Name
+	})
+	return json.Marshal(nodes)
 }

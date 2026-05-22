@@ -37,6 +37,7 @@ services:
       AWS_S3_ENDPOINT: http://localhost:31102
       AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: somelongpassword
+      SCALEODM_ARGO_ARCHIVE_LOG_BUCKET: argo-logs
     volumes:
       # Mount local files
       - ./go.mod:/code/go.mod:ro
@@ -133,16 +134,16 @@ services:
             config=botocore.config.Config(s3={"addressing_style": "path"}),
         )
 
-        bucket = "scaleodm-test"
-        try:
-            s3.create_bucket(Bucket=bucket)
-            print(f"Created bucket '{bucket}'")
-        except botocore.exceptions.ClientError as e:
-            code = e.response.get("Error", {}).get("Code", "")
-            if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
-                print(f"Bucket '{bucket}' already exists")
-            else:
-                raise
+        for bucket in ("scaleodm-test", "argo-logs"):
+            try:
+                s3.create_bucket(Bucket=bucket)
+                print(f"Created bucket '{bucket}'")
+            except botocore.exceptions.ClientError as e:
+                code = e.response.get("Error", {}).get("Code", "")
+                if code in ("BucketAlreadyOwnedByYou", "BucketAlreadyExists"):
+                    print(f"Bucket '{bucket}' already exists")
+                else:
+                    raise
 
         print("RustFS initialized.")
         PY

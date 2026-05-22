@@ -224,6 +224,12 @@ spec:
               value: {{ .Values.config.processSizing.fastOrthoMemoryMultiplier | quote }}
             - name: SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
               value: {{ .Values.config.processSizing.dsmDtmMemoryMultiplier | quote }}
+            # Argo log archive bucket - read by the UI/API's post-TTL log
+            # fallback path (s3/main.go GetArgoArchiveLogs). Must match the
+            # bucket set in the Argo controller's workflow-controller-configmap
+            # artifactRepository.s3.bucket. Empty disables the fallback.
+            - name: SCALEODM_ARGO_ARCHIVE_LOG_BUCKET
+              value: {{ .Values.config.argoArchiveLogBucket | default "" | quote }}
             {{- if .Values.kubernetes.kubeconfigPath }}
             - name: KUBECONFIG_PATH
               value: {{ .Values.kubernetes.kubeconfigPath | quote }}

@@ -853,13 +853,6 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, "Unable to read imagery from readS3Path", countErr)
 		}
 
-		// Best-effort: remove any prior run's aggregated log so the UI doesn't
-		// show stale output while this run is Pending. The workflow's log
-		// upload step will recreate this object once the run completes.
-		if err := s3.DeleteWorkflowLogsFromS3(ctx, taskClient, writePath); err != nil {
-			log.Printf("POST /task/new: failed to clear stale workflow logs at %q: %v", writePath, err)
-		}
-
 		// S3 credentials are configured at the server level and injected into
 		// workflow pods via Kubernetes Secret references (secretKeyRef).
 		// No per-request credential handling needed.
@@ -1493,15 +1486,6 @@ func (a *API) registerNodeODMRoutes() {
 					}
 				}
 			}
-		}
-
-		// Best-effort: remove the prior run's aggregated log so the UI doesn't
-		// show stale output while the restarted run is Pending. The workflow's
-		// log upload step will recreate this object once the run completes.
-		if taskClientErr != nil {
-			log.Printf("POST /task/restart: skipping stale log cleanup, S3 client init failed endpoint=%q: %v", s3Endpoint, taskClientErr)
-		} else if err := s3.DeleteWorkflowLogsFromS3(ctx, taskClient, metadata.WriteS3Path); err != nil {
-			log.Printf("POST /task/restart: failed to clear stale workflow logs at %q: %v", metadata.WriteS3Path, err)
 		}
 
 		wfConfig := workflows.NewDefaultODMConfig(

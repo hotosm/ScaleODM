@@ -16,8 +16,16 @@ CREATE TABLE IF NOT EXISTS scaleodm_job_metadata (
     started_at TIMESTAMPTZ,
     completed_at TIMESTAMPTZ,
     error_message TEXT,
+    -- Per-failed-node detail (name, template, exitCode, message, hostNodeName,
+    -- finishedAt) captured by the reconciler on terminal failure. Independent
+    -- of Argo workflow CR TTL and any log archive state - lives forever.
+    failure_details JSONB,
     metadata JSONB
 );
+
+-- Idempotent column migration for existing deployments.
+ALTER TABLE scaleodm_job_metadata
+    ADD COLUMN IF NOT EXISTS failure_details JSONB;
 
 -- Indexes
 

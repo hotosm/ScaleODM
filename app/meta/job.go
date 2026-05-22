@@ -27,7 +27,12 @@ type JobMetadata struct {
 	StartedAt    *time.Time      `json:"started_at,omitempty"`
 	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
 	ErrorMessage *string         `json:"error_message,omitempty"`
-	Metadata     json.RawMessage `json:"metadata,omitempty"`
+	// FailureDetails is a JSON array of per-failed-node summaries (one per
+	// pod that hit a non-zero exit code). Populated by the reconciler when a
+	// job transitions to "failed" so the diagnostic context survives Argo
+	// workflow CR GC and log archive expiry.
+	FailureDetails json.RawMessage `json:"failure_details,omitempty"`
+	Metadata       json.RawMessage `json:"metadata,omitempty"`
 }
 
 type Store struct {
@@ -108,7 +113,7 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 	query := `
 		SELECT id, workflow_name, odm_project_id, read_s3_path, write_s3_path,
 		       odm_flags, s3_region, job_status, created_at, started_at, completed_at,
-		       error_message, metadata
+		       error_message, failure_details, metadata
 		FROM scaleodm_job_metadata
 		WHERE workflow_name = $1
 	`
@@ -116,12 +121,12 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 	job := &JobMetadata{}
 	var startedAt, completedAt sql.NullTime
 	var errorMsg sql.NullString
-	var metadataJSON []byte
+	var failureDetailsJSON, metadataJSON []byte
 
 	err := s.db.Pool.QueryRow(ctx, query, workflowName).Scan(
 		&job.ID, &job.WorkflowName, &job.ODMProjectID, &job.ReadS3Path,
 		&job.WriteS3Path, &job.ODMFlags, &job.S3Region, &job.JobStatus,
-		&job.CreatedAt, &startedAt, &completedAt, &errorMsg, &metadataJSON,
+		&job.CreatedAt, &startedAt, &completedAt, &errorMsg, &failureDetailsJSON, &metadataJSON,
 	)
 
 	if err == pgx.ErrNoRows {
@@ -140,6 +145,9 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 	if errorMsg.Valid {
 		job.ErrorMessage = &errorMsg.String
 	}
+	if len(failureDetailsJSON) > 0 {
+		job.FailureDetails = failureDetailsJSON
+	}
 	if len(metadataJSON) > 0 {
 		job.Metadata = metadataJSON
 	}
@@ -151,23 +159,42 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 // status should be one of: 'queued', 'claimed', 'running', 'failed', 'completed', 'canceled'
 // Note: 'claimed' is an internal state for job queue management (maps to QUEUED/10 in API)
 func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string, errorMsg *string) error {
+	return s.updateJobStatus(ctx, workflowName, status, errorMsg, nil)
+}
+
+// UpdateJobStatusWithFailureDetails behaves like UpdateJobStatus but also
+// writes per-failed-node JSON to the failure_details column. Used by the
+// reconciler when a workflow transitions to a terminal failure state, so the
+// diagnostic detail survives Argo workflow CR TTL and log archive expiry.
+//
+// Pass failureDetails == nil to leave the column unchanged (rather than
+// clobbering it with NULL on subsequent status updates).
+func (s *Store) UpdateJobStatusWithFailureDetails(ctx context.Context, workflowName, status string, errorMsg *string, failureDetails json.RawMessage) error {
+	return s.updateJobStatus(ctx, workflowName, status, errorMsg, failureDetails)
+}
+
+func (s *Store) updateJobStatus(ctx context.Context, workflowName, status string, errorMsg *string, failureDetails json.RawMessage) error {
 	started := time.Now()
 	reason := "none"
 	if errorMsg != nil && strings.TrimSpace(*errorMsg) != "" {
 		reason = "error_message_present"
 	}
+	// Conditional COALESCE on failure_details: only overwrite when the caller
+	// passes a non-nil value. Successive "running -> running" status pings
+	// must not clobber an earlier failure capture.
 	query := `
 		UPDATE scaleodm_job_metadata
 		SET job_status = $2,
-		    started_at = CASE 
+		    started_at = CASE
 		        WHEN $2 = 'running' AND started_at IS NULL THEN NOW()
 		        ELSE started_at
 		    END,
-		    completed_at = CASE 
+		    completed_at = CASE
 		        WHEN $2 IN ('completed', 'failed', 'canceled') AND completed_at IS NULL THEN NOW()
 		        ELSE completed_at
 		    END,
-		    error_message = $3
+		    error_message = $3,
+		    failure_details = COALESCE($4::jsonb, failure_details)
 		WHERE workflow_name = $1
 	`
 
@@ -180,7 +207,14 @@ func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string
 		errValue = nil
 	}
 
-	result, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue)
+	var failureValue interface{}
+	if len(failureDetails) > 0 {
+		failureValue = []byte(failureDetails)
+	} else {
+		failureValue = nil
+	}
+
+	result, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue, failureValue)
 	if err != nil {
 		observability.RecordJobStatusUpdate("failure", status, "db_exec_failed", time.Since(started))
 		return fmt.Errorf("failed to update job status: %w", err)

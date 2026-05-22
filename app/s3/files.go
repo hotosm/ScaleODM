@@ -345,94 +345,72 @@ fi
 echo "Upload complete."`
 }
 
-// GenerateLogUploadScript generates a script to collect workflow logs and upload to S3
-// This runs after the main workflow completes to preserve logs before cleanup
-// Collects logs from download, process, and upload stages, plus any ODM-generated log files
-func GenerateLogUploadScript(destPath string) string {
-	return `set -e
-set -o pipefail
-echo "Collecting workflow logs..."
-
-DEST_PATH="` + destPath + `"
-
-# Create rclone config on-the-fly using AWS env vars (not filtered by ContainerSet)
-JOB_ID="{{workflow.name}}"
+// GenerateWorkspaceSnapshotScript prints a small diagnostic snapshot of the
+// workflow's terminal state to stdout. The Argo executor captures stdout and
+// (when archiveLogs is enabled) ships it to S3 - so the snapshot survives pod
+// GC, workspace deletion, and onExit failures without any in-pod rclone or
+// AWS credentials.
+//
+// What lives here vs. elsewhere:
+//   - Pod stdout/stderr -> Argo log archive (configured at the chart level)
+//   - Terminal status, exit codes -> ScaleODM job DB row (via reconciler)
+//   - Workspace tree / disk usage -> THIS SCRIPT - it's the one diagnostic
+//     that disappears when the PVC is reclaimed and can't be reconstructed
+//     from anywhere else.
+//
+// Environment expected from the workflow spec:
+//   WORKFLOW_NAME, WORKFLOW_UID, WORKFLOW_STATUS, WORKFLOW_FAILURES,
+//   WORKFLOW_DURATION, WORKFLOW_CREATION_TIMESTAMP - Argo {{workflow.*}}
+//   globals, substituted by the controller before pod creation.
+//
+// Each command is wrapped so a partial workspace (mid-cleanup, vanished files)
+// doesn't kill the snapshot dump; set -u catches typos in env var references.
+func GenerateWorkspaceSnapshotScript() string {
+	return `set -u
+JOB_ID="${WORKFLOW_NAME:-{{workflow.name}}}"
 WORKSPACE_DIR="/workspace/$JOB_ID"
-RCLONE_DIR="$WORKSPACE_DIR/.rclone"
-mkdir -p "$RCLONE_DIR"
-export RCLONE_CONFIG="$RCLONE_DIR/rclone.conf"
 
-` + rcloneS3ConfigSnippet() + `
+echo "=== Workflow Status ==="
+echo "Workflow Name: $JOB_ID"
+echo "Workflow UID: ${WORKFLOW_UID:-unknown}"
+echo "Started: ${WORKFLOW_CREATION_TIMESTAMP:-unknown}"
+echo "Finished: $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
+echo "Duration (seconds): ${WORKFLOW_DURATION:-unknown}"
+echo "Status: ${WORKFLOW_STATUS:-unknown}"
 
-LOG_FILE="$WORKSPACE_DIR/.workflow-logs.txt"
-
-# Collect logs from all containers and combine into single log file
-echo "=== Workflow Logs for $JOB_ID ===" > "$LOG_FILE"
-echo "Workflow Name: $JOB_ID" >> "$LOG_FILE"
-echo "Collected at: $(date -u +"%Y-%m-%d %H:%M:%S UTC")" >> "$LOG_FILE"
-echo "" >> "$LOG_FILE"
-
-# Collect download stage logs
-if [ -f "$WORKSPACE_DIR/.download.log" ]; then
-  echo "=== Download Stage Logs ===" >> "$LOG_FILE"
-  cat "$WORKSPACE_DIR/.download.log" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
+echo ""
+echo "=== Failed Nodes (JSON) ==="
+# JSON array from Argo; empty/unset when nothing failed.
+if [ -n "${WORKFLOW_FAILURES:-}" ] && [ "${WORKFLOW_FAILURES}" != "<nil>" ]; then
+  echo "${WORKFLOW_FAILURES}"
 else
-  echo "=== Download Stage Logs ===" >> "$LOG_FILE"
-  echo "Download log file not found" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
+  echo "[]"
 fi
 
-# Collect process (ODM) stage logs
-if [ -f "$WORKSPACE_DIR/.process.log" ]; then
-  echo "=== Process (ODM) Stage Logs ===" >> "$LOG_FILE"
-  cat "$WORKSPACE_DIR/.process.log" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
+echo ""
+echo "=== Workspace Disk Usage (df) ==="
+df -h "$WORKSPACE_DIR" 2>/dev/null || echo "df failed (workspace may be unmounted)"
+
+echo ""
+echo "=== Workspace Disk Usage (du, top level) ==="
+# du sorted by size makes "what filled the PVC" obvious at a glance.
+(du -sh "$WORKSPACE_DIR"/* 2>/dev/null || true) | sort -h || echo "du failed"
+
+echo ""
+echo "=== Workspace Tree (depth 3, excluding images/ and .rclone/) ==="
+# Reveals which ODM stage directories were created (opensfm/, odm_meshing/,
+# odm_dem/, odm_orthophoto/, ...) so you can tell where processing died even
+# when stdout doesn't say. images/ and .rclone/ would dominate output and
+# don't help with diagnosis.
+if [ -d "$WORKSPACE_DIR" ]; then
+  (find "$WORKSPACE_DIR" -maxdepth 3 \
+    \( -path "$WORKSPACE_DIR/images" -prune \) \
+    -o \( -path "$WORKSPACE_DIR/.rclone" -prune \) \
+    -o -print 2>/dev/null || true) | sort
 else
-  echo "=== Process (ODM) Stage Logs ===" >> "$LOG_FILE"
-  echo "Process log file not found" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
+  echo "Workspace directory missing"
 fi
 
-# Collect any ODM-generated log files from the project directory
-if [ -d "$WORKSPACE_DIR/$JOB_ID" ]; then
-  echo "=== ODM-Generated Log Files ===" >> "$LOG_FILE"
-  # Find and include ODM log files
-  find "$WORKSPACE_DIR/$JOB_ID" -name "*_log.txt" -o -name "*.log" | while read logfile; do
-    echo "--- $(basename "$logfile") ---" >> "$LOG_FILE"
-    cat "$logfile" >> "$LOG_FILE" 2>/dev/null || echo "Failed to read log file" >> "$LOG_FILE"
-    echo "" >> "$LOG_FILE"
-  done
-fi
-
-# Collect upload stage logs
-if [ -f "$WORKSPACE_DIR/.upload.log" ]; then
-  echo "=== Upload Stage Logs ===" >> "$LOG_FILE"
-  cat "$WORKSPACE_DIR/.upload.log" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
-else
-  echo "=== Upload Stage Logs ===" >> "$LOG_FILE"
-  echo "Upload log file not found" >> "$LOG_FILE"
-  echo "" >> "$LOG_FILE"
-fi
-
-# Convert s3://bucket/path to s3:bucket/path format for rclone remote
-if echo "$DEST_PATH" | grep -q "^s3://"; then
-  S3_REMOTE=$(echo "$DEST_PATH" | sed 's|^s3://|s3:|')
-else
-  S3_REMOTE="$DEST_PATH"
-fi
-
-LOG_OBJECT="$S3_REMOTE/.workflow-logs.txt"
-
-echo "Uploading workflow logs to S3..."
-if rclone copyto "$LOG_FILE" "$LOG_OBJECT" --progress; then
-  echo "Workflow logs uploaded to: s3://$(echo "$LOG_OBJECT" | sed 's|^s3:||')"
-else
-  echo "Warning: Failed to upload workflow logs to S3"
-  # Don't fail the workflow if log upload fails
-fi
-
-rm -f "$LOG_FILE"
-echo "Log collection complete."`
+echo ""
+echo "Workspace snapshot complete."`
 }

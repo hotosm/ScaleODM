@@ -67,6 +67,10 @@ def create_task() -> str:
         raise RuntimeError(f"Could not find task UUID in response: {data!r}")
 
     print(f"Created task with UUID: {uuid}")
+    uuid_file = os.environ.get("SCALEODM_EXAMPLE_UUID_FILE")
+    if uuid_file:
+        with open(uuid_file, "w", encoding="utf-8") as f:
+            f.write(uuid)
     return uuid
 
 

@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"path"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -136,64 +137,76 @@ func parseS3Path(s3Path string) (string, string, error) {
 	return bucket, prefix, nil
 }
 
-// GetWorkflowLogsFromS3 fetches workflow logs from S3
-// writeS3Path is the S3 path where logs are stored (e.g., s3://bucket/path/)
-// Returns the log content as a string
-func GetWorkflowLogsFromS3(ctx context.Context, client *minio.Client, writeS3Path string) (string, error) {
-	// Parse S3 path: s3://bucket/path -> bucket and path
-	if !strings.HasPrefix(writeS3Path, "s3://") {
-		return "", fmt.Errorf("invalid S3 path: %s", writeS3Path)
+// GetArgoArchiveLogs fetches archived pod stdout/stderr for a workflow from
+// the Argo log archive bucket. Argo's executor writes one object per pod
+// under <bucket>/<keyFormat>, where the chart pins keyFormat to
+// "{{workflow.namespace}}/{{workflow.name}}/{{pod.name}}" - so all pods for a
+// given workflow live under bucket/<namespace>/<workflowName>/.
+//
+// Returns ErrArgoArchiveBucketUnset when no archive bucket is configured at
+// the deployment level, so callers can present an actionable error instead
+// of silently empty logs. Returns ErrArgoArchiveLogsNotFound when the bucket
+// is configured but no objects exist for the workflow (e.g. archiveLogs was
+// disabled when this workflow ran, or it never produced any pods).
+func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, namespace, workflowName string) (string, error) {
+	if strings.TrimSpace(bucket) == "" {
+		return "", ErrArgoArchiveBucketUnset
+	}
+	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(workflowName) == "" {
+		return "", fmt.Errorf("namespace and workflowName must be non-empty")
 	}
 
-	pathParts := strings.TrimPrefix(writeS3Path, "s3://")
-	parts := strings.SplitN(pathParts, "/", 2)
-	if len(parts) < 1 {
-		return "", fmt.Errorf("invalid S3 path format: %s", writeS3Path)
-	}
+	prefix := fmt.Sprintf("%s/%s/", namespace, workflowName)
 
-	bucket := parts[0]
-	prefix := ""
-	if len(parts) > 1 {
-		prefix = strings.TrimSuffix(parts[1], "/") + "/"
-	}
-
-	logObjectKey := prefix + ".workflow-logs.txt"
-
-	// Get object from S3
-	obj, err := client.GetObject(ctx, bucket, logObjectKey, minio.GetObjectOptions{})
-	if err != nil {
-		return "", fmt.Errorf("failed to get log object from S3: %w", err)
-	}
-	defer obj.Close()
-
-	// Read object content
-	content, err := io.ReadAll(obj)
-	if err != nil {
-		return "", fmt.Errorf("failed to read log object: %w", err)
-	}
-
-	return string(content), nil
-}
-
-// DeleteWorkflowLogsFromS3 removes the aggregated .workflow-logs.txt object at
-// writeS3Path if it exists. A missing object is treated as success so callers
-// can invoke this safely before starting a (re)run without checking existence.
-func DeleteWorkflowLogsFromS3(ctx context.Context, client *minio.Client, writeS3Path string) error {
-	bucket, prefix, err := parseS3Path(writeS3Path)
-	if err != nil {
-		return err
-	}
-
-	logObjectKey := prefix + ".workflow-logs.txt"
-	if err := client.RemoveObject(ctx, bucket, logObjectKey, minio.RemoveObjectOptions{}); err != nil {
-		errResp := minio.ToErrorResponse(err)
-		if errResp.Code == "NoSuchKey" || errResp.Code == "NoSuchBucket" {
-			return nil
+	// List all archived log objects for this workflow. Each pod has its own
+	// object (e.g. ".../<pod-name>/main.log"); we concatenate them in object-
+	// key order so the output is stable across calls.
+	var keys []string
+	for obj := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: true,
+	}) {
+		if obj.Err != nil {
+			return "", fmt.Errorf("failed to list archive logs: %w", obj.Err)
 		}
-		return fmt.Errorf("failed to delete workflow logs from S3: %w", err)
+		keys = append(keys, obj.Key)
 	}
-	return nil
+
+	if len(keys) == 0 {
+		return "", ErrArgoArchiveLogsNotFound
+	}
+
+	sort.Strings(keys)
+
+	var out strings.Builder
+	for _, key := range keys {
+		fmt.Fprintf(&out, "=== %s ===\n", strings.TrimPrefix(key, prefix))
+
+		stream, err := client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+		if err != nil {
+			fmt.Fprintf(&out, "(failed to open: %v)\n", err)
+			continue
+		}
+		if _, err := io.Copy(&out, stream); err != nil {
+			fmt.Fprintf(&out, "(failed to read: %v)\n", err)
+		}
+		stream.Close()
+		out.WriteString("\n")
+	}
+
+	return out.String(), nil
 }
+
+// ErrArgoArchiveBucketUnset means the deployment hasn't configured an Argo
+// log archive bucket (SCALEODM_ARGO_ARCHIVE_LOG_BUCKET). Without it we have
+// nowhere to look once pods are GC'd, so the caller should surface a clear
+// message to the user.
+var ErrArgoArchiveBucketUnset = fmt.Errorf("argo archive log bucket not configured")
+
+// ErrArgoArchiveLogsNotFound means the bucket is configured but no archived
+// log objects exist for this workflow. Usually this means archiveLogs was
+// disabled when the workflow ran, or the workflow never reached pod creation.
+var ErrArgoArchiveLogsNotFound = fmt.Errorf("no archived logs found for workflow")
 
 // ObjectExistsInS3Path checks if an exact object exists under writeS3Path.
 // writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)

@@ -488,10 +488,15 @@ example-python:
   echo "Starting API..."
   docker compose up --wait --detach --force-recreate api
 
+  UUID_FILE=$(mktemp)
+  trap 'rm -f "$UUID_FILE"; docker compose down --remove-orphans' EXIT
+
   echo "Running Python API test inside container..."
   docker run --rm \
     --network host \
     -e SCALEODM_WORKFLOW_S3_ENDPOINT=${SCALEODM_WORKFLOW_S3_ENDPOINT} \
+    -e SCALEODM_EXAMPLE_UUID_FILE=/tmp/scaleodm-example-uuid \
+    -v "$UUID_FILE:/tmp/scaleodm-example-uuid" \
     -v "$PWD/examples/python:/app" \
     --workdir /app \
     -e PYTHONDONTWRITEBYTECODE=1 \
@@ -505,6 +510,9 @@ example-python:
       uv sync
       uv run python main.py
     '
+
+  UUID=$(cat "$UUID_FILE")
+  just _verify-archived-logs "$UUID"
 
   echo "Shutting down containers..."
   docker compose down --remove-orphans
@@ -541,10 +549,15 @@ example-pyodm:
   echo "Starting API..."
   docker compose up --wait --detach --force-recreate api
 
+  UUID_FILE=$(mktemp)
+  trap 'rm -f "$UUID_FILE"; docker compose down --remove-orphans' EXIT
+
   echo "Running pyodm example inside container..."
   docker run --rm \
     --network host \
     -e SCALEODM_WORKFLOW_S3_ENDPOINT=${SCALEODM_WORKFLOW_S3_ENDPOINT} \
+    -e SCALEODM_EXAMPLE_UUID_FILE=/tmp/scaleodm-example-uuid \
+    -v "$UUID_FILE:/tmp/scaleodm-example-uuid" \
     -v "$PWD/examples/pyodm:/app" \
     --workdir /app \
     -e PYTHONDONTWRITEBYTECODE=1 \
@@ -559,8 +572,37 @@ example-pyodm:
       uv run python main.py
     '
 
+  UUID=$(cat "$UUID_FILE")
+  just _verify-archived-logs "$UUID"
+
   echo "Shutting down containers..."
   docker compose down --remove-orphans
+
+[private]
+_verify-archived-logs uuid:
+  #!/usr/bin/env bash
+  set -euo pipefail
+
+  API_URL="${SCALEODM_BASE_URL:-http://localhost:31100}"
+  NAMESPACE="${K8S_NAMESPACE:-argo}"
+
+  echo "Verifying archived log fallback for workflow {{ uuid }}..."
+  kubectl delete workflow -n "$NAMESPACE" "{{ uuid }}" --ignore-not-found=true
+
+  for _ in $(seq 1 30); do
+    if ! kubectl get workflow -n "$NAMESPACE" "{{ uuid }}" >/dev/null 2>&1; then
+      break
+    fi
+    sleep 2
+  done
+
+  LOG_PREVIEW=$(curl -fsS "${API_URL}/task/{{ uuid }}/output?line=0" | sed -n '1,120p')
+  printf "%s\n" "$LOG_PREVIEW"
+
+  if ! printf "%s\n" "$LOG_PREVIEW" | grep -Fq "Fetching archived logs from s3://"; then
+    echo "Archived log fallback did not appear to read from Argo archive"
+    exit 1
+  fi
 
 # Echo to terminal with blue colour
 [no-cd]

@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -17,6 +18,7 @@ import (
 	workflowclient "github.com/argoproj/argo-workflows/v3/pkg/client/clientset/versioned"
 	apiv1 "k8s.io/api/core/v1"
 
+	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/minio/minio-go/v7"
 )
@@ -113,14 +115,13 @@ func (c *Client) DeleteWorkflow(ctx context.Context, name string) error {
 	return nil
 }
 
-// GetWorkflowLogs retrieves logs for a workflow
-// If workflow is deleted/cleaned up, writeS3Path should be provided to fetch from S3
-// For backward compatibility, this will try pods first, then return error if not found
+// GetWorkflowLogs retrieves logs for a workflow.
+// If the workflow CR has been GC'd, caller should use GetWorkflowLogsWithS3Path
+// to fall back to Argo's archived per-pod logs in S3.
 func (c *Client) GetWorkflowLogs(ctx context.Context, workflowName string, writer io.Writer) error {
 	wf, err := c.GetWorkflow(ctx, workflowName)
 	if err != nil {
-		// Workflow not found - caller should use GetWorkflowLogsWithS3Path with write path
-		return fmt.Errorf("workflow not found: %w (use GetWorkflowLogsWithS3Path to fetch from S3)", err)
+		return fmt.Errorf("workflow not found: %w (use GetWorkflowLogsWithS3Path for archive fallback)", err)
 	}
 
 	// Workflow exists - get logs from pods
@@ -220,32 +221,39 @@ func (c *Client) getWorkflowLogsFromPods(ctx context.Context, wf *wfv1.Workflow,
 	return nil
 }
 
-// getWorkflowLogsFromS3 attempts to fetch workflow logs from S3
-// This is used when the workflow has been cleaned up
-// writeS3Path is the S3 path where logs should be stored (e.g., s3://bucket/path/)
-// s3Client is the minio client to use for fetching logs
-func (c *Client) getWorkflowLogsFromS3(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
-	fmt.Fprintf(writer, "Workflow %s not found (may have been cleaned up).\n", workflowName)
-	fmt.Fprintf(writer, "Attempting to fetch logs from S3...\n\n")
+// getWorkflowLogsFromArgoArchive reads Argo's archived per-pod stdout objects
+// from S3 - the fallback used when the workflow CR has been GC'd and the pod
+// logs are no longer available via the Kubernetes API.
+//
+// Requires SCALEODM_ARGO_ARCHIVE_LOG_BUCKET to be set and the chart's
+// argo.controller.workflowDefaults.spec.archiveLogs / argo.artifactRepository
+// to be enabled. Without those, the workflow's logs are simply gone past TTL.
+func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowName string, s3Client interface{}, writer io.Writer) error {
+	fmt.Fprintf(writer, "Workflow %s not found (TTL expired or GC'd).\n", workflowName)
 
-	// Validate S3 path format
-	if !strings.HasPrefix(writeS3Path, "s3://") {
-		return fmt.Errorf("invalid S3 path: %s", writeS3Path)
+	bucket := strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_BUCKET)
+	if bucket == "" {
+		fmt.Fprintf(writer, "No archived logs available: SCALEODM_ARGO_ARCHIVE_LOG_BUCKET is not configured.\n")
+		fmt.Fprintf(writer, "Enable archiveLogs in the Helm values and set this env var to recover logs after workflow TTL.\n")
+		return nil
 	}
 
-	// Type assert s3Client to *minio.Client
 	minioClient, ok := s3Client.(*minio.Client)
 	if !ok {
 		return fmt.Errorf("invalid s3Client type: expected *minio.Client")
 	}
 
-	// Fetch logs from S3
-	logContent, err := s3.GetWorkflowLogsFromS3(ctx, minioClient, writeS3Path)
+	fmt.Fprintf(writer, "Fetching archived logs from s3://%s/%s/%s/...\n\n", bucket, c.namespace, workflowName)
+
+	logContent, err := s3.GetArgoArchiveLogs(ctx, minioClient, bucket, c.namespace, workflowName)
 	if err != nil {
-		return fmt.Errorf("failed to fetch logs from S3: %w", err)
+		if errors.Is(err, s3.ErrArgoArchiveLogsNotFound) {
+			fmt.Fprintf(writer, "No archived logs found for this workflow. archiveLogs may have been disabled when it ran.\n")
+			return nil
+		}
+		return fmt.Errorf("failed to fetch archived logs: %w", err)
 	}
 
-	// Write log content to writer
 	_, err = writer.Write([]byte(logContent))
 	if err != nil {
 		return fmt.Errorf("failed to write logs: %w", err)
@@ -254,14 +262,19 @@ func (c *Client) getWorkflowLogsFromS3(ctx context.Context, workflowName, writeS
 	return nil
 }
 
-// GetWorkflowLogsWithS3Path retrieves logs for a workflow, with fallback to S3
-// writeS3Path is used to fetch logs from S3 if workflow is deleted
-// s3Client is the minio client to use for S3 operations (can be nil if workflow exists)
+// GetWorkflowLogsWithS3Path retrieves logs for a workflow, with fallback to
+// Argo's per-pod archived stdout in S3 if the workflow CR is gone.
+//
+// The writeS3Path parameter is kept for interface compatibility but is no
+// longer used - the archive lives at a fixed location keyed off the workflow
+// name, not the output path. Pass it as "" or the job's WriteS3Path; either
+// works.
 func (c *Client) GetWorkflowLogsWithS3Path(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
+	_ = writeS3Path // unused; kept for interface stability
 	wf, err := c.GetWorkflow(ctx, workflowName)
 	if err != nil {
-		// Workflow not found - try to fetch logs from S3
-		return c.getWorkflowLogsFromS3(ctx, workflowName, writeS3Path, s3Client, writer)
+		// Workflow CR gone - try Argo's log archive
+		return c.getWorkflowLogsFromArgoArchive(ctx, workflowName, s3Client, writer)
 	}
 
 	// Workflow exists - get logs from pods

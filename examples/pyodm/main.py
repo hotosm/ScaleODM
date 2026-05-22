@@ -74,6 +74,10 @@ def create_s3_task(
     response.raise_for_status()
     uuid = response.json()["uuid"]
     print(f"Created task: {uuid}")
+    uuid_file = os.environ.get("SCALEODM_EXAMPLE_UUID_FILE")
+    if uuid_file:
+        with open(uuid_file, "w", encoding="utf-8") as f:
+            f.write(uuid)
     return Task(node, uuid)
 
 

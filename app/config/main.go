@@ -107,6 +107,16 @@ var AWS_S3_SECRET_NAME = cmp.Or(
 var SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST = envBool("SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST", false)
 var SCALEODM_ALLOWED_S3_ENDPOINTS = strings.TrimSpace(os.Getenv("SCALEODM_ALLOWED_S3_ENDPOINTS"))
 
+// SCALEODM_ARGO_ARCHIVE_LOG_BUCKET names the S3 bucket where Argo's executor
+// archives pod stdout (per-pod main.log objects under
+// <bucket>/<namespace>/<workflow>/<pod>/main.log when archiveLogs is enabled
+// in the chart). Empty disables the post-pod-GC log fallback - the UI/API
+// will still serve live pod logs via the Kubernetes API during the
+// workflow's TTL window, but won't have anywhere to read from afterward.
+//
+// Must match argo.artifactRepository.s3.bucket in the Helm values.
+var SCALEODM_ARGO_ARCHIVE_LOG_BUCKET = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_BUCKET"))
+
 var SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS = envInt("SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS", 300)
 
 // SCALEODM_RECONCILER_INTERVAL_SECONDS controls how often the background
