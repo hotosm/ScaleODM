@@ -81,18 +81,12 @@ def create_s3_task(
     return Task(node, uuid)
 
 
-def print_log_preview(api_base_url: str, uuid: str, line: int = 0, edge_lines: int = 20) -> None:
-    """Fetch task logs and print only the first and last N logical log lines."""
+def print_log_summary(api_base_url: str, uuid: str, line: int = 0) -> None:
+    """Fetch task logs and print a one-line summary plus a command to view them."""
     url = f"{api_base_url}/task/{uuid}/output?line={line}"
-    print(f"\nGET {url}")
     resp = requests.get(url, timeout=60)
-    print(f"Status: {resp.status_code}")
     resp.raise_for_status()
 
-    output = resp.text
-
-    # /task/{uuid}/output may return either newline-delimited text or a JSON
-    # array of log strings (NodeODM-style). Support both and normalize to lines.
     parsed_json = None
     try:
         parsed_json = resp.json()
@@ -100,29 +94,14 @@ def print_log_preview(api_base_url: str, uuid: str, line: int = 0, edge_lines: i
         pass
 
     if isinstance(parsed_json, list) and all(isinstance(item, str) for item in parsed_json):
-        lines = parsed_json
+        total = len(parsed_json)
     elif isinstance(parsed_json, str):
-        lines = parsed_json.splitlines()
+        total = len(parsed_json.splitlines())
     else:
-        lines = output.splitlines()
+        total = len(resp.text.splitlines())
 
-    total = len(lines)
-
-    print(f"Log lines available: {total}")
-    print("--- log preview start ---")
-
-    if total == 0:
-        print("[no logs]")
-    elif total <= edge_lines * 2:
-        print("\n".join(lines))
-    else:
-        first = "\n".join(lines[:edge_lines])
-        last = "\n".join(lines[-edge_lines:])
-        print(first)
-        print(f"... [omitted {total - (edge_lines * 2)} middle lines] ...")
-        print(last)
-
-    print("--- log preview end ---")
+    print(f"\nWorkflow logs: {total} lines available")
+    print(f"To view full logs run: curl '{url}'")
 
 
 def _is_s3_not_found_xml(body: str) -> bool:
@@ -238,7 +217,7 @@ def main() -> None:
     print("\nFinal task summary:")
     print(json.dumps(info_resp.json(), indent=2))
 
-    print_log_preview(api_base_url, info.uuid)
+    print_log_summary(api_base_url, info.uuid)
     validate_asset_exists(api_base_url, info.uuid, "all.zip")
     validate_asset_exists(api_base_url, info.uuid, "orthophoto.tif")
 

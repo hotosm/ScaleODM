@@ -445,10 +445,12 @@ example-curl:
   curl -fsS "${API_URL}/task/${UUID}/info"
   echo
 
-  echo "Fetching task log preview..."
-  set +o pipefail
-  curl -fsS "${API_URL}/task/${UUID}/output?line=0" | sed -n '1,80p'
-  set -o pipefail
+  echo "Saving task logs to file..."
+  LOG_FILE="/tmp/scaleodm-example-${UUID}.log"
+  curl -fsS "${API_URL}/task/${UUID}/output?line=0" > "$LOG_FILE"
+  LOG_LINES=$(wc -l < "$LOG_FILE" | tr -d ' ')
+  echo "Workflow logs saved to: $LOG_FILE (${LOG_LINES} lines)"
+  echo "To view the workflow logs run: less $LOG_FILE"
 
   echo "Checking download redirect for orthophoto.tif..."
   curl -fsSI "${API_URL}/task/${UUID}/download/orthophoto.tif" | sed -n '1,20p'
@@ -585,6 +587,7 @@ _verify-archived-logs uuid:
 
   API_URL="${SCALEODM_BASE_URL:-http://localhost:31100}"
   NAMESPACE="${K8S_NAMESPACE:-argo}"
+  LOG_FILE="/tmp/scaleodm-example-{{ uuid }}.log"
 
   echo "Verifying archived log fallback for workflow {{ uuid }}..."
   kubectl delete workflow -n "$NAMESPACE" "{{ uuid }}" --ignore-not-found=true
@@ -596,13 +599,18 @@ _verify-archived-logs uuid:
     sleep 2
   done
 
-  LOG_PREVIEW=$(curl -fsS "${API_URL}/task/{{ uuid }}/output?line=0" | sed -n '1,120p')
-  printf "%s\n" "$LOG_PREVIEW"
+  curl -fsS "${API_URL}/task/{{ uuid }}/output?line=0" > "$LOG_FILE"
 
-  if ! printf "%s\n" "$LOG_PREVIEW" | grep -Fq "Fetching archived logs from s3://"; then
+  if ! grep -Fq "Fetching archived logs from s3://" "$LOG_FILE"; then
     echo "Archived log fallback did not appear to read from Argo archive"
+    echo "Workflow logs saved to: $LOG_FILE"
     exit 1
   fi
+
+  LOG_LINES=$(wc -l < "$LOG_FILE" | tr -d ' ')
+  echo "Archived log fallback verified (${LOG_LINES} lines)."
+  echo "Workflow logs saved to: $LOG_FILE"
+  echo "To view the workflow logs run: less $LOG_FILE"
 
 # Echo to terminal with blue colour
 [no-cd]
