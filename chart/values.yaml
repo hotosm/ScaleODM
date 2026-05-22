@@ -143,9 +143,6 @@ config:
   # ODM image to use in workflows
   odmImage: "ghcr.io/hotosm/odm:3.6.0"
 
-  # Argo archiveLogs bucket used for log lookup after Workflow TTL.
-  argoArchiveLogBucket: ""
-
   s3EndpointPolicy:
     enforceAllowlist: false
     allowedEndpoints: ""
@@ -320,6 +317,25 @@ argo:
   # Argo controller namespace. Only used when argo.enabled=true.
   # The controller watches all namespaces for workflows.
   namespaceOverride: argo
+
+  # Enable this if you wish to archive and view logs,
+  # after the workflow is complete.
+  # This is particularly useful for debugging failures.
+  # artifactRepository:
+  #   archiveLogs: true
+  #   s3:
+  #     bucket: your-bucket-name
+  #     endpoint: s3.amazonaws.com            
+  #     region: eu-west-1
+  #     insecure: false
+  #     useSDKCreds: false
+  #     accessKeySecret:
+  #       name: scaleodm-secrets
+  #       key: AWS_ACCESS_KEY_ID
+  #     secretKeySecret:
+  #       name: scaleodm-secrets
+  #       key: AWS_SECRET_ACCESS_KEY
+  #     keyFormat: "{{workflow.namespace}}/{{workflow.name}}/{{pod.name}}"
 
 # Ingress configuration (optional, UI-only)
 ingress:
