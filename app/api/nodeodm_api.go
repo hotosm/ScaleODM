@@ -332,8 +332,8 @@ type TaskNewRequest struct {
 	Name string `json:"name,omitempty" form:"name" doc:"Task name (optional; defaults to 'odm-project' if empty)"`
 
 	// JSON array of processing options.
-	// If omitted or empty, a default of --fast-orthophoto is applied.
-	Options string `json:"options,omitempty" form:"options" doc:"JSON array of processing options (optional; defaults to fast-orthophoto when empty)"`
+	// If omitted or empty, ODM runs in standard mode (no extra flags).
+	Options string `json:"options,omitempty" form:"options" doc:"JSON array of processing options (optional; empty runs standard ODM with no extra flags)"`
 
 	// Webhook URL to notify when processing is complete.
 	Webhook string `json:"webhook,omitempty" form:"webhook" doc:"Webhook URL (optional)"`
@@ -730,10 +730,6 @@ func (a *API) registerNodeODMRoutes() {
 					}
 				}
 			}
-		}
-
-		if len(odmFlags) == 0 {
-			odmFlags = []string{"--fast-orthophoto"}
 		}
 
 		// Determine read and write paths
@@ -1442,9 +1438,6 @@ func (a *API) registerNodeODMRoutes() {
 			if err := json.Unmarshal(metadata.ODMFlags, &odmFlags); err != nil {
 				return nil, huma.NewError(500, "Failed to parse stored task options", err)
 			}
-		}
-		if len(odmFlags) == 0 {
-			odmFlags = []string{"--fast-orthophoto"}
 		}
 		for _, flag := range odmFlags {
 			if err := validateShellSafe(flag, "options flag"); err != nil {

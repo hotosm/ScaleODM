@@ -165,7 +165,7 @@ Dynamic sizing is enabled by default and selects a profile based on ODM flags (m
 
 | Profile | Trigger | Default multiplier | Default min |
 |---|---|---|---|
-| `fastOrtho` | `--fast-orthophoto` | 3× | 30 GiB |
+| `fastOrtho` | `--fast-orthophoto` | 6× | 60 GiB |
 | `dsmDtm` | `--dsm` or `--dtm` | 12× | 100 GiB |
 | `standard` | everything else | 8× | 70 GiB |
 
@@ -378,8 +378,8 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.workspace.dynamicSize.enabled` | Enable flag-aware dynamic PVC sizing (PVC mode only) | `true` |
 | `config.workflow.workspace.dynamicSize.maxGiB` | Global maximum GiB clamp across all profiles | `1024` |
 | `config.workflow.workspace.dynamicSize.fallbackMBPerImage` | Fallback MB/image when byte totals unavailable | `20` |
-| `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `3` |
-| `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `30` |
+| `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `6` |
+| `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `60` |
 | `config.workflow.workspace.dynamicSize.dsmDtm.multiplier` | Workspace multiplier for `--dsm`/`--dtm` jobs | `12` |
 | `config.workflow.workspace.dynamicSize.dsmDtm.minGiB` | Minimum GiB for DSM/DTM profile | `100` |
 | `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs | `8` |

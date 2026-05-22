@@ -188,9 +188,12 @@ config:
         maxGiB: 1024
         fallbackMBPerImage: 20
         # Profile order: fastOrtho, then dsmDtm, then standard.
+        # NOTE: even --fast-orthophoto runs full OpenSFM undistortion, which
+        # produces uncompressed TIFFs ~5-10x the source JPG size. The multiplier
+        # must cover those intermediates, not just the (smaller) fastOrtho outputs.
         fastOrtho:
-          multiplier: 3
-          minGiB: 30
+          multiplier: 6
+          minGiB: 60
         standard:
           multiplier: 8
           minGiB: 70
