@@ -67,6 +67,28 @@ cluster-init:
   ARGO_ARCHIVE_S3_ENDPOINT="${SCALEODM_ARGO_ARCHIVE_S3_ENDPOINT:-${SCALEODM_WORKFLOW_S3_ENDPOINT:-}}"
   ARGO_ARCHIVE_S3_INSECURE="${SCALEODM_ARGO_ARCHIVE_S3_INSECURE:-true}"
 
+  label_workflow_nodes() {
+      # Workflows pin themselves to Karpenter-style labels (node-type=cpu,
+      # karpenter.sh/capacity-type=spot). The Docker-mode Talos worker has
+      # neither, so without this the workflow pod sits Pending forever with
+      # "node(s) didn't match Pod's node affinity/selector".
+      local workers
+      workers=$(kubectl get nodes -l '!node-role.kubernetes.io/control-plane' -o name 2>/dev/null || true)
+      if [ -z "$workers" ]; then
+          echo "⚠️  No worker nodes found to label; skipping workflow node labels"
+          return 0
+      fi
+      echo "📦 Labeling worker nodes for workflow scheduling..."
+      while IFS= read -r node; do
+          [ -z "$node" ] && continue
+          kubectl label "$node" \
+              node-type=cpu \
+              karpenter.sh/capacity-type=spot \
+              --overwrite >/dev/null
+      done <<< "$workers"
+      echo "✓ Worker nodes labeled (node-type=cpu, karpenter.sh/capacity-type=spot)"
+  }
+
   configure_argo_archive_logs() {
       local endpoint="$ARGO_ARCHIVE_S3_ENDPOINT"
       if [ -z "$endpoint" ]; then
@@ -203,6 +225,7 @@ cluster-init:
                       --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
                       --dry-run=client -o yaml | kubectl apply -f - &> /dev/null
                   echo "✓ Workflow S3 credentials secret verified"
+                  label_workflow_nodes
                   configure_argo_archive_logs
                   echo ""
                   exit 0
@@ -290,6 +313,7 @@ cluster-init:
       --from-literal=AWS_SECRET_ACCESS_KEY="$WORKFLOW_S3_SECRET_KEY" \
       --from-literal=AWS_DEFAULT_REGION="$WORKFLOW_S3_REGION" \
       --dry-run=client -o yaml | kubectl apply -f -
+  label_workflow_nodes
   configure_argo_archive_logs
 
   echo ""
