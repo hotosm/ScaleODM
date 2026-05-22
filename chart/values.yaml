@@ -143,15 +143,7 @@ config:
   # ODM image to use in workflows
   odmImage: "ghcr.io/hotosm/odm:3.6.0"
 
-  # Bucket where Argo's executor archives pod stdout when archiveLogs is
-  # enabled (one object per pod under
-  # <bucket>/<namespace>/<workflow>/<pod>/main.log). Read by the ScaleODM UI/
-  # API as the post-TTL log fallback - once the workflow CR is GC'd, this is
-  # the only place pod stdout is recoverable from. Must match the bucket in
-  # the Argo controller's artifactRepository config.
-  #
-  # Empty = post-TTL log fallback disabled (live pod logs via Kubernetes API
-  # still work during the workflow's TTL window).
+  # Argo archiveLogs bucket used for log lookup after Workflow TTL.
   argoArchiveLogBucket: ""
 
   s3EndpointPolicy:
@@ -198,13 +190,17 @@ config:
         enabled: true
         maxGiB: 1024
         fallbackMBPerImage: 20
-        # --fast-orthophoto skips dense reconstruction; everything else uses standard.
+        # Profile order: fastOrtho, then dsmDtm, then standard.
         fastOrtho:
           multiplier: 3
           minGiB: 30
         standard:
           multiplier: 8
           minGiB: 70
+        # DSM/DTM jobs need more space for DEM outputs and intermediates.
+        dsmDtm:
+          multiplier: 12
+          minGiB: 100
     retryLimit: 1
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"

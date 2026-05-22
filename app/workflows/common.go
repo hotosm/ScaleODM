@@ -221,13 +221,8 @@ func (c *Client) getWorkflowLogsFromPods(ctx context.Context, wf *wfv1.Workflow,
 	return nil
 }
 
-// getWorkflowLogsFromArgoArchive reads Argo's archived per-pod stdout objects
-// from S3 - the fallback used when the workflow CR has been GC'd and the pod
-// logs are no longer available via the Kubernetes API.
-//
-// Requires SCALEODM_ARGO_ARCHIVE_LOG_BUCKET to be set and the chart's
-// argo.controller.workflowDefaults.spec.archiveLogs / argo.artifactRepository
-// to be enabled. Without those, the workflow's logs are simply gone past TTL.
+// getWorkflowLogsFromArgoArchive reads archived pod logs after the Workflow CR
+// is gone. Requires SCALEODM_ARGO_ARCHIVE_LOG_BUCKET.
 func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowName string, s3Client interface{}, writer io.Writer) error {
 	fmt.Fprintf(writer, "Workflow %s not found (TTL expired or GC'd).\n", workflowName)
 
@@ -262,22 +257,15 @@ func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowNam
 	return nil
 }
 
-// GetWorkflowLogsWithS3Path retrieves logs for a workflow, with fallback to
-// Argo's per-pod archived stdout in S3 if the workflow CR is gone.
-//
-// The writeS3Path parameter is kept for interface compatibility but is no
-// longer used - the archive lives at a fixed location keyed off the workflow
-// name, not the output path. Pass it as "" or the job's WriteS3Path; either
-// works.
+// GetWorkflowLogsWithS3Path returns live logs, or archived logs if the
+// Workflow CR has already been removed.
 func (c *Client) GetWorkflowLogsWithS3Path(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
 	_ = writeS3Path // unused; kept for interface stability
 	wf, err := c.GetWorkflow(ctx, workflowName)
 	if err != nil {
-		// Workflow CR gone - try Argo's log archive
 		return c.getWorkflowLogsFromArgoArchive(ctx, workflowName, s3Client, writer)
 	}
 
-	// Workflow exists - get logs from pods
 	return c.getWorkflowLogsFromPods(ctx, wf, writer)
 }
 

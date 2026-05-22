@@ -137,17 +137,7 @@ func parseS3Path(s3Path string) (string, string, error) {
 	return bucket, prefix, nil
 }
 
-// GetArgoArchiveLogs fetches archived pod stdout/stderr for a workflow from
-// the Argo log archive bucket. Argo's executor writes one object per pod
-// under <bucket>/<keyFormat>, where the chart pins keyFormat to
-// "{{workflow.namespace}}/{{workflow.name}}/{{pod.name}}" - so all pods for a
-// given workflow live under bucket/<namespace>/<workflowName>/.
-//
-// Returns ErrArgoArchiveBucketUnset when no archive bucket is configured at
-// the deployment level, so callers can present an actionable error instead
-// of silently empty logs. Returns ErrArgoArchiveLogsNotFound when the bucket
-// is configured but no objects exist for the workflow (e.g. archiveLogs was
-// disabled when this workflow ran, or it never produced any pods).
+// GetArgoArchiveLogs reads archived pod logs for a workflow.
 func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, namespace, workflowName string) (string, error) {
 	if strings.TrimSpace(bucket) == "" {
 		return "", ErrArgoArchiveBucketUnset
@@ -158,9 +148,6 @@ func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, names
 
 	prefix := fmt.Sprintf("%s/%s/", namespace, workflowName)
 
-	// List all archived log objects for this workflow. Each pod has its own
-	// object (e.g. ".../<pod-name>/main.log"); we concatenate them in object-
-	// key order so the output is stable across calls.
 	var keys []string
 	for obj := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
 		Prefix:    prefix,
@@ -197,15 +184,10 @@ func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, names
 	return out.String(), nil
 }
 
-// ErrArgoArchiveBucketUnset means the deployment hasn't configured an Argo
-// log archive bucket (SCALEODM_ARGO_ARCHIVE_LOG_BUCKET). Without it we have
-// nowhere to look once pods are GC'd, so the caller should surface a clear
-// message to the user.
+// ErrArgoArchiveBucketUnset means no archive bucket is configured.
 var ErrArgoArchiveBucketUnset = fmt.Errorf("argo archive log bucket not configured")
 
-// ErrArgoArchiveLogsNotFound means the bucket is configured but no archived
-// log objects exist for this workflow. Usually this means archiveLogs was
-// disabled when the workflow ran, or the workflow never reached pod creation.
+// ErrArgoArchiveLogsNotFound means no archived objects exist for the workflow.
 var ErrArgoArchiveLogsNotFound = fmt.Errorf("no archived logs found for workflow")
 
 // ObjectExistsInS3Path checks if an exact object exists under writeS3Path.

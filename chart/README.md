@@ -166,7 +166,8 @@ Dynamic sizing is enabled by default and selects a profile based on ODM flags (m
 | Profile | Trigger | Default multiplier | Default min |
 |---|---|---|---|
 | `fastOrtho` | `--fast-orthophoto` | 3× | 30 GiB |
-| `standard` | everything else (including DSM/DTM) | 6× | 50 GiB |
+| `dsmDtm` | `--dsm` or `--dtm` | 12× | 100 GiB |
+| `standard` | everything else | 8× | 70 GiB |
 
 Sizing precedence:
 
@@ -379,8 +380,10 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.workspace.dynamicSize.fallbackMBPerImage` | Fallback MB/image when byte totals unavailable | `20` |
 | `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `3` |
 | `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `30` |
-| `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs (including DSM/DTM) | `6` |
-| `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `50` |
+| `config.workflow.workspace.dynamicSize.dsmDtm.multiplier` | Workspace multiplier for `--dsm`/`--dtm` jobs | `12` |
+| `config.workflow.workspace.dynamicSize.dsmDtm.minGiB` | Minimum GiB for DSM/DTM profile | `100` |
+| `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs | `8` |
+| `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `70` |
 | `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `21600` |
 | `config.workflow.retryLimit` | Number of retry attempts on failure | `1` |
 | `config.workflow.retryBackoffDuration` | Initial backoff wait between retries | `"60s"` |

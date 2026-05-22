@@ -345,26 +345,8 @@ fi
 echo "Upload complete."`
 }
 
-// GenerateWorkspaceSnapshotScript prints a small diagnostic snapshot of the
-// workflow's terminal state to stdout. The Argo executor captures stdout and
-// (when archiveLogs is enabled) ships it to S3 - so the snapshot survives pod
-// GC, workspace deletion, and onExit failures without any in-pod rclone or
-// AWS credentials.
-//
-// What lives here vs. elsewhere:
-//   - Pod stdout/stderr -> Argo log archive (configured at the chart level)
-//   - Terminal status, exit codes -> ScaleODM job DB row (via reconciler)
-//   - Workspace tree / disk usage -> THIS SCRIPT - it's the one diagnostic
-//     that disappears when the PVC is reclaimed and can't be reconstructed
-//     from anywhere else.
-//
-// Environment expected from the workflow spec:
-//   WORKFLOW_NAME, WORKFLOW_UID, WORKFLOW_STATUS, WORKFLOW_FAILURES,
-//   WORKFLOW_DURATION, WORKFLOW_CREATION_TIMESTAMP - Argo {{workflow.*}}
-//   globals, substituted by the controller before pod creation.
-//
-// Each command is wrapped so a partial workspace (mid-cleanup, vanished files)
-// doesn't kill the snapshot dump; set -u catches typos in env var references.
+// GenerateWorkspaceSnapshotScript prints the final workspace state to stdout.
+// Argo archives the cleanup pod logs when archiveLogs is enabled.
 func GenerateWorkspaceSnapshotScript() string {
 	return `set -u
 JOB_ID="${WORKFLOW_NAME:-{{workflow.name}}}"
@@ -393,15 +375,10 @@ df -h "$WORKSPACE_DIR" 2>/dev/null || echo "df failed (workspace may be unmounte
 
 echo ""
 echo "=== Workspace Disk Usage (du, top level) ==="
-# du sorted by size makes "what filled the PVC" obvious at a glance.
 (du -sh "$WORKSPACE_DIR"/* 2>/dev/null || true) | sort -h || echo "du failed"
 
 echo ""
 echo "=== Workspace Tree (depth 3, excluding images/ and .rclone/) ==="
-# Reveals which ODM stage directories were created (opensfm/, odm_meshing/,
-# odm_dem/, odm_orthophoto/, ...) so you can tell where processing died even
-# when stdout doesn't say. images/ and .rclone/ would dominate output and
-# don't help with diagnosis.
 if [ -d "$WORKSPACE_DIR" ]; then
   (find "$WORKSPACE_DIR" -maxdepth 3 \
     \( -path "$WORKSPACE_DIR/images" -prune \) \

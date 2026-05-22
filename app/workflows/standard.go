@@ -231,10 +231,7 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 	return created, nil
 }
 
-// flagMemoryMultiplier returns a scaling factor for the RAM estimate based on
-// which ODM flags are active. --fast-orthophoto skips dense reconstruction
-// (the most memory-intensive step), while --dsm/--dtm require it and then
-// add surface-model generation on top.
+// flagMemoryMultiplier adjusts RAM estimates for high/low-cost ODM modes.
 func flagMemoryMultiplier(odmFlags []string) float64 {
 	for _, f := range odmFlags {
 		if f == "--fast-orthophoto" {
@@ -335,14 +332,19 @@ func estimateWorkspacePVCSize(imageTotalBytes int64, imageCount int, odmFlags []
 	return fmt.Sprintf("%dGi", int64(math.Ceil(estimatedGiB))), true
 }
 
-// flagWorkspaceProfile returns the (multiplier, minGiB) pair for workspace sizing.
-// --fast-orthophoto skips dense reconstruction and has a much smaller disk footprint;
-// everything else (including DSM/DTM) uses the standard profile.
+// flagWorkspaceProfile returns the workspace multiplier and minimum size.
+// Keep precedence aligned with flagMemoryMultiplier.
 func flagWorkspaceProfile(odmFlags []string) (multiplier, minGiB float64) {
 	for _, f := range odmFlags {
 		if f == "--fast-orthophoto" {
 			return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER,
 				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
+		}
+	}
+	for _, f := range odmFlags {
+		if f == "--dsm" || f == "--dtm" {
+			return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER,
+				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB
 		}
 	}
 	return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER,
@@ -596,12 +598,7 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	// Generate unique job ID for this workflow instance
 	jobID := "{{workflow.name}}"
 
-	// Download container - downloads from readS3Path and extracts zips, using
-	// include filters so only image files and supported archives are pulled.
-	//
-	// Stdout is captured by Argo's executor (see chart artifactRepository
-	// + workflowDefaults.spec.archiveLogs); no in-pod tee/log-file machinery.
-	// The attempt marker disambiguates retries in the archived stream.
+	// Download input files. Argo captures stdout when log archival is enabled.
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "download",
@@ -617,9 +614,7 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 		},
 	}
 
-	// ODM processing container. python3 -u keeps Python's stdout line-buffered
-	// so partial output survives SIGKILL/OOM and reaches Argo's log archive
-	// (or kubectl logs --previous within the workflow's TTL).
+	// Run ODM with unbuffered Python so partial logs are flushed promptly.
 	odmFlagsStr := strings.Join(cfg.ODMFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
@@ -653,8 +648,7 @@ echo "ODM processing complete"
 		Dependencies: []string{"download"},
 	}
 
-	// Upload container - uploads results to writeS3Path. Stdout captured by
-	// Argo archive same as the other stage containers.
+	// Upload results to writeS3Path.
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:    "upload",
@@ -671,15 +665,7 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 		Dependencies: []string{"process"},
 	}
 
-	// Cleanup template runs as workflow onExit so it executes after the
-	// workflow's terminal outcome. Its job is *only* to dump the workspace
-	// diagnostic snapshot to stdout - log capture is owned by Argo's archive
-	// (configured at the chart level) and job-level status persistence is
-	// owned by the reconciler writing to the ScaleODM job DB row.
-	//
-	// Consequently the cleanup container needs no S3 credentials, no /tmp
-	// scratch volume, and no rclone - just the workspace PVC mount and the
-	// {{workflow.*}} globals Argo substitutes before pod creation.
+	// onExit prints a small workspace snapshot before the PVC is removed.
 	cleanupEnv := []apiv1.EnvVar{
 		{
 			Name:  "WORKFLOW_STATUS",

@@ -555,27 +555,41 @@ func TestFlagWorkspaceProfile(t *testing.T) {
 	prevFastMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
 	prevStdM := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
 	prevStdMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
+	prevDemM := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER
+	prevDemMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER = 3
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB = 30
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = 6
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = 50
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER = 10
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB = 90
 	t.Cleanup(func() {
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER = prevFastM
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB = prevFastMin
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = prevStdM
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = prevStdMin
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER = prevDemM
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB = prevDemMin
 	})
 
-	// standard profile for nil, arbitrary flags, and DEM flags
+	// standard profile for nil and non-special flags
 	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile(nil)))
 	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--orthophoto-resolution=5"})))
-	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--dsm"})))
-	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--dtm"})))
 	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--pc-quality", "ultra"})))
 
-	// fastOrtho profile
+	// --dsm/--dtm gets the larger DSM/DTM profile (surface rasters need ~2x
+	// disk over the standard pipeline)
+	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dsm"})))
+	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dtm"})))
+	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dsm", "--dtm"})))
+	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--orthophoto-resolution=5", "--dsm"})))
+
+	// fast-orthophoto profile
 	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--fast-orthophoto"})))
+	// fast-orthophoto wins over --dsm/--dtm because it skips the dense
+	// reconstruction those flags depend on.
 	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--fast-orthophoto", "--dsm"})))
+	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--dtm", "--fast-orthophoto"})))
 }
 
 func TestEstimateWorkspaceGiB_PrefersBytesOverCountFallback(t *testing.T) {
