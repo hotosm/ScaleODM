@@ -3,8 +3,8 @@ type: application
 name: scaleodm
 description: Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
 # Ensure version and appVersion are updated together
-version: "0.6.4"
-appVersion: "0.6.4"
+version: "0.6.5"
+appVersion: "0.6.5"
 maintainers:
 - email: sam.woodcock@hotosm.org
   name: Sam Woodcock
