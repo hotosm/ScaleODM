@@ -137,16 +137,23 @@ func parseS3Path(s3Path string) (string, string, error) {
 	return bucket, prefix, nil
 }
 
-// GetArgoArchiveLogs reads archived pod logs for a workflow.
-func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, namespace, workflowName string) (string, error) {
+// GetArgoArchiveContainerLog reads one container's archived stdout for a
+// workflow. Argo's key format is {namespace}/{workflow}/{pod}/{container}.log,
+// so we list the workflow prefix and concatenate matching keys in sorted
+// order - that yields retry pods chronologically.
+func GetArgoArchiveContainerLog(ctx context.Context, client *minio.Client, bucket, namespace, workflowName, container string) (string, error) {
 	if strings.TrimSpace(bucket) == "" {
 		return "", ErrArgoArchiveBucketUnset
 	}
 	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(workflowName) == "" {
 		return "", fmt.Errorf("namespace and workflowName must be non-empty")
 	}
+	if strings.TrimSpace(container) == "" {
+		return "", fmt.Errorf("container must be non-empty")
+	}
 
 	prefix := fmt.Sprintf("%s/%s/", namespace, workflowName)
+	suffix := "/" + container + ".log"
 
 	var keys []string
 	for obj := range client.ListObjects(ctx, bucket, minio.ListObjectsOptions{
@@ -155,6 +162,9 @@ func GetArgoArchiveLogs(ctx context.Context, client *minio.Client, bucket, names
 	}) {
 		if obj.Err != nil {
 			return "", fmt.Errorf("failed to list archive logs: %w", obj.Err)
+		}
+		if !strings.HasSuffix(obj.Key, suffix) {
+			continue
 		}
 		keys = append(keys, obj.Key)
 	}

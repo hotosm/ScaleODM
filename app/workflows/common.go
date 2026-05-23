@@ -115,16 +115,22 @@ func (c *Client) DeleteWorkflow(ctx context.Context, name string) error {
 	return nil
 }
 
-// GetWorkflowLogs retrieves logs for a workflow.
-// If the workflow CR has been GC'd, caller should use GetWorkflowLogsWithS3Path
-// to fall back to Argo's archived per-pod logs in S3.
+// GetWorkflowLogs reads live pod logs. Terminal workflows have no pods
+// (podGC), so callers without S3 credentials get an explicit error rather
+// than a stream of "pod not found" warnings - use GetWorkflowLogsWithS3Path
+// for the archive fallback.
 func (c *Client) GetWorkflowLogs(ctx context.Context, workflowName string, writer io.Writer) error {
 	wf, err := c.GetWorkflow(ctx, workflowName)
 	if err != nil {
 		return fmt.Errorf("workflow not found: %w (use GetWorkflowLogsWithS3Path for archive fallback)", err)
 	}
 
-	// Workflow exists - get logs from pods
+	if wf.Status.Phase == wfv1.WorkflowSucceeded ||
+		wf.Status.Phase == wfv1.WorkflowFailed ||
+		wf.Status.Phase == wfv1.WorkflowError {
+		return fmt.Errorf("workflow %s is %s; pods gone, use GetWorkflowLogsWithS3Path", workflowName, wf.Status.Phase)
+	}
+
 	return c.getWorkflowLogsFromPods(ctx, wf, writer)
 }
 
@@ -221,15 +227,17 @@ func (c *Client) getWorkflowLogsFromPods(ctx context.Context, wf *wfv1.Workflow,
 	return nil
 }
 
-// getWorkflowLogsFromArgoArchive reads archived pod logs after the Workflow CR
-// is gone. Requires SCALEODM_ARGO_ARCHIVE_LOG_BUCKET.
-func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowName string, s3Client interface{}, writer io.Writer) error {
-	fmt.Fprintf(writer, "Workflow %s not found (TTL expired or GC'd).\n", workflowName)
+// The ContainerSet template runs download/process/upload in one pod; only
+// `process` carries useful ODM output, so that's the only container log we
+// surface from the archive.
+const archivedProcessLogContainer = "process"
 
+// streamArchivedProcessLog pulls process.log for a workflow from the Argo
+// log archive bucket. Used once podGC has removed the live pods.
+func (c *Client) streamArchivedProcessLog(ctx context.Context, workflowName string, s3Client interface{}, writer io.Writer) error {
 	bucket := strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_BUCKET)
 	if bucket == "" {
-		fmt.Fprintf(writer, "No archived logs available: SCALEODM_ARGO_ARCHIVE_LOG_BUCKET is not configured.\n")
-		fmt.Fprintf(writer, "Enable archiveLogs in the Helm values and set this env var to recover logs after workflow TTL.\n")
+		fmt.Fprintln(writer, "Archived logs unavailable: set SCALEODM_ARGO_ARCHIVE_LOG_BUCKET and enable archiveLogs in Helm.")
 		return nil
 	}
 
@@ -238,12 +246,10 @@ func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowNam
 		return fmt.Errorf("invalid s3Client type: expected *minio.Client")
 	}
 
-	fmt.Fprintf(writer, "Fetching archived logs from s3://%s/%s/%s/...\n\n", bucket, c.namespace, workflowName)
-
-	logContent, err := s3.GetArgoArchiveLogs(ctx, minioClient, bucket, c.namespace, workflowName)
+	logContent, err := s3.GetArgoArchiveContainerLog(ctx, minioClient, bucket, c.namespace, workflowName, archivedProcessLogContainer)
 	if err != nil {
 		if errors.Is(err, s3.ErrArgoArchiveLogsNotFound) {
-			fmt.Fprintf(writer, "No archived logs found for this workflow. archiveLogs may have been disabled when it ran.\n")
+			fmt.Fprintln(writer, "No archived process.log for this workflow (archiveLogs likely disabled at the time).")
 			return nil
 		}
 		return fmt.Errorf("failed to fetch archived logs: %w", err)
@@ -257,13 +263,21 @@ func (c *Client) getWorkflowLogsFromArgoArchive(ctx context.Context, workflowNam
 	return nil
 }
 
-// GetWorkflowLogsWithS3Path returns live logs, or archived logs if the
-// Workflow CR has already been removed.
+// GetWorkflowLogsWithS3Path returns live pod logs while the workflow is
+// running and falls back to the S3 archive once it has completed or the CR
+// has been GC'd. The phase check exists because podGC deletes pods at
+// completion - without it we'd churn through dead pod lookups.
 func (c *Client) GetWorkflowLogsWithS3Path(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
 	_ = writeS3Path // unused; kept for interface stability
 	wf, err := c.GetWorkflow(ctx, workflowName)
 	if err != nil {
-		return c.getWorkflowLogsFromArgoArchive(ctx, workflowName, s3Client, writer)
+		return c.streamArchivedProcessLog(ctx, workflowName, s3Client, writer)
+	}
+
+	if wf.Status.Phase == wfv1.WorkflowSucceeded ||
+		wf.Status.Phase == wfv1.WorkflowFailed ||
+		wf.Status.Phase == wfv1.WorkflowError {
+		return c.streamArchivedProcessLog(ctx, workflowName, s3Client, writer)
 	}
 
 	return c.getWorkflowLogsFromPods(ctx, wf, writer)
