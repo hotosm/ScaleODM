@@ -234,12 +234,30 @@ spec:
               value: {{ .Values.config.processSizing.fastOrthoMemoryMultiplier | quote }}
             - name: SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
               value: {{ .Values.config.processSizing.dsmDtmMemoryMultiplier | quote }}
-            # Argo log archive bucket - read by the UI/API's post-TTL log
-            # fallback path (s3/main.go GetArgoArchiveLogs). Sourced from the
-            # Argo controller's artifactRepository.s3.bucket so there is a
-            # single source of truth; empty disables the fallback.
+            # Archive log lookup (s3.GetArgoArchiveLogClient). All values come
+            # straight from argo.artifactRepository.s3.* so the controller's
+            # write config and the API's read config stay in sync.
+            {{- $artifact := dig "argo" "artifactRepository" "s3" (dict) (.Values | toYaml | fromYaml) }}
             - name: SCALEODM_ARGO_ARCHIVE_LOG_BUCKET
-              value: {{ dig "argo" "artifactRepository" "s3" "bucket" "" (.Values | toYaml | fromYaml) | quote }}
+              value: {{ dig "bucket" "" $artifact | quote }}
+            - name: SCALEODM_ARGO_ARCHIVE_LOG_ENDPOINT
+              value: {{ dig "endpoint" "" $artifact | quote }}
+            - name: SCALEODM_ARGO_ARCHIVE_LOG_REGION
+              value: {{ dig "region" "" $artifact | quote }}
+            {{- $accessSecretName := dig "accessKeySecret" "name" "" $artifact }}
+            {{- $secretSecretName := dig "secretKeySecret" "name" "" $artifact }}
+            {{- if and $accessSecretName $secretSecretName }}
+            - name: SCALEODM_ARGO_ARCHIVE_LOG_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $accessSecretName | quote }}
+                  key: {{ dig "accessKeySecret" "key" "AWS_ACCESS_KEY_ID" $artifact | quote }}
+            - name: SCALEODM_ARGO_ARCHIVE_LOG_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $secretSecretName | quote }}
+                  key: {{ dig "secretKeySecret" "key" "AWS_SECRET_ACCESS_KEY" $artifact | quote }}
+            {{- end }}
             {{- if .Values.kubernetes.kubeconfigPath }}
             - name: KUBECONFIG_PATH
               value: {{ .Values.kubernetes.kubeconfigPath | quote }}

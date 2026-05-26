@@ -92,6 +92,39 @@ func GetS3ClientWithCredentials(endpoint, accessKey, secretKey, sessionToken str
 	return client, nil
 }
 
+// GetArgoArchiveLogClient builds the client used to read Argo's archived
+// workflow logs. Uses the dedicated SCALEODM_ARGO_ARCHIVE_LOG_* credentials
+// when set, otherwise the runtime AWS creds against the archive bucket.
+// Returns ok=false when the bucket or credentials are missing so callers can
+// skip the fallback.
+func GetArgoArchiveLogClient() (client *minio.Client, bucket string, ok bool, err error) {
+	bucket = strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_BUCKET)
+	if bucket == "" {
+		return nil, "", false, nil
+	}
+
+	endpoint := strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_ENDPOINT)
+	if endpoint == "" {
+		endpoint = config.AWS_S3_ENDPOINT
+	}
+
+	accessKey := strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_ACCESS_KEY_ID)
+	secretKey := strings.TrimSpace(config.SCALEODM_ARGO_ARCHIVE_LOG_SECRET_ACCESS_KEY)
+	if accessKey == "" || secretKey == "" {
+		accessKey = config.AWS_ACCESS_KEY_ID
+		secretKey = config.AWS_SECRET_ACCESS_KEY
+	}
+	if accessKey == "" || secretKey == "" {
+		return nil, bucket, false, nil
+	}
+
+	client, err = GetS3ClientWithCredentials(endpoint, accessKey, secretKey, "")
+	if err != nil {
+		return nil, bucket, false, err
+	}
+	return client, bucket, true, nil
+}
+
 func resolveMinIOEndpoint(endpoint string) (string, bool) {
 	secure := true
 	if strings.HasPrefix(endpoint, "http://") {

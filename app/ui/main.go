@@ -14,10 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/minio/minio-go/v7"
-
 	"github.com/hotosm/scaleodm/app/meta"
-	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -313,16 +310,8 @@ func (h *Handler) loadTaskOutput(ctx context.Context, job *meta.JobMetadata) (st
 	}
 
 	if strings.TrimSpace(job.WriteS3Path) != "" {
-		client, err := taskS3Client(job.Metadata)
-		if err != nil {
-			return "", err
-		}
-
-		// Try live pods first, then fall back to Argo's archived logs in S3.
-		// The fallback is handled inside GetWorkflowLogsWithS3Path - no need
-		// to pre-fetch a separate aggregated artifact anymore.
 		var builder strings.Builder
-		if err := h.workflow.GetWorkflowLogsWithS3Path(ctx, job.WorkflowName, job.WriteS3Path, client, &builder); err != nil {
+		if err := h.workflow.GetWorkflowLogsWithArchiveFallback(ctx, job.WorkflowName, &builder); err != nil {
 			return "", err
 		}
 		return builder.String(), nil
@@ -333,20 +322,6 @@ func (h *Handler) loadTaskOutput(ctx context.Context, job *meta.JobMetadata) (st
 		return "", err
 	}
 	return builder.String(), nil
-}
-
-func taskS3Client(metadataJSON []byte) (*minio.Client, error) {
-	metaMap := parseMetadataMap(metadataJSON)
-	endpoint, _ := metaMap["s3_endpoint"].(string)
-	endpoint = strings.TrimSpace(endpoint)
-	if endpoint == "" {
-		return s3.GetS3Client(), nil
-	}
-	normalized, err := s3.NormalizeEndpoint(endpoint)
-	if err != nil {
-		return nil, err
-	}
-	return s3.GetS3ClientForEndpoint(normalized)
 }
 
 func parseMetadataMap(metadataJSON []byte) map[string]interface{} {

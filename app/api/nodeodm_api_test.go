@@ -979,7 +979,7 @@ func (c *recordingWorkflowClient) GetWorkflowLogs(ctx context.Context, workflowN
 	return errors.New("not implemented")
 }
 
-func (c *recordingWorkflowClient) GetWorkflowLogsWithS3Path(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
+func (c *recordingWorkflowClient) GetWorkflowLogsWithArchiveFallback(ctx context.Context, workflowName string, writer io.Writer) error {
 	return errors.New("not implemented")
 }
 

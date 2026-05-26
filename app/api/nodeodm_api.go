@@ -1147,18 +1147,14 @@ func (a *API) registerNodeODMRoutes() {
 		// Get console output if requested
 		if input.WithOutput > 0 {
 			var logBuilder strings.Builder
-			// Use S3 path if available for fallback
 			if job.WriteS3Path != "" {
-				s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(job.Metadata)
-				if clientErr != nil {
-					log.Printf("GET /task/%s/info: failed to construct S3 client for log fallback endpoint=%q: %v", input.UUID, selectedEndpoint, clientErr)
-				} else if err := a.workflowClient.GetWorkflowLogsWithS3Path(ctx, input.UUID, job.WriteS3Path, s3Client, &logBuilder); err == nil {
+				if err := a.workflowClient.GetWorkflowLogsWithArchiveFallback(ctx, input.UUID, &logBuilder); err == nil {
 					lines := strings.Split(logBuilder.String(), "\n")
 					if input.WithOutput < len(lines) {
 						info.Output = lines[input.WithOutput:]
 					}
 				} else {
-					log.Printf("GET /task/%s/info: failed to get workflow logs with S3 path: %v", input.UUID, err)
+					log.Printf("GET /task/%s/info: load logs: %v", input.UUID, err)
 				}
 			} else {
 				// Fallback to regular log retrieval
@@ -1203,18 +1199,11 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(404, "Task not found")
 		}
 
-		// Get logs - try workflow first, fallback to S3 if workflow is deleted
 		var logBuilder strings.Builder
 		if job.WriteS3Path != "" {
-			// Use S3 path for fallback
-			s3Client, selectedEndpoint, clientErr := resolveTaskS3Client(job.Metadata)
-			if clientErr != nil {
-				log.Printf("GET /task/%s/output: failed to construct S3 client for log fallback endpoint=%q: %v", input.UUID, selectedEndpoint, clientErr)
-				return nil, huma.NewError(500, "Failed to initialize S3 client", clientErr)
-			}
-			err = a.workflowClient.GetWorkflowLogsWithS3Path(ctx, input.UUID, job.WriteS3Path, s3Client, &logBuilder)
+			err = a.workflowClient.GetWorkflowLogsWithArchiveFallback(ctx, input.UUID, &logBuilder)
 			if err != nil {
-				log.Printf("GET /task/%s/output: failed to retrieve logs from workflow or S3: %v", input.UUID, err)
+				log.Printf("GET /task/%s/output: load logs: %v", input.UUID, err)
 				return nil, huma.NewError(500, "Failed to retrieve logs", err)
 			}
 		} else {

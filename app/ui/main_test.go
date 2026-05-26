@@ -52,7 +52,7 @@ func (c *testWorkflowClient) GetWorkflowLogs(ctx context.Context, workflowName s
 	return err
 }
 
-func (c *testWorkflowClient) GetWorkflowLogsWithS3Path(ctx context.Context, workflowName, writeS3Path string, s3Client interface{}, writer io.Writer) error {
+func (c *testWorkflowClient) GetWorkflowLogsWithArchiveFallback(ctx context.Context, workflowName string, writer io.Writer) error {
 	_, err := io.WriteString(writer, c.logs)
 	return err
 }

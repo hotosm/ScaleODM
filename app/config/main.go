@@ -107,8 +107,15 @@ var AWS_S3_SECRET_NAME = cmp.Or(
 var SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST = envBool("SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST", false)
 var SCALEODM_ALLOWED_S3_ENDPOINTS = strings.TrimSpace(os.Getenv("SCALEODM_ALLOWED_S3_ENDPOINTS"))
 
-// S3 bucket used by Argo archiveLogs for post-GC log lookup.
+// Argo archiveLogs lookup. Bucket enables the post-GC log fallback; the
+// access/secret pair is optional - when unset, the runtime AWS creds are
+// reused against the same bucket. Endpoint/region default to AWS_S3_ENDPOINT
+// / AWS_DEFAULT_REGION.
 var SCALEODM_ARGO_ARCHIVE_LOG_BUCKET = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_BUCKET"))
+var SCALEODM_ARGO_ARCHIVE_LOG_ENDPOINT = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_ENDPOINT"))
+var SCALEODM_ARGO_ARCHIVE_LOG_REGION = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_REGION"))
+var SCALEODM_ARGO_ARCHIVE_LOG_ACCESS_KEY_ID = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_ACCESS_KEY_ID"))
+var SCALEODM_ARGO_ARCHIVE_LOG_SECRET_ACCESS_KEY = strings.TrimSpace(os.Getenv("SCALEODM_ARGO_ARCHIVE_LOG_SECRET_ACCESS_KEY"))
 
 var SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS = envInt("SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS", 300)
 
