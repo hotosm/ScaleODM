@@ -101,14 +101,17 @@ type interpolationPoint struct {
 	ramGiB float64
 }
 
+// Peak RAM fit: ~0.042*images + 16 GiB (from testing). The ~16 GiB SIFT/OpenSFM
+// baseline dominates small jobs. MEMORY_LIMIT_MARGIN_PERCENT pads the limit.
 var odmMemoryEstimationPoints = []interpolationPoint{
-	{images: 40, ramGiB: 4},
-	{images: 250, ramGiB: 16},
-	{images: 500, ramGiB: 32},
-	{images: 1500, ramGiB: 64},
-	{images: 2500, ramGiB: 128},
-	{images: 3500, ramGiB: 192},
-	{images: 5000, ramGiB: 256},
+	{images: 40, ramGiB: 18},
+	{images: 200, ramGiB: 25},
+	{images: 500, ramGiB: 37},
+	{images: 1000, ramGiB: 58},
+	{images: 1500, ramGiB: 79},
+	{images: 2500, ramGiB: 121},
+	{images: 3500, ramGiB: 163},
+	{images: 5000, ramGiB: 227},
 }
 
 // NewDefaultODMConfig returns default configuration
@@ -332,27 +335,30 @@ func estimateWorkspacePVCSize(imageTotalBytes int64, imageCount int, odmFlags []
 	return fmt.Sprintf("%dGi", int64(math.Ceil(estimatedGiB))), true
 }
 
-// flagWorkspaceProfile returns the workspace multiplier and minimum size.
-// Keep precedence aligned with flagMemoryMultiplier.
-func flagWorkspaceProfile(odmFlags []string) (multiplier, minGiB float64) {
+// flagWorkspaceProfile returns the bytes multiplier, GiB-per-image floor,
+// and min size for the ODM profile. Precedence matches flagMemoryMultiplier.
+func flagWorkspaceProfile(odmFlags []string) (multiplier, gibPerImage, minGiB float64) {
 	for _, f := range odmFlags {
 		if f == "--fast-orthophoto" {
 			return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER,
+				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_GIB_PER_IMAGE,
 				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
 		}
 	}
 	for _, f := range odmFlags {
 		if f == "--dsm" || f == "--dtm" {
 			return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER,
+				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_GIB_PER_IMAGE,
 				config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB
 		}
 	}
 	return config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER,
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE,
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
 }
 
 func estimateWorkspaceGiB(imageTotalBytes int64, imageCount int, odmFlags []string) float64 {
-	multiplier, minGiB := flagWorkspaceProfile(odmFlags)
+	multiplier, gibPerImage, minGiB := flagWorkspaceProfile(odmFlags)
 	maxGiB := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
 	if multiplier <= 0 || maxGiB <= 0 || maxGiB < minGiB {
 		return 0
@@ -361,16 +367,26 @@ func estimateWorkspaceGiB(imageTotalBytes int64, imageCount int, odmFlags []stri
 	bytesEstimate := float64(imageTotalBytes)
 	if bytesEstimate <= 0 && imageCount > 0 {
 		fallbackMBPerImage := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE
-		if fallbackMBPerImage <= 0 {
-			return 0
+		if fallbackMBPerImage > 0 {
+			bytesEstimate = float64(imageCount) * fallbackMBPerImage * 1024 * 1024
 		}
-		bytesEstimate = float64(imageCount) * fallbackMBPerImage * 1024 * 1024
 	}
-	if bytesEstimate <= 0 {
+
+	bytesBasedGiB := (bytesEstimate / (1024 * 1024 * 1024)) * multiplier
+
+	// Intermediates scale with image count, not raw bytes (~66 MB/image in
+	// standard mode, from testing). Without this floor, small-image datasets get
+	// under-provisioned.
+	countBasedGiB := 0.0
+	if gibPerImage > 0 && imageCount > 0 {
+		countBasedGiB = float64(imageCount) * gibPerImage
+	}
+
+	gibEstimate := math.Max(bytesBasedGiB, countBasedGiB)
+	if gibEstimate <= 0 {
 		return 0
 	}
 
-	gibEstimate := (bytesEstimate / (1024 * 1024 * 1024)) * multiplier
 	gibEstimate = clamp(gibEstimate, minGiB, maxGiB)
 	return gibEstimate
 }

@@ -134,14 +134,20 @@ spec:
               value: {{ .Values.config.workflow.workspace.dynamicSize.fastOrtho.multiplier | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
               value: {{ .Values.config.workflow.workspace.dynamicSize.fastOrtho.minGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_GIB_PER_IMAGE
+              value: {{ .Values.config.workflow.workspace.dynamicSize.fastOrtho.gibPerImage | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
               value: {{ .Values.config.workflow.workspace.dynamicSize.standard.multiplier | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
               value: {{ .Values.config.workflow.workspace.dynamicSize.standard.minGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE
+              value: {{ .Values.config.workflow.workspace.dynamicSize.standard.gibPerImage | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER
               value: {{ .Values.config.workflow.workspace.dynamicSize.dsmDtm.multiplier | quote }}
             - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB
               value: {{ .Values.config.workflow.workspace.dynamicSize.dsmDtm.minGiB | quote }}
+            - name: SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_GIB_PER_IMAGE
+              value: {{ .Values.config.workflow.workspace.dynamicSize.dsmDtm.gibPerImage | quote }}
             - name: SCALEODM_WORKFLOW_RETRY_LIMIT
               value: {{ .Values.config.workflow.retryLimit | quote }}
             - name: SCALEODM_WORKFLOW_RETRY_BACKOFF_DURATION

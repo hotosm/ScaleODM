@@ -191,16 +191,22 @@ config:
         # NOTE: even --fast-orthophoto runs full OpenSFM undistortion, which
         # produces uncompressed TIFFs ~5-10x the source JPG size. The multiplier
         # must cover those intermediates, not just the (smaller) fastOrtho outputs.
+        # Final size = max(bytes*multiplier, imageCount*gibPerImage),
+        # clamped to [minGiB, maxGiB]. The count term covers intermediates
+        # which scale per-image (sparse/dense cloud, mesh, DEMs).
         fastOrtho:
           multiplier: 6
-          minGiB: 60
+          minGiB: 20
+          gibPerImage: 0.075
         standard:
           multiplier: 8
-          minGiB: 70
+          minGiB: 30
+          gibPerImage: 0.10
         # DSM/DTM jobs need more space for DEM outputs and intermediates.
         dsmDtm:
           multiplier: 12
           minGiB: 100
+          gibPerImage: 0.15
     retryLimit: 1
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"

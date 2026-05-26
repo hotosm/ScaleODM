@@ -12,7 +12,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func profilePair(m, min float64) [2]float64 { return [2]float64{m, min} }
+func profileTriple(m, gibPerImage, min float64) [3]float64 {
+	return [3]float64{m, gibPerImage, min}
+}
 
 func TestNewDefaultODMConfig(t *testing.T) {
 	projectID := "test-project"
@@ -275,31 +277,37 @@ func TestBuildODMWorkflow_UsesSecretKeyRef(t *testing.T) {
 }
 
 func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
-	assert.InDelta(t, 4, estimateMemoryGiB(40), 0.001)
-	assert.InDelta(t, 16, estimateMemoryGiB(250), 0.001)
-	assert.InDelta(t, 24, estimateMemoryGiB(375), 0.001)
-	assert.InDelta(t, 256, estimateMemoryGiB(5000), 0.001)
-	assert.InDelta(t, 256, estimateMemoryGiB(8000), 0.001)
+	// Below the first point, return the first point's value.
+	assert.InDelta(t, 18, estimateMemoryGiB(40), 0.001)
+	// Interpolation between (200, 25) and (500, 37): ratio=50/300, ram=27.
+	assert.InDelta(t, 27, estimateMemoryGiB(250), 0.001)
+	// Interpolation between (500, 37) and (1000, 58): ratio=200/500=0.4, ram=37+0.4*21=45.4.
+	assert.InDelta(t, 45.4, estimateMemoryGiB(700), 0.001)
+	// At/above the last point, return the last (clamped to max).
+	assert.InDelta(t, 227, estimateMemoryGiB(5000), 0.001)
+	assert.InDelta(t, 227, estimateMemoryGiB(8000), 0.001)
 }
 
 func TestEstimateProcessResourcesFromImageCount_SetsMarginLimit(t *testing.T) {
 	fallback := ContainerResources{}
+	// 250 images interpolates to 27 GiB request; limit = 27 * 1.2 = 32.4 GiB.
 	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
-	assert.Equal(t, "16384Mi", resources.Requests.Memory)
-	assert.Equal(t, "19661Mi", resources.Limits.Memory)
-	assert.Equal(t, "2", resources.Requests.CPU)
-	assert.Equal(t, "3", resources.Limits.CPU)
+	assert.Equal(t, "27648Mi", resources.Requests.Memory) // 27 GiB * 1024
+	assert.Equal(t, "33178Mi", resources.Limits.Memory)   // ceil(27 * 1.2 * 1024)
+	assert.Equal(t, "3375m", resources.Requests.CPU)      // 27 * 0.125 = 3.375 cores
+	assert.Equal(t, "5063m", resources.Limits.CPU)        // ceil(3.375 * 1.5 * 1000)
 	assert.NotEmpty(t, resources.Requests.EphemeralStorage)
 	assert.NotEmpty(t, resources.Limits.EphemeralStorage)
 }
 
 func TestEstimateProcessResourcesFromImageCount_CapsLargeJobCPUByRAMRatio(t *testing.T) {
 	fallback := ContainerResources{}
+	// 5000 images estimates 227 GiB (below the 256 max).
 	resources := estimateProcessResourcesFromImageCount(5000, nil, fallback)
 
-	assert.Equal(t, "262144Mi", resources.Requests.Memory)
-	assert.Equal(t, "32", resources.Requests.CPU)
-	assert.Equal(t, "48", resources.Limits.CPU)
+	assert.Equal(t, "232448Mi", resources.Requests.Memory) // 227 * 1024
+	assert.Equal(t, "28375m", resources.Requests.CPU)      // 227 * 0.125 = 28.375 cores
+	assert.Equal(t, "42563m", resources.Limits.CPU)        // ceil(28.375 * 1.5 * 1000)
 }
 
 func TestFlagMemoryMultiplier(t *testing.T) {
@@ -317,20 +325,20 @@ func TestFlagMemoryMultiplier(t *testing.T) {
 func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing.T) {
 	fallback := ContainerResources{}
 
-	// --fast-orthophoto halves the request; limit = request * 1.2
+	// 250 images base = 27 GiB; --fast-orthophoto halves: 13.5 GiB; limit = req * 1.2
 	fast := estimateProcessResourcesFromImageCount(250, []string{"--fast-orthophoto"}, fallback)
-	assert.Equal(t, "8192Mi", fast.Requests.Memory) // 16 GiB * 0.5
-	assert.Equal(t, "9831Mi", fast.Limits.Memory)   // 8 GiB * 1.2
+	assert.Equal(t, "13824Mi", fast.Requests.Memory) // 13.5 GiB * 1024
+	assert.Equal(t, "16589Mi", fast.Limits.Memory)   // ceil(13.5 * 1.2 * 1024)
 
-	// --dsm scales up by 1.5x
+	// --dsm scales up by 1.5x: 27 * 1.5 = 40.5 GiB
 	dsm := estimateProcessResourcesFromImageCount(250, []string{"--dsm"}, fallback)
-	assert.Equal(t, "24576Mi", dsm.Requests.Memory) // 16 GiB * 1.5
-	assert.Equal(t, "29492Mi", dsm.Limits.Memory)   // 24 GiB * 1.2
+	assert.Equal(t, "41472Mi", dsm.Requests.Memory) // 40.5 * 1024
+	assert.Equal(t, "49767Mi", dsm.Limits.Memory)   // ceil(40.5 * 1.2 * 1024)
 
-	// small job with --dsm must not fall below memoryMinGiB (4 GiB)
+	// Small job (7 images) returns the first table point (18 GiB) * dsm 1.5 = 27 GiB.
 	small := estimateProcessResourcesFromImageCount(7, []string{"--dsm"}, fallback)
-	assert.Equal(t, "6144Mi", small.Requests.Memory) // 4 GiB * 1.5 = 6 GiB
-	assert.Equal(t, "7373Mi", small.Limits.Memory)   // 6 GiB * 1.2
+	assert.Equal(t, "27648Mi", small.Requests.Memory) // 27 * 1024
+	assert.Equal(t, "33178Mi", small.Limits.Memory)   // ceil(27 * 1.2 * 1024)
 }
 
 func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
@@ -552,57 +560,69 @@ func TestApplyDynamicWorkspaceSize_EnabledPVCComputesSize(t *testing.T) {
 
 func TestFlagWorkspaceProfile(t *testing.T) {
 	prevFastM := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER
+	prevFastG := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_GIB_PER_IMAGE
 	prevFastMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB
 	prevStdM := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
+	prevStdG := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE
 	prevStdMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
 	prevDemM := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER
+	prevDemG := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_GIB_PER_IMAGE
 	prevDemMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER = 3
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_GIB_PER_IMAGE = 0.05
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB = 30
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = 6
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = 0.10
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = 50
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER = 10
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_GIB_PER_IMAGE = 0.20
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB = 90
 	t.Cleanup(func() {
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MULTIPLIER = prevFastM
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_GIB_PER_IMAGE = prevFastG
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FAST_ORTHO_MIN_GIB = prevFastMin
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = prevStdM
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = prevStdG
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = prevStdMin
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MULTIPLIER = prevDemM
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_GIB_PER_IMAGE = prevDemG
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_DSM_DTM_MIN_GIB = prevDemMin
 	})
 
 	// standard profile for nil and non-special flags
-	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile(nil)))
-	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--orthophoto-resolution=5"})))
-	assert.Equal(t, [2]float64{6, 50}, profilePair(flagWorkspaceProfile([]string{"--pc-quality", "ultra"})))
+	assert.Equal(t, [3]float64{6, 0.10, 50}, profileTriple(flagWorkspaceProfile(nil)))
+	assert.Equal(t, [3]float64{6, 0.10, 50}, profileTriple(flagWorkspaceProfile([]string{"--orthophoto-resolution=5"})))
+	assert.Equal(t, [3]float64{6, 0.10, 50}, profileTriple(flagWorkspaceProfile([]string{"--pc-quality", "ultra"})))
 
 	// --dsm/--dtm gets the larger DSM/DTM profile (surface rasters need ~2x
 	// disk over the standard pipeline)
-	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dsm"})))
-	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dtm"})))
-	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--dsm", "--dtm"})))
-	assert.Equal(t, [2]float64{10, 90}, profilePair(flagWorkspaceProfile([]string{"--orthophoto-resolution=5", "--dsm"})))
+	assert.Equal(t, [3]float64{10, 0.20, 90}, profileTriple(flagWorkspaceProfile([]string{"--dsm"})))
+	assert.Equal(t, [3]float64{10, 0.20, 90}, profileTriple(flagWorkspaceProfile([]string{"--dtm"})))
+	assert.Equal(t, [3]float64{10, 0.20, 90}, profileTriple(flagWorkspaceProfile([]string{"--dsm", "--dtm"})))
+	assert.Equal(t, [3]float64{10, 0.20, 90}, profileTriple(flagWorkspaceProfile([]string{"--orthophoto-resolution=5", "--dsm"})))
 
 	// fast-orthophoto profile
-	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--fast-orthophoto"})))
+	assert.Equal(t, [3]float64{3, 0.05, 30}, profileTriple(flagWorkspaceProfile([]string{"--fast-orthophoto"})))
 	// fast-orthophoto wins over --dsm/--dtm because it skips the dense
 	// reconstruction those flags depend on.
-	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--fast-orthophoto", "--dsm"})))
-	assert.Equal(t, [2]float64{3, 30}, profilePair(flagWorkspaceProfile([]string{"--dtm", "--fast-orthophoto"})))
+	assert.Equal(t, [3]float64{3, 0.05, 30}, profileTriple(flagWorkspaceProfile([]string{"--fast-orthophoto", "--dsm"})))
+	assert.Equal(t, [3]float64{3, 0.05, 30}, profileTriple(flagWorkspaceProfile([]string{"--dtm", "--fast-orthophoto"})))
 }
 
 func TestEstimateWorkspaceGiB_PrefersBytesOverCountFallback(t *testing.T) {
 	prevMultiplier := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
+	prevGibPerImage := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE
 	prevMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
 	prevMax := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
 	prevFallback := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = 1
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = 0
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = 1
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = 1024
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE = 20
 	t.Cleanup(func() {
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = prevMultiplier
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = prevGibPerImage
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = prevMin
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = prevMax
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE = prevFallback
@@ -615,15 +635,18 @@ func TestEstimateWorkspaceGiB_PrefersBytesOverCountFallback(t *testing.T) {
 
 func TestEstimateWorkspaceGiB_UsesCountFallbackDefault20MB(t *testing.T) {
 	prevMultiplier := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
+	prevGibPerImage := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE
 	prevMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
 	prevMax := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
 	prevFallback := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = 1
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = 0
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = 1
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = 1024
 	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE = 20
 	t.Cleanup(func() {
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = prevMultiplier
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = prevGibPerImage
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = prevMin
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = prevMax
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_FALLBACK_MB_PER_IMAGE = prevFallback
@@ -632,6 +655,38 @@ func TestEstimateWorkspaceGiB_UsesCountFallbackDefault20MB(t *testing.T) {
 	gib := estimateWorkspaceGiB(0, 100, nil)
 
 	assert.InDelta(t, 1.953125, gib, 0.0001)
+}
+
+// TestEstimateWorkspaceGiB_CountFloorBeatsSmallBytes covers the case the
+// count-based floor was added for: small image bytes would size the workspace
+// well below the actual intermediate-artifact growth measured from tests.
+func TestEstimateWorkspaceGiB_CountFloorBeatsSmallBytes(t *testing.T) {
+	prevMultiplier := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER
+	prevGibPerImage := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE
+	prevMin := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB
+	prevMax := config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = 8
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = 0.10
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = 1
+	config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = 1024
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MULTIPLIER = prevMultiplier
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_GIB_PER_IMAGE = prevGibPerImage
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_STANDARD_MIN_GIB = prevMin
+		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = prevMax
+	})
+
+	const gib = int64(1024 * 1024 * 1024)
+
+	// 1000 small images totalling 5 GiB: bytes-based = 5 * 8 = 40 GiB,
+	// count-based = 1000 * 0.10 = 100 GiB; max() picks 100.
+	smallImages := estimateWorkspaceGiB(5*gib, 1000, nil)
+	assert.InDelta(t, 100.0, smallImages, 0.001)
+
+	// 1000 large images totalling 25 GiB: bytes-based = 25 * 8 = 200 GiB,
+	// count-based = 100 GiB; max() picks 200, so the floor is inert here.
+	largeImages := estimateWorkspaceGiB(25*gib, 1000, nil)
+	assert.InDelta(t, 200.0, largeImages, 0.001)
 }
 
 func TestEstimateWorkspacePVCSize_ClampsToMinAndMax(t *testing.T) {

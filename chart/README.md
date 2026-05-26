@@ -163,11 +163,11 @@ Dynamic workspace sizing:
 
 Dynamic sizing is enabled by default and selects a profile based on ODM flags (mirrors the flag-aware RAM sizing logic):
 
-| Profile | Trigger | Default multiplier | Default min |
-|---|---|---|---|
-| `fastOrtho` | `--fast-orthophoto` | 6× | 60 GiB |
-| `dsmDtm` | `--dsm` or `--dtm` | 12× | 100 GiB |
-| `standard` | everything else | 8× | 70 GiB |
+| Profile | Trigger | Default multiplier | Default GiB/image | Default min |
+|---|---|---|---|---|
+| `fastOrtho` | `--fast-orthophoto` | 6× | 0.075 | 20 GiB |
+| `dsmDtm` | `--dsm` or `--dtm` | 12× | 0.15 | 100 GiB |
+| `standard` | everything else | 8× | 0.10 | 30 GiB |
 
 Sizing precedence:
 
@@ -175,7 +175,7 @@ Sizing precedence:
 2. If workspace is not PVC, dynamic sizing is ignored
 3. If dynamic sizing is disabled, the static `workspace.size` value is used
 4. If enabled, ScaleODM estimates from `image_total_bytes` first, then `image_count × fallbackMBPerImage` (default `20`) as fallback
-5. The profile multiplier is applied, clamped to the profile's `minGiB` and the global `maxGiB`, rounded up to whole GiB
+5. The size is `max(bytes × multiplier, image_count × gibPerImage)`, clamped to `[minGiB, maxGiB]` and rounded up to whole GiB. The count-based term covers intermediates that scale per-image rather than per-byte
 
 > **Note on retries and disk-full failures:** workflow retries reuse the same PVC. If ODM fills the volume on the first attempt, the retry will also fail at the download step. Dynamic sizing is the primary mitigation - size the workspace correctly upfront.
 
@@ -380,10 +380,13 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.workspace.dynamicSize.fallbackMBPerImage` | Fallback MB/image when byte totals unavailable | `20` |
 | `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `6` |
 | `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `60` |
+| `config.workflow.workspace.dynamicSize.fastOrtho.gibPerImage` | Count-based GiB-per-image floor for fastOrtho jobs | `0.075` |
 | `config.workflow.workspace.dynamicSize.dsmDtm.multiplier` | Workspace multiplier for `--dsm`/`--dtm` jobs | `12` |
 | `config.workflow.workspace.dynamicSize.dsmDtm.minGiB` | Minimum GiB for DSM/DTM profile | `100` |
+| `config.workflow.workspace.dynamicSize.dsmDtm.gibPerImage` | Count-based GiB-per-image floor for DSM/DTM jobs | `0.15` |
 | `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs | `8` |
 | `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `70` |
+| `config.workflow.workspace.dynamicSize.standard.gibPerImage` | Count-based GiB-per-image floor for standard jobs | `0.10` |
 | `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `21600` |
 | `config.workflow.retryLimit` | Number of retry attempts on failure | `1` |
 | `config.workflow.retryBackoffDuration` | Initial backoff wait between retries | `"60s"` |
