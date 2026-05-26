@@ -243,18 +243,12 @@ func (c *Client) streamArchivedProcessLog(ctx context.Context, workflowName stri
 		return nil
 	}
 
-	logContent, err := s3.GetArgoArchiveContainerLog(ctx, archiveClient, bucket, c.namespace, workflowName, archivedProcessLogContainer)
-	if err != nil {
+	if err := s3.GetArgoArchiveContainerLog(ctx, archiveClient, bucket, c.namespace, workflowName, archivedProcessLogContainer, writer); err != nil {
 		if errors.Is(err, s3.ErrArgoArchiveLogsNotFound) {
 			fmt.Fprintln(writer, "No archived logs for this workflow.")
 			return nil
 		}
 		return fmt.Errorf("fetch archived logs: %w", err)
-	}
-
-	_, err = writer.Write([]byte(logContent))
-	if err != nil {
-		return fmt.Errorf("write logs: %w", err)
 	}
 
 	return nil

@@ -171,18 +171,20 @@ func parseS3Path(s3Path string) (string, string, error) {
 }
 
 // GetArgoArchiveContainerLog reads one container's archived stdout for a
-// workflow. Argo's key format is {namespace}/{workflow}/{pod}/{container}.log,
-// so we list the workflow prefix and concatenate matching keys in sorted
-// order - that yields retry pods chronologically.
-func GetArgoArchiveContainerLog(ctx context.Context, client *minio.Client, bucket, namespace, workflowName, container string) (string, error) {
+// workflow and streams it to writer. Argo's key format is
+// {namespace}/{workflow}/{pod}/{container}.log, so we list the workflow prefix
+// and copy matching keys in sorted order - that yields retry pods
+// chronologically. Each object is copied to writer with io.Copy so memory
+// stays flat regardless of log size.
+func GetArgoArchiveContainerLog(ctx context.Context, client *minio.Client, bucket, namespace, workflowName, container string, writer io.Writer) error {
 	if strings.TrimSpace(bucket) == "" {
-		return "", ErrArgoArchiveBucketUnset
+		return ErrArgoArchiveBucketUnset
 	}
 	if strings.TrimSpace(namespace) == "" || strings.TrimSpace(workflowName) == "" {
-		return "", fmt.Errorf("namespace and workflowName must be non-empty")
+		return fmt.Errorf("namespace and workflowName must be non-empty")
 	}
 	if strings.TrimSpace(container) == "" {
-		return "", fmt.Errorf("container must be non-empty")
+		return fmt.Errorf("container must be non-empty")
 	}
 
 	prefix := fmt.Sprintf("%s/%s/", namespace, workflowName)
@@ -194,7 +196,7 @@ func GetArgoArchiveContainerLog(ctx context.Context, client *minio.Client, bucke
 		Recursive: true,
 	}) {
 		if obj.Err != nil {
-			return "", fmt.Errorf("failed to list archive logs: %w", obj.Err)
+			return fmt.Errorf("failed to list archive logs: %w", obj.Err)
 		}
 		if !strings.HasSuffix(obj.Key, suffix) {
 			continue
@@ -203,28 +205,27 @@ func GetArgoArchiveContainerLog(ctx context.Context, client *minio.Client, bucke
 	}
 
 	if len(keys) == 0 {
-		return "", ErrArgoArchiveLogsNotFound
+		return ErrArgoArchiveLogsNotFound
 	}
 
 	sort.Strings(keys)
 
-	var out strings.Builder
 	for _, key := range keys {
-		fmt.Fprintf(&out, "=== %s ===\n", strings.TrimPrefix(key, prefix))
+		fmt.Fprintf(writer, "=== %s ===\n", strings.TrimPrefix(key, prefix))
 
 		stream, err := client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
 		if err != nil {
-			fmt.Fprintf(&out, "(failed to open: %v)\n", err)
+			fmt.Fprintf(writer, "(failed to open: %v)\n", err)
 			continue
 		}
-		if _, err := io.Copy(&out, stream); err != nil {
-			fmt.Fprintf(&out, "(failed to read: %v)\n", err)
+		if _, err := io.Copy(writer, stream); err != nil {
+			fmt.Fprintf(writer, "(failed to read: %v)\n", err)
 		}
 		stream.Close()
-		out.WriteString("\n")
+		fmt.Fprintln(writer)
 	}
 
-	return out.String(), nil
+	return nil
 }
 
 // ErrArgoArchiveBucketUnset means no archive bucket is configured.

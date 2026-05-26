@@ -67,7 +67,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 	mux.Handle("GET /ui/api/tasks", h.withSecurityHeaders(http.HandlerFunc(h.handleTasksJSON)))
 	mux.Handle("GET /ui/api/tasks/{uuid}", h.withSecurityHeaders(http.HandlerFunc(h.handleTaskDetailJSON)))
-	mux.Handle("GET /ui/api/tasks/{uuid}/output", h.withSecurityHeaders(http.HandlerFunc(h.handleTaskOutputJSON)))
+	mux.Handle("GET /ui/api/tasks/{uuid}/output", h.withSecurityHeaders(http.HandlerFunc(h.handleTaskOutput)))
 
 	mux.Handle("GET /ui/static/", h.withSecurityHeaders(http.StripPrefix("/ui/static/", h.static)))
 }
@@ -260,68 +260,44 @@ func (h *Handler) handleTaskDetailJSON(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, toTaskDetail(job, time.Now().UTC()))
 }
 
-func (h *Handler) handleTaskOutputJSON(w http.ResponseWriter, r *http.Request) {
+// handleTaskOutput streams the workflow's log directly to the client as
+// text/plain. The chunked copy keeps per-request memory flat regardless of
+// log size - buffering the whole log in RAM OOM'd the pod at ~100MB+ jobs.
+func (h *Handler) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 	uuid := strings.TrimSpace(r.PathValue("uuid"))
 	if uuid == "" {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
-		return
-	}
-	line, err := parseLine(r.URL.Query().Get("line"))
-	if err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		http.NotFound(w, r)
 		return
 	}
 
 	job, err := h.metadataStore.GetJob(r.Context(), uuid)
 	if err != nil {
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load task"})
+		http.Error(w, "failed to load task", http.StatusInternalServerError)
 		return
 	}
 	if job == nil {
-		writeJSON(w, http.StatusNotFound, map[string]string{"error": "task not found"})
+		http.NotFound(w, r)
 		return
 	}
 
-	output, err := h.loadTaskOutput(r.Context(), job)
-	if err != nil {
-		log.Printf("GET /ui/api/tasks/%s/output: failed to load logs: %v", uuid, err)
-		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to load task output"})
-		return
-	}
-
-	lines := strings.Split(output, "\n")
-	if line < len(lines) {
-		lines = lines[line:]
-	} else {
-		lines = []string{}
-	}
-
-	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"uuid":   uuid,
-		"line":   line,
-		"output": lines,
-		"text":   strings.Join(lines, "\n"),
-	})
-}
-
-func (h *Handler) loadTaskOutput(ctx context.Context, job *meta.JobMetadata) (string, error) {
 	if h.workflow == nil {
-		return "", errors.New("workflow client not initialized")
+		http.Error(w, "workflow client not initialized", http.StatusInternalServerError)
+		return
 	}
 
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+
+	var streamErr error
 	if strings.TrimSpace(job.WriteS3Path) != "" {
-		var builder strings.Builder
-		if err := h.workflow.GetWorkflowLogsWithArchiveFallback(ctx, job.WorkflowName, &builder); err != nil {
-			return "", err
-		}
-		return builder.String(), nil
+		streamErr = h.workflow.GetWorkflowLogsWithArchiveFallback(r.Context(), job.WorkflowName, w)
+	} else {
+		streamErr = h.workflow.GetWorkflowLogs(r.Context(), job.WorkflowName, w)
 	}
-
-	var builder strings.Builder
-	if err := h.workflow.GetWorkflowLogs(ctx, job.WorkflowName, &builder); err != nil {
-		return "", err
+	if streamErr != nil {
+		// Headers may already be flushed - we can't reset status here, just log.
+		log.Printf("GET /ui/api/tasks/%s/output: failed to stream logs: %v", uuid, streamErr)
 	}
-	return builder.String(), nil
 }
 
 func parseMetadataMap(metadataJSON []byte) map[string]interface{} {
@@ -349,21 +325,6 @@ func parseLimit(raw string) (int, error) {
 	}
 	if value > maxLimit {
 		return maxLimit, nil
-	}
-	return value, nil
-}
-
-func parseLine(raw string) (int, error) {
-	raw = strings.TrimSpace(raw)
-	if raw == "" {
-		return 0, nil
-	}
-	value, err := strconv.Atoi(raw)
-	if err != nil {
-		return 0, errors.New("invalid line")
-	}
-	if value < 0 {
-		return 0, errors.New("line must be 0 or greater")
 	}
 	return value, nil
 }

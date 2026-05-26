@@ -3,16 +3,15 @@
   if (output && output.dataset.outputUrl) {
     const loadOutput = async () => {
       try {
-        const response = await fetch(output.dataset.outputUrl + "?line=0", {
-          headers: { Accept: "application/json" },
+        const response = await fetch(output.dataset.outputUrl, {
+          headers: { Accept: "text/plain" },
           cache: "no-store",
         });
         if (!response.ok) {
           output.textContent = "Failed to load logs (" + response.status + ")";
           return;
         }
-        const payload = await response.json();
-        output.textContent = payload.text || "";
+        output.textContent = await response.text();
       } catch (error) {
         output.textContent = "Failed to load logs";
       }

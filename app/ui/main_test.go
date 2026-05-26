@@ -240,40 +240,34 @@ func TestMissingTaskReturns404(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, w.Code)
 }
 
-func TestTaskOutputLineParsing(t *testing.T) {
+func TestTaskOutputStreamsPlainText(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
 	_, err := store.CreateJob(ctx, "wf-ui-5", "project-output", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-5/output?line=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-5/output", nil)
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, req)
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "line2")
-	assert.NotContains(t, w.Body.String(), "line0")
-
-	req = httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-5/output?line=-1", nil)
-	w = httptest.NewRecorder()
-	server.ServeHTTP(w, req)
-	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.True(t, strings.HasPrefix(w.Header().Get("Content-Type"), "text/plain"))
+	assert.Equal(t, "line0\nline1\nline2\nline3", w.Body.String())
 }
 
-func TestTaskOutputWithInvalidS3PathFallsBackToWorkflowLogs(t *testing.T) {
+func TestTaskOutputWithWriteS3PathUsesArchiveFallback(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-7", "project-output", "s3://bucket/in/", "invalid-path", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-7", "project-output", "s3://bucket/in/", "s3://bucket/out/", []string{"--fast-orthophoto"}, "us-east-1")
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-7/output?line=0", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-7/output", nil)
 	w := httptest.NewRecorder()
 	server.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "line0")
-	assert.Contains(t, w.Body.String(), "line3")
+	assert.Equal(t, "line0\nline1\nline2\nline3", w.Body.String())
 }
 
 func TestTaskOutputWithoutWorkflowClientReturns500(t *testing.T) {
