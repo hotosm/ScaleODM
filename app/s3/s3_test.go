@@ -237,6 +237,15 @@ func TestGenerateUploadScript_TestWriteFailureSurvivesErrexit(t *testing.T) {
 	assert.NotContains(t, script, "TEST_OUTPUT=$(rclone copyto \"$TEST_FILE\" \"$TEST_OBJECT\" 2>&1)\nTEST_EXIT_CODE=$?")
 }
 
+func TestGenerateUploadScript_ExcludesUndistortedOpenSfMImages(t *testing.T) {
+	script := GenerateUploadScript("s3://bucket/output/")
+
+	assert.Contains(t, script, `--exclude ".rclone/**"`)
+	assert.Contains(t, script, `--exclude "opensfm/undistorted/**"`)
+	assert.Contains(t, script, `--exclude "**/opensfm/undistorted/**"`)
+	assert.Contains(t, script, `rclone copy "$SRC_DIR" "$S3_REMOTE"`)
+}
+
 func TestRenderRcloneFilterFile_OrderingAndFormat(t *testing.T) {
 	out := renderRcloneFilterFile([]string{"odm_orthophoto/**", "all.zip"})
 

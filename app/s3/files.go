@@ -37,6 +37,26 @@ var imageIncludePatterns = []string{
 	"*.TAR",
 }
 
+var uploadExcludePatterns = []string{
+	".rclone/**",
+	"opensfm/undistorted/**",
+	"**/opensfm/undistorted/**",
+}
+
+func renderRcloneExcludeFlags(excludePatterns []string) string {
+	if len(excludePatterns) == 0 {
+		return ""
+	}
+
+	var b strings.Builder
+	for _, pattern := range excludePatterns {
+		b.WriteString(` --exclude "`)
+		b.WriteString(pattern)
+		b.WriteString(`"`)
+	}
+	return b.String()
+}
+
 // renderRcloneFilterFile builds the contents of a rclone --filter-from file.
 // Order matters: excludes go first (so they win over the catch-all includes
 // below), then includes for image/archive extensions, then a final catch-all
@@ -265,6 +285,8 @@ find "$DEST_DIR" -type f \( -iname "*.jpg" -o -iname "*.jpeg" -o -iname "*.tiff"
 // Credentials are injected via Kubernetes Secret references in the workflow spec
 // Note: We create rclone config on-the-fly to avoid ContainerSet env var filtering of RCLONE_CONFIG_*
 func GenerateUploadScript(destPath string) string {
+	uploadExcludeFlags := renderRcloneExcludeFlags(uploadExcludePatterns)
+
 	return `set -e
 set -o pipefail
 echo "Running final upload..."
@@ -337,7 +359,7 @@ echo "Listing ODM imagery products..."
 ls -lh "$SRC_DIR"
 
 echo "Uploading to S3..."
-if ! rclone copy "$SRC_DIR" "$S3_REMOTE" --exclude ".rclone/**" --progress; then
+if ! rclone copy "$SRC_DIR" "$S3_REMOTE"` + uploadExcludeFlags + ` --progress; then
   echo "Upload failed."
   exit 1
 fi
