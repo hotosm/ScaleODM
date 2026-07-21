@@ -37,6 +37,8 @@ var imageIncludePatterns = []string{
 	"*.TAR",
 }
 
+// We don't exclude other OpenSfM intermediates, but the undistorted images are
+// a full-resolution duplicate of every input photo, so we focus on that for now.
 var uploadExcludePatterns = []string{
 	".rclone/**",
 	"opensfm/undistorted/**",
