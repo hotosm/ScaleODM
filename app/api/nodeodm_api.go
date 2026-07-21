@@ -927,6 +927,10 @@ func (a *API) registerNodeODMRoutes() {
 		if s3Endpoint != "" {
 			metadataUpdates[metadataS3EndpointKey] = s3Endpoint
 		}
+		// Persist the webhook URL so the reconciler can POST a terminal-status notification
+		if strings.TrimSpace(req.Webhook) != "" {
+			metadataUpdates[meta.MetadataWebhookKey] = req.Webhook
+		}
 		if metaErr := a.metadataStore.MergeJobMetadata(ctx, wf.Name, metadataUpdates); metaErr != nil {
 			log.Printf("workflow created but metadata enrichment failed workflow=%q reason=metadata_enrichment_failed error=%v", wf.Name, metaErr)
 		}

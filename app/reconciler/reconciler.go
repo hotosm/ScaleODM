@@ -42,9 +42,11 @@
 package reconciler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"log"
+	"net/http"
 	"sort"
 	"time"
 
@@ -162,12 +164,87 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 		} else {
 			log.Printf("reconciler: synced job %q %s→%s", job.WorkflowName, job.JobStatus, liveStatus)
 			synced++
+			// Notify the caller's webhook, terminal transitions only.
+			if meta.IsTerminalJobStatus(liveStatus) {
+				if hookURL := webhookURLFromMetadata(job.Metadata); hookURL != "" {
+					notifyWebhook(hookURL, job.WorkflowName, meta.NodeODMStatusCode(liveStatus))
+				}
+			}
 		}
 	}
 
 	if synced > 0 || errors > 0 {
 		log.Printf("reconciler: cycle done synced=%d skipped=%d errors=%d total_checked=%d", synced, skipped, errors, len(jobs))
 	}
+}
+
+const (
+	webhookTimeout    = 5 * time.Second
+	webhookMaxRetries = 3
+)
+
+// webhookURLFromMetadata extracts the caller's webhook URL from job metadata,
+// or "" when none was set.
+func webhookURLFromMetadata(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]interface{}
+	if err := json.Unmarshal(raw, &m); err != nil {
+		return ""
+	}
+	if v, ok := m[meta.MetadataWebhookKey].(string); ok {
+		return v
+	}
+	return ""
+}
+
+// notifyWebhook POSTs {uuid, statusCode} to the caller's webhook, best-effort.
+// Fire-and-forget in a goroutine so a slow or unreachable receiver never stalls
+// the reconcile loop.
+func notifyWebhook(hookURL, uuid string, statusCode int) {
+	payload, err := json.Marshal(map[string]interface{}{
+		"uuid":       uuid,
+		"statusCode": statusCode,
+	})
+	if err != nil {
+		log.Printf("reconciler: webhook marshal failed for %q: %v", uuid, err)
+		return
+	}
+
+	go func() {
+		for attempt := 1; attempt <= webhookMaxRetries; attempt++ {
+			// Detached from the loop context so a tick or shutdown can't abort
+			// a delivery mid-flight.
+			reqCtx, cancel := context.WithTimeout(context.Background(), webhookTimeout)
+			req, reqErr := http.NewRequestWithContext(reqCtx, http.MethodPost, hookURL, bytes.NewReader(payload))
+			if reqErr != nil {
+				cancel()
+				log.Printf("reconciler: webhook request build failed for %q: %v", uuid, reqErr)
+				return
+			}
+			req.Header.Set("Content-Type", "application/json")
+
+			resp, doErr := http.DefaultClient.Do(req)
+			if doErr == nil {
+				_ = resp.Body.Close()
+				cancel()
+				if resp.StatusCode < 400 {
+					log.Printf("reconciler: webhook delivered uuid=%q code=%d http=%d", uuid, statusCode, resp.StatusCode)
+					return
+				}
+				log.Printf("reconciler: webhook attempt %d for %q returned HTTP %d", attempt, uuid, resp.StatusCode)
+			} else {
+				cancel()
+				log.Printf("reconciler: webhook attempt %d for %q failed: %v", attempt, uuid, doErr)
+			}
+
+			if attempt < webhookMaxRetries {
+				time.Sleep(time.Duration(attempt) * time.Second)
+			}
+		}
+		log.Printf("reconciler: webhook giving up for %q after %d attempts", uuid, webhookMaxRetries)
+	}()
 }
 
 // failedNode is the slimmed-down representation of an Argo node we persist to

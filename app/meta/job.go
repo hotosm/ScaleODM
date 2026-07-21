@@ -228,6 +228,36 @@ func (s *Store) updateJobStatus(ctx context.Context, workflowName, status string
 	return nil
 }
 
+// MetadataWebhookKey is the metadata key for the caller's webhook URL.
+const MetadataWebhookKey = "webhook"
+
+// NodeODMStatusCode maps a DB job status to the NodeODM status code
+// (10 queued, 20 running, 30 failed, 40 completed, 50 canceled).
+func NodeODMStatusCode(jobStatus string) int {
+	switch strings.ToLower(strings.TrimSpace(jobStatus)) {
+	case "completed":
+		return 40
+	case "failed":
+		return 30
+	case "canceled":
+		return 50
+	case "running":
+		return 20
+	default: // queued, claimed
+		return 10
+	}
+}
+
+// IsTerminalJobStatus reports whether a job status is terminal (won't change).
+func IsTerminalJobStatus(jobStatus string) bool {
+	switch strings.ToLower(strings.TrimSpace(jobStatus)) {
+	case "completed", "failed", "canceled":
+		return true
+	default:
+		return false
+	}
+}
+
 // MapArgoPhaseToJobStatus converts Argo workflow phase to database job status
 // Returns NodeODM-aligned status labels: 'queued', 'running', 'completed', 'failed', 'canceled'
 func MapArgoPhaseToJobStatus(phase string) string {
