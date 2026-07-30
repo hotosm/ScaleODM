@@ -227,6 +227,22 @@ config:
     # Individual submissions can override this via the capacityType API field.
     capacityType: "spot"
 
+    # Auto-upgrade a spot job to on-demand at or above this image count, so a
+    # spot eviction can't waste a long run. 0 disables. Karpenter mode only.
+    onDemandImageThreshold: 5000
+    # Stamp karpenter.sh/do-not-disrupt on workflow pods so a long ODM job is not
+    # wasted by node consolidation or drift mid-run.
+    doNotDisrupt: true
+
+    # Node scheduling. "karpenter" adds a karpenter.sh/capacity-type selector
+    # and, for spot, a "spot" toleration. "generic" adds no Karpenter
+    # labels/taints, so ScaleODM runs on any cluster. See docs/swap.md.
+    schedulingMode: "karpenter"
+    # Base node selector (both modes), comma-separated "key=value". "" = any node.
+    nodeSelector: "node-type=cpu"
+    # Extra tolerations (both modes), ';'-separated "key=value:Effect".
+    tolerations: ""
+
     # These limits are not used in reality, but only the edge case when 0 images are counted.
     # We use a dynamic pod resource estimator, based on number of images to process.
     resources:
@@ -271,11 +287,20 @@ config:
     memoryLimitMarginPercent: 20
     memoryMinGiB: 4
     memoryMaxGiB: 256
-    # ODM processing is usually constrained by RAM, temporary storage, and I/O
-    # before it scales linearly with CPU. Requesting 1 core per 8GiB keeps large
-    # jobs schedulable while still giving bigger RAM estimates more CPU.
+    # Swap-aware sizing: request = peak / (1 + swapRatio), swap absorbs the peak.
+    # Default 0 (off): a reduced request on a no-swap node just OOMs, so only set
+    # > 0 with a nodeSelector pinning pods to swap nodes. Prod uses 2.0. See
+    # docs/swap.md.
+    swapRatio: 0
+    # Floor for the RAM request after the split.
+    memoryRequestMinGiB: 4
+    # CPU request = RAM request * cpuPerGiB, so CPU never forces a bigger instance
+    # than RAM. 0.125 = 1 vCPU per 8GiB (r-family). cpuLimitMultiplier 0 omits the
+    # CPU limit so ODM bursts to every node core.
     cpuPerGiB: 0.125
     cpuLimitMultiplier: 1.5
+    # Optional safety cap on the CPU request; rarely binds. 0 = off.
+    cpuMaxCores: 0
 
     # Ephemeral storage for the process container. The formula is:
     #   request = max(10 GiB, estimatedRAM * ephemeralGiBPerGiBRAM)

@@ -168,6 +168,16 @@ spec:
               value: {{ .Values.config.workflow.podGCDeleteDelaySeconds | quote }}
             - name: SCALEODM_WORKFLOW_CAPACITY_TYPE
               value: {{ .Values.config.workflow.capacityType | quote }}
+            - name: SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD
+              value: {{ .Values.config.workflow.onDemandImageThreshold | quote }}
+            - name: SCALEODM_WORKFLOW_DO_NOT_DISRUPT
+              value: {{ .Values.config.workflow.doNotDisrupt | quote }}
+            - name: SCALEODM_WORKFLOW_SCHEDULING_MODE
+              value: {{ .Values.config.workflow.schedulingMode | quote }}
+            - name: SCALEODM_WORKFLOW_NODE_SELECTOR
+              value: {{ .Values.config.workflow.nodeSelector | quote }}
+            - name: SCALEODM_WORKFLOW_TOLERATIONS
+              value: {{ .Values.config.workflow.tolerations | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU
               value: {{ .Values.config.workflow.resources.download.requests.cpu | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY
@@ -226,6 +236,8 @@ spec:
               value: {{ .Values.config.processSizing.cpuPerGiB | quote }}
             - name: SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER
               value: {{ .Values.config.processSizing.cpuLimitMultiplier | quote }}
+            - name: SCALEODM_PROCESS_CPU_MAX_CORES
+              value: {{ .Values.config.processSizing.cpuMaxCores | quote }}
             - name: SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM
               value: {{ .Values.config.processSizing.ephemeralGiBPerGiBRAM | quote }}
             - name: SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER
@@ -234,6 +246,10 @@ spec:
               value: {{ .Values.config.processSizing.fastOrthoMemoryMultiplier | quote }}
             - name: SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
               value: {{ .Values.config.processSizing.dsmDtmMemoryMultiplier | quote }}
+            - name: SCALEODM_PROCESS_SWAP_RATIO
+              value: {{ .Values.config.processSizing.swapRatio | quote }}
+            - name: SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB
+              value: {{ .Values.config.processSizing.memoryRequestMinGiB | quote }}
             # Archive log lookup (s3.GetArgoArchiveLogClient). All values come
             # straight from argo.artifactRepository.s3.* so the controller's
             # write config and the API's read config stay in sync.

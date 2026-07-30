@@ -38,6 +38,15 @@ func envInt(key string, fallback int) int {
 	return parsed
 }
 
+// envStringAllowEmpty returns the trimmed env value if the var is set (even to
+// ""), else the fallback. Unlike cmp.Or it lets callers clear a value to "".
+func envStringAllowEmpty(key, fallback string) string {
+	if value, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(value)
+	}
+	return fallback
+}
+
 func envFloat(key string, fallback float64) float64 {
 	value := strings.TrimSpace(os.Getenv(key))
 	if value == "" {
@@ -221,6 +230,37 @@ var SCALEODM_WORKFLOW_CAPACITY_TYPE = cmp.Or(
 	"spot",
 )
 
+// SCALEODM_WORKFLOW_DO_NOT_DISRUPT stamps karpenter.sh/do-not-disrupt on workflow
+// pods so Karpenter won't consolidate or drift the node and waste a long job.
+var SCALEODM_WORKFLOW_DO_NOT_DISRUPT = envBool("SCALEODM_WORKFLOW_DO_NOT_DISRUPT", true)
+
+// SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD upgrades a spot job to on-demand at
+// or above this image count, so a spot eviction can't waste a long run.
+// Karpenter mode only; 0 disables.
+var SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD = envInt("SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD", 5000)
+
+// SCALEODM_WORKFLOW_SCHEDULING_MODE places workflow pods. "karpenter" (default)
+// adds a capacity-type selector and spot toleration; "generic" uses only
+// NODE_SELECTOR/TOLERATIONS below, so ScaleODM runs on any cluster. See
+// docs/swap.md.
+var SCALEODM_WORKFLOW_SCHEDULING_MODE = cmp.Or(
+	strings.TrimSpace(os.Getenv("SCALEODM_WORKFLOW_SCHEDULING_MODE")),
+	"karpenter",
+)
+
+// SCALEODM_WORKFLOW_NODE_SELECTOR is a comma-separated "key=value" node
+// selector for every workflow pod (both modes). "node-type=cpu" matches the
+// Karpenter CPU pool. Set "" for any node, or e.g. "pool=swap".
+var SCALEODM_WORKFLOW_NODE_SELECTOR = envStringAllowEmpty(
+	"SCALEODM_WORKFLOW_NODE_SELECTOR",
+	"node-type=cpu",
+)
+
+// SCALEODM_WORKFLOW_TOLERATIONS is a ';'-separated list of extra tolerations
+// (both modes), each "key=value:Effect" (e.g. "swap=true:NoSchedule"). Omit
+// "=value" for the Exists operator.
+var SCALEODM_WORKFLOW_TOLERATIONS = strings.TrimSpace(os.Getenv("SCALEODM_WORKFLOW_TOLERATIONS"))
+
 var SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU = cmp.Or(os.Getenv("SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU"), "500m")
 var SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY = cmp.Or(os.Getenv("SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY"), "1Gi")
 var SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_EPHEMERAL_STORAGE = cmp.Or(os.Getenv("SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_EPHEMERAL_STORAGE"), "2Gi")
@@ -253,11 +293,24 @@ var SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT = envFloat("SCALEODM_PROCESS_ME
 var SCALEODM_PROCESS_MEMORY_MIN_GIB = envFloat("SCALEODM_PROCESS_MEMORY_MIN_GIB", 4)
 var SCALEODM_PROCESS_MEMORY_MAX_GIB = envFloat("SCALEODM_PROCESS_MEMORY_MAX_GIB", 256)
 
-// ODM process sizing is primarily RAM-driven; CPU does not scale linearly for
-// the largest jobs and high requests can leave pods unschedulable. The default
-// is 1 requested core per 8GiB estimated RAM, with limits controlled below.
+// SCALEODM_PROCESS_SWAP_RATIO enables swap-aware sizing: when > 0, request =
+// peak / (1 + ratio) as RAM and the peak spills to swap (LimitedSwap). Default 0
+// (off): a reduced request on a no-swap node just OOMs, so only set > 0 with a
+// nodeSelector pinning pods to swap nodes. Prod uses 2.0. See docs/swap.md.
+var SCALEODM_PROCESS_SWAP_RATIO = envFloat("SCALEODM_PROCESS_SWAP_RATIO", 0)
+
+// SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB floors the RAM request after the split.
+var SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB = envFloat("SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB", 4)
+
+// CPU request = RAM request * this ratio, so CPU never forces a bigger instance
+// than RAM does. 0.125 = 1 vCPU per 8GiB (r-family ratio).
 var SCALEODM_PROCESS_CPU_PER_GIB = envFloat("SCALEODM_PROCESS_CPU_PER_GIB", 0.125)
+
+// CPU limit = request * this. 0 omits the limit so ODM bursts to every node core.
 var SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER = envFloat("SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER", 1.5)
+
+// Optional safety cap on the CPU request; rarely binds. 0 disables it.
+var SCALEODM_PROCESS_CPU_MAX_CORES = envFloat("SCALEODM_PROCESS_CPU_MAX_CORES", 0)
 var SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM = envFloat("SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM", 1)
 var SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER = envFloat("SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER", 1.2)
 var SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER = envFloat("SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER", 0.5)

@@ -283,31 +283,137 @@ func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
 	assert.InDelta(t, 27, estimateMemoryGiB(250), 0.001)
 	// Interpolation between (500, 37) and (1000, 58): ratio=200/500=0.4, ram=37+0.4*21=45.4.
 	assert.InDelta(t, 45.4, estimateMemoryGiB(700), 0.001)
-	// At/above the last point, return the last (clamped to max).
+	// At the last point, return its value.
 	assert.InDelta(t, 227, estimateMemoryGiB(5000), 0.001)
-	assert.InDelta(t, 227, estimateMemoryGiB(8000), 0.001)
+	// Beyond the table, extrapolate along the last segment slope
+	// (64/1500 = 0.04267/image), clamped by the 256 GiB default max:
+	// 8000 -> 227 + 3000*0.04267 = ~355, clamped to 256.
+	assert.InDelta(t, 256, estimateMemoryGiB(8000), 0.001)
 }
 
-func TestEstimateProcessResourcesFromImageCount_SetsMarginLimit(t *testing.T) {
+func TestEstimateMemoryGiB_ExtrapolatesBeyondTable(t *testing.T) {
+	prev := config.SCALEODM_PROCESS_MEMORY_MAX_GIB
+	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 2048
+	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
+
+	// With the cap raised, 13000 images extrapolate to
+	// 227 + (13000-5000)*0.04267 = ~568 GiB peak.
+	assert.InDelta(t, 568, estimateMemoryGiB(13000), 1.0)
+}
+
+// withSwapRatio sets the swap ratio (default is 0/off) for tests that exercise
+// the request/limit split, restoring it afterward.
+func withSwapRatio(t *testing.T, v float64) {
+	prev := config.SCALEODM_PROCESS_SWAP_RATIO
+	config.SCALEODM_PROCESS_SWAP_RATIO = v
+	t.Cleanup(func() { config.SCALEODM_PROCESS_SWAP_RATIO = prev })
+}
+
+func TestEstimateProcessResourcesFromImageCount_SplitsRequestAndLimit(t *testing.T) {
+	withSwapRatio(t, 2.0)
 	fallback := ContainerResources{}
-	// 250 images interpolates to 27 GiB request; limit = 27 * 1.2 = 32.4 GiB.
+	// 250 images interpolates to a 27 GiB peak. With swap ratio 2.0 the RAM
+	// request is peak/3 = 9 GiB, while the OOM limit stays at the peak plus margin
+	// (27 * 1.2 = 32.4 GiB), backed by swap. CPU/ephemeral still scale off the
+	// peak, not the reduced request.
 	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
-	assert.Equal(t, "27648Mi", resources.Requests.Memory) // 27 GiB * 1024
-	assert.Equal(t, "33178Mi", resources.Limits.Memory)   // ceil(27 * 1.2 * 1024)
-	assert.Equal(t, "3375m", resources.Requests.CPU)      // 27 * 0.125 = 3.375 cores
-	assert.Equal(t, "5063m", resources.Limits.CPU)        // ceil(3.375 * 1.5 * 1000)
+	assert.Equal(t, "9216Mi", resources.Requests.Memory) // 9 GiB * 1024 (27 / 3)
+	assert.Equal(t, "33178Mi", resources.Limits.Memory)  // ceil(27 * 1.2 * 1024)
+	// CPU is requested off the 9 GiB RAM request: 9 * 0.125 = 1.125 cores.
+	assert.Equal(t, "1125m", resources.Requests.CPU)
+	assert.Equal(t, "1688m", resources.Limits.CPU) // ceil(1.125 * 1.5 * 1000)
 	assert.NotEmpty(t, resources.Requests.EphemeralStorage)
 	assert.NotEmpty(t, resources.Limits.EphemeralStorage)
 }
 
-func TestEstimateProcessResourcesFromImageCount_CapsLargeJobCPUByRAMRatio(t *testing.T) {
+func TestEstimateProcessResourcesFromImageCount_ScalesCPUOffRAMRequest(t *testing.T) {
+	withSwapRatio(t, 2.0)
 	fallback := ContainerResources{}
-	// 5000 images estimates 227 GiB (below the 256 max).
+	// 5000 images: 227 GiB peak, RAM request = 75.667 GiB. CPU scales off the
+	// request (not the peak): 75.667 * 0.125 = 9.458 cores.
 	resources := estimateProcessResourcesFromImageCount(5000, nil, fallback)
 
-	assert.Equal(t, "232448Mi", resources.Requests.Memory) // 227 * 1024
-	assert.Equal(t, "28375m", resources.Requests.CPU)      // 227 * 0.125 = 28.375 cores
-	assert.Equal(t, "42563m", resources.Limits.CPU)        // ceil(28.375 * 1.5 * 1000)
+	assert.Equal(t, "77483Mi", resources.Requests.Memory) // ceil(227/3 * 1024)
+	assert.Equal(t, "9459m", resources.Requests.CPU)      // ceil(75.667 * 0.125 * 1000)
+	assert.Equal(t, "14188m", resources.Limits.CPU)       // ceil(9.458 * 1.5 * 1000)
+}
+
+func TestEstimateProcessResourcesFromImageCount_CapsCPUCores(t *testing.T) {
+	withSwapRatio(t, 2.0)
+	prev := config.SCALEODM_PROCESS_CPU_MAX_CORES
+	config.SCALEODM_PROCESS_CPU_MAX_CORES = 5
+	t.Cleanup(func() { config.SCALEODM_PROCESS_CPU_MAX_CORES = prev })
+
+	// 5000 images -> 75.667 GiB request -> 9.458 cores uncapped, capped to 5.
+	resources := estimateProcessResourcesFromImageCount(5000, nil, ContainerResources{})
+	assert.Equal(t, "5", resources.Requests.CPU)
+	assert.Equal(t, "7500m", resources.Limits.CPU) // 5 * 1.5
+}
+
+func TestEstimateProcessResourcesFromImageCount_OmitsCPULimitWhenMultiplierZero(t *testing.T) {
+	prev := config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER
+	config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER = 0
+	t.Cleanup(func() { config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER = prev })
+
+	// With no multiplier the CPU limit is omitted so ODM bursts to the whole node.
+	resources := estimateProcessResourcesFromImageCount(2500, nil, ContainerResources{})
+	assert.NotEmpty(t, resources.Requests.CPU)
+	assert.Empty(t, resources.Limits.CPU)
+}
+
+func TestBuildODMWorkflow_StampsDoNotDisrupt(t *testing.T) {
+	prev := config.SCALEODM_WORKFLOW_DO_NOT_DISRUPT
+	config.SCALEODM_WORKFLOW_DO_NOT_DISRUPT = true
+	t.Cleanup(func() { config.SCALEODM_WORKFLOW_DO_NOT_DISRUPT = prev })
+
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf.Spec.PodMetadata)
+	assert.Equal(t, "true", wf.Spec.PodMetadata.Annotations["karpenter.sh/do-not-disrupt"])
+}
+
+func TestApplyOnDemandUpgrade(t *testing.T) {
+	prevT := config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD
+	prevM := config.SCALEODM_WORKFLOW_SCHEDULING_MODE
+	config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD = 5000
+	config.SCALEODM_WORKFLOW_SCHEDULING_MODE = "karpenter"
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD = prevT
+		config.SCALEODM_WORKFLOW_SCHEDULING_MODE = prevM
+	})
+
+	// Large spot job is upgraded to on-demand.
+	big := &ODMPipelineConfig{ImageCount: 5000, CapacityType: CapacityTypeSpot}
+	applyOnDemandUpgrade(big)
+	assert.Equal(t, CapacityTypeOnDemand, big.CapacityType)
+
+	// Small spot job is left on spot.
+	small := &ODMPipelineConfig{ImageCount: 4999, CapacityType: CapacityTypeSpot}
+	applyOnDemandUpgrade(small)
+	assert.Equal(t, CapacityTypeSpot, small.CapacityType)
+
+	// An explicit on-demand choice is unaffected.
+	od := &ODMPipelineConfig{ImageCount: 100, CapacityType: CapacityTypeOnDemand}
+	applyOnDemandUpgrade(od)
+	assert.Equal(t, CapacityTypeOnDemand, od.CapacityType)
+}
+
+func TestApplyOnDemandUpgrade_GenericModeNoUpgrade(t *testing.T) {
+	prevT := config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD
+	prevM := config.SCALEODM_WORKFLOW_SCHEDULING_MODE
+	config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD = 5000
+	config.SCALEODM_WORKFLOW_SCHEDULING_MODE = "generic"
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD = prevT
+		config.SCALEODM_WORKFLOW_SCHEDULING_MODE = prevM
+	})
+
+	// In generic mode capacity type is ignored, so a large job is not mutated.
+	big := &ODMPipelineConfig{ImageCount: 20000, CapacityType: CapacityTypeSpot}
+	applyOnDemandUpgrade(big)
+	assert.Equal(t, CapacityTypeSpot, big.CapacityType)
 }
 
 func TestFlagMemoryMultiplier(t *testing.T) {
@@ -323,22 +429,25 @@ func TestFlagMemoryMultiplier(t *testing.T) {
 }
 
 func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing.T) {
+	withSwapRatio(t, 2.0)
 	fallback := ContainerResources{}
 
-	// 250 images base = 27 GiB; --fast-orthophoto halves: 13.5 GiB; limit = req * 1.2
+	// 250 images base = 27 GiB peak; --fast-orthophoto halves it to a 13.5 GiB
+	// peak. RAM request = peak/3 = 4.5 GiB; limit = peak * 1.2.
 	fast := estimateProcessResourcesFromImageCount(250, []string{"--fast-orthophoto"}, fallback)
-	assert.Equal(t, "13824Mi", fast.Requests.Memory) // 13.5 GiB * 1024
-	assert.Equal(t, "16589Mi", fast.Limits.Memory)   // ceil(13.5 * 1.2 * 1024)
+	assert.Equal(t, "4608Mi", fast.Requests.Memory) // 4.5 GiB * 1024 (13.5 / 3)
+	assert.Equal(t, "16589Mi", fast.Limits.Memory)  // ceil(13.5 * 1.2 * 1024)
 
-	// --dsm scales up by 1.5x: 27 * 1.5 = 40.5 GiB
+	// --dsm scales the peak up by 1.5x: 27 * 1.5 = 40.5 GiB; request = 13.5 GiB.
 	dsm := estimateProcessResourcesFromImageCount(250, []string{"--dsm"}, fallback)
-	assert.Equal(t, "41472Mi", dsm.Requests.Memory) // 40.5 * 1024
+	assert.Equal(t, "13824Mi", dsm.Requests.Memory) // 13.5 GiB * 1024 (40.5 / 3)
 	assert.Equal(t, "49767Mi", dsm.Limits.Memory)   // ceil(40.5 * 1.2 * 1024)
 
-	// Small job (7 images) returns the first table point (18 GiB) * dsm 1.5 = 27 GiB.
+	// Small job (7 images) returns the first table point (18 GiB) * dsm 1.5 = 27
+	// GiB peak; request = peak/3 = 9 GiB.
 	small := estimateProcessResourcesFromImageCount(7, []string{"--dsm"}, fallback)
-	assert.Equal(t, "27648Mi", small.Requests.Memory) // 27 * 1024
-	assert.Equal(t, "33178Mi", small.Limits.Memory)   // ceil(27 * 1.2 * 1024)
+	assert.Equal(t, "9216Mi", small.Requests.Memory) // 9 GiB * 1024 (27 / 3)
+	assert.Equal(t, "33178Mi", small.Limits.Memory)  // ceil(27 * 1.2 * 1024)
 }
 
 func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
@@ -748,6 +857,100 @@ func TestBuildODMWorkflow_InvalidCapacityTypeFallsBackToSpot(t *testing.T) {
 
 	require.NotNil(t, wf)
 	assert.Equal(t, "spot", wf.Spec.NodeSelector["karpenter.sh/capacity-type"])
+}
+
+func TestBuildNodeScheduling_GenericModeOmitsKarpenter(t *testing.T) {
+	prevMode := config.SCALEODM_WORKFLOW_SCHEDULING_MODE
+	prevSelector := config.SCALEODM_WORKFLOW_NODE_SELECTOR
+	prevTolerations := config.SCALEODM_WORKFLOW_TOLERATIONS
+	config.SCALEODM_WORKFLOW_SCHEDULING_MODE = "generic"
+	config.SCALEODM_WORKFLOW_NODE_SELECTOR = "pool=swap"
+	config.SCALEODM_WORKFLOW_TOLERATIONS = "swap=true:NoSchedule"
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_SCHEDULING_MODE = prevMode
+		config.SCALEODM_WORKFLOW_NODE_SELECTOR = prevSelector
+		config.SCALEODM_WORKFLOW_TOLERATIONS = prevTolerations
+	})
+
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	cfg.CapacityType = CapacityTypeSpot // must be ignored in generic mode
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf)
+	// No Karpenter capacity-type label, no spot toleration.
+	_, hasCapacity := wf.Spec.NodeSelector["karpenter.sh/capacity-type"]
+	assert.False(t, hasCapacity)
+	assert.Equal(t, "swap", wf.Spec.NodeSelector["pool"])
+	require.Len(t, wf.Spec.Tolerations, 1)
+	assert.Equal(t, "swap", wf.Spec.Tolerations[0].Key)
+	assert.Equal(t, "true", wf.Spec.Tolerations[0].Value)
+	assert.Equal(t, apiv1.TaintEffectNoSchedule, wf.Spec.Tolerations[0].Effect)
+}
+
+func TestBuildNodeScheduling_EmptySelectorPlacesAnywhere(t *testing.T) {
+	prevMode := config.SCALEODM_WORKFLOW_SCHEDULING_MODE
+	prevSelector := config.SCALEODM_WORKFLOW_NODE_SELECTOR
+	config.SCALEODM_WORKFLOW_SCHEDULING_MODE = "generic"
+	config.SCALEODM_WORKFLOW_NODE_SELECTOR = ""
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_SCHEDULING_MODE = prevMode
+		config.SCALEODM_WORKFLOW_NODE_SELECTOR = prevSelector
+	})
+
+	selector, tolerations := buildNodeScheduling(CapacityTypeSpot)
+	assert.Empty(t, selector)
+	assert.Empty(t, tolerations)
+}
+
+func TestParseTolerations(t *testing.T) {
+	tolerations := parseTolerations("swap=true:NoSchedule; dedicated:NoExecute; ;bad")
+	require.Len(t, tolerations, 3)
+
+	assert.Equal(t, "swap", tolerations[0].Key)
+	assert.Equal(t, apiv1.TolerationOpEqual, tolerations[0].Operator)
+	assert.Equal(t, "true", tolerations[0].Value)
+	assert.Equal(t, apiv1.TaintEffectNoSchedule, tolerations[0].Effect)
+
+	// No "=value" -> Exists operator.
+	assert.Equal(t, "dedicated", tolerations[1].Key)
+	assert.Equal(t, apiv1.TolerationOpExists, tolerations[1].Operator)
+	assert.Equal(t, apiv1.TaintEffectNoExecute, tolerations[1].Effect)
+
+	// "bad" has no effect separator -> Exists, no effect.
+	assert.Equal(t, "bad", tolerations[2].Key)
+	assert.Equal(t, apiv1.TolerationOpExists, tolerations[2].Operator)
+	assert.Empty(t, string(tolerations[2].Effect))
+}
+
+func TestBurstHeadroomGiB(t *testing.T) {
+	// Burstable: limit 32Gi - request 8Gi = 24Gi headroom.
+	assert.Equal(t, int64(24), burstHeadroomGiB(ContainerResources{
+		Requests: ResourceSpec{Memory: "8Gi"},
+		Limits:   ResourceSpec{Memory: "32Gi"},
+	}))
+	// Guaranteed (request == limit) -> no headroom / no swap.
+	assert.Equal(t, int64(0), burstHeadroomGiB(ContainerResources{
+		Requests: ResourceSpec{Memory: "8Gi"},
+		Limits:   ResourceSpec{Memory: "8Gi"},
+	}))
+	// Unset -> 0.
+	assert.Equal(t, int64(0), burstHeadroomGiB(ContainerResources{}))
+}
+
+func TestBuildODMWorkflow_AnnotatesBurstHeadroom(t *testing.T) {
+	withSwapRatio(t, 2.0)
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+	cfg.ImageCount = 2500
+	cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ODMFlags, cfg.ProcessResources)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf)
+	require.NotNil(t, wf.Annotations)
+	assert.NotEmpty(t, wf.Annotations["scaleodm.hotosm.org/burst-headroom-gib"])
 }
 
 func TestApplyDynamicWorkspaceSize_EmptyDirUnaffected(t *testing.T) {

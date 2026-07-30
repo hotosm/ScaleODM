@@ -3,6 +3,7 @@ package workflows
 import (
 	"context"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -215,6 +216,7 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 		cfg.ProcessResources = estimateProcessResourcesFromImageCount(cfg.ImageCount, cfg.ODMFlags, cfg.ProcessResources)
 	}
 
+	applyOnDemandUpgrade(cfg)
 	applyDynamicWorkspaceSize(cfg)
 
 	wf := c.buildODMWorkflow(cfg)
@@ -250,27 +252,56 @@ func flagMemoryMultiplier(odmFlags []string) float64 {
 }
 
 func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, fallback ContainerResources) ContainerResources {
-	baseRAMGiB := estimateMemoryGiB(imageCount)
-	estimatedRAMGiB := clamp(baseRAMGiB*flagMemoryMultiplier(odmFlags), config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+	// peakRAMGiB is the brief peak working set (RAM + swap), not the resident
+	// set. It sets the memory limit and the CPU/ephemeral sizing.
+	peakRAMGiB := clamp(estimateMemoryGiB(imageCount)*flagMemoryMultiplier(odmFlags), config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+
+	// requestGiB is the real RAM to schedule; swap absorbs the peak. See
+	// SCALEODM_PROCESS_SWAP_RATIO.
+	requestGiB := peakRAMGiB
+	if config.SCALEODM_PROCESS_SWAP_RATIO > 0 {
+		requestGiB = peakRAMGiB / (1 + config.SCALEODM_PROCESS_SWAP_RATIO)
+	}
+	if requestGiB < config.SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB {
+		requestGiB = config.SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB
+	}
+	if requestGiB > peakRAMGiB {
+		requestGiB = peakRAMGiB
+	}
+
 	marginMultiplier := 1 + (config.SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT / 100)
 	if marginMultiplier < 1 {
 		marginMultiplier = 1
 	}
 
-	memoryLimitGiB := estimatedRAMGiB * marginMultiplier
-	cpuRequestCores := math.Max(1, estimatedRAMGiB*config.SCALEODM_PROCESS_CPU_PER_GIB)
-	cpuLimitCores := math.Max(cpuRequestCores, cpuRequestCores*config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER)
-	ephemeralRequestGiB := math.Max(10, estimatedRAMGiB*config.SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM)
+	// memoryLimitGiB is the OOM ceiling (peak + margin), backed by RAM + swap.
+	memoryLimitGiB := peakRAMGiB * marginMultiplier
+
+	// CPU scales off the RAM request so it never forces a bigger instance than
+	// RAM does; ODM uses every node core regardless of the request.
+	cpuRequestCores := math.Max(1, requestGiB*config.SCALEODM_PROCESS_CPU_PER_GIB)
+	if config.SCALEODM_PROCESS_CPU_MAX_CORES > 0 && cpuRequestCores > config.SCALEODM_PROCESS_CPU_MAX_CORES {
+		cpuRequestCores = config.SCALEODM_PROCESS_CPU_MAX_CORES
+	}
+	// A multiplier of 0 omits the CPU limit, letting ODM burst to the whole node.
+	cpuLimit := ""
+	if config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER > 0 {
+		cpuLimitCores := math.Max(cpuRequestCores, cpuRequestCores*config.SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER)
+		cpuLimit = formatCPU(cpuLimitCores)
+	}
+
+	// Ephemeral (ODM scratch) scales off the peak, the true working-set size.
+	ephemeralRequestGiB := math.Max(10, peakRAMGiB*config.SCALEODM_PROCESS_EPHEMERAL_GIB_PER_GIB_RAM)
 	ephemeralLimitGiB := math.Max(ephemeralRequestGiB, ephemeralRequestGiB*config.SCALEODM_PROCESS_EPHEMERAL_LIMIT_MULTIPLIER)
 
 	estimated := ContainerResources{
 		Requests: ResourceSpec{
 			CPU:              formatCPU(cpuRequestCores),
-			Memory:           formatGiBAsMi(estimatedRAMGiB),
+			Memory:           formatGiBAsMi(requestGiB),
 			EphemeralStorage: formatGiBAsMi(ephemeralRequestGiB),
 		},
 		Limits: ResourceSpec{
-			CPU:              formatCPU(cpuLimitCores),
+			CPU:              cpuLimit,
 			Memory:           formatGiBAsMi(memoryLimitGiB),
 			EphemeralStorage: formatGiBAsMi(ephemeralLimitGiB),
 		},
@@ -292,7 +323,12 @@ func estimateMemoryGiB(imageCount int) float64 {
 	}
 	last := odmMemoryEstimationPoints[len(odmMemoryEstimationPoints)-1]
 	if imageCount >= last.images {
-		return clamp(last.ramGiB, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+		// Beyond the table, extrapolate on the last segment's slope instead of
+		// clamping. MEMORY_MAX_GIB still bounds it to what the cluster can schedule.
+		prev := odmMemoryEstimationPoints[len(odmMemoryEstimationPoints)-2]
+		slope := (last.ramGiB - prev.ramGiB) / float64(last.images-prev.images)
+		extrapolated := last.ramGiB + slope*float64(imageCount-last.images)
+		return clamp(extrapolated, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
 	}
 
 	for i := 1; i < len(odmMemoryEstimationPoints); i++ {
@@ -316,6 +352,126 @@ func clamp(v, minV, maxV float64) float64 {
 		return maxV
 	}
 	return v
+}
+
+// buildNodeScheduling returns the node selector and tolerations for workflow
+// pods. The base NODE_SELECTOR/TOLERATIONS apply in every mode; "karpenter"
+// mode also adds capacity-type routing and the spot toleration. "generic" mode
+// adds nothing Karpenter-specific.
+func buildNodeScheduling(capacityType string) (map[string]string, []apiv1.Toleration) {
+	nodeSelector := parseNodeSelector(config.SCALEODM_WORKFLOW_NODE_SELECTOR)
+	tolerations := parseTolerations(config.SCALEODM_WORKFLOW_TOLERATIONS)
+
+	if strings.EqualFold(strings.TrimSpace(config.SCALEODM_WORKFLOW_SCHEDULING_MODE), "generic") {
+		return nodeSelector, tolerations
+	}
+
+	if !IsValidCapacityType(capacityType) {
+		capacityType = CapacityTypeSpot
+	}
+	nodeSelector["karpenter.sh/capacity-type"] = capacityType
+	if capacityType == CapacityTypeSpot {
+		tolerations = append(tolerations, apiv1.Toleration{
+			Key:      "spot",
+			Operator: apiv1.TolerationOpEqual,
+			Value:    "true",
+			Effect:   apiv1.TaintEffectPreferNoSchedule,
+		})
+	}
+	return nodeSelector, tolerations
+}
+
+// parseNodeSelector parses a comma-separated "key=value" list into a label map.
+// Blank or malformed entries are skipped.
+func parseNodeSelector(raw string) map[string]string {
+	selector := map[string]string{}
+	for _, pair := range strings.Split(raw, ",") {
+		pair = strings.TrimSpace(pair)
+		if pair == "" {
+			continue
+		}
+		key, value, found := strings.Cut(pair, "=")
+		key = strings.TrimSpace(key)
+		if !found || key == "" {
+			continue
+		}
+		selector[key] = strings.TrimSpace(value)
+	}
+	return selector
+}
+
+// parseTolerations parses a ';'-separated list of "key=value:Effect" entries.
+// Omitting "=value" uses the Exists operator; omitting ":Effect" matches all.
+func parseTolerations(raw string) []apiv1.Toleration {
+	tolerations := []apiv1.Toleration{}
+	for _, item := range strings.Split(raw, ";") {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+
+		keyval := item
+		effect := ""
+		if idx := strings.LastIndex(item, ":"); idx != -1 {
+			keyval = item[:idx]
+			effect = strings.TrimSpace(item[idx+1:])
+		}
+
+		key, value, hasValue := strings.Cut(keyval, "=")
+		key = strings.TrimSpace(key)
+		value = strings.TrimSpace(value)
+		if key == "" {
+			continue
+		}
+
+		tol := apiv1.Toleration{Key: key}
+		if hasValue && value != "" {
+			tol.Operator = apiv1.TolerationOpEqual
+			tol.Value = value
+		} else {
+			tol.Operator = apiv1.TolerationOpExists
+		}
+		if effect != "" {
+			tol.Effect = apiv1.TaintEffect(effect)
+		}
+		tolerations = append(tolerations, tol)
+	}
+	return tolerations
+}
+
+// burstHeadroomGiB is ceil(memory limit - request) in GiB: how much the pod may
+// use above its request, i.e. the swap the node must provide. 0 when unset or
+// request == limit (Guaranteed, no swap).
+func burstHeadroomGiB(r ContainerResources) int64 {
+	if r.Requests.Memory == "" || r.Limits.Memory == "" {
+		return 0
+	}
+	req, err1 := resource.ParseQuantity(r.Requests.Memory)
+	lim, err2 := resource.ParseQuantity(r.Limits.Memory)
+	if err1 != nil || err2 != nil {
+		return 0
+	}
+	diffBytes := lim.Value() - req.Value()
+	if diffBytes <= 0 {
+		return 0
+	}
+	const giB = 1024 * 1024 * 1024
+	return int64(math.Ceil(float64(diffBytes) / giB))
+}
+
+// applyOnDemandUpgrade pins large spot jobs to on-demand capacity, since a spot
+// eviction partway through a multi-hour run would waste the whole job.
+func applyOnDemandUpgrade(cfg *ODMPipelineConfig) {
+	// Capacity type is ignored in generic mode, so skip the phantom upgrade.
+	if strings.EqualFold(strings.TrimSpace(config.SCALEODM_WORKFLOW_SCHEDULING_MODE), "generic") {
+		return
+	}
+	threshold := config.SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD
+	if threshold > 0 && cfg.ImageCount >= threshold && cfg.CapacityType == CapacityTypeSpot {
+		cfg.CapacityType = CapacityTypeOnDemand
+		log.Printf("capacity upgraded spot->on-demand project=%s images=%d threshold=%d",
+			cfg.ODMProjectID, cfg.ImageCount, threshold)
+	}
 }
 
 func applyDynamicWorkspaceSize(cfg *ODMPipelineConfig) {
@@ -798,19 +954,16 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 		cleanupTemplate.Volumes = append(cleanupTemplate.Volumes, emptyDirWorkspace)
 	}
 
-	capacityType := cfg.CapacityType
-	if !IsValidCapacityType(capacityType) {
-		capacityType = CapacityTypeSpot
-	}
+	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
 
-	tolerations := []apiv1.Toleration{}
-	if capacityType == CapacityTypeSpot {
-		tolerations = append(tolerations, apiv1.Toleration{
-			Key:      "spot",
-			Operator: apiv1.TolerationOpEqual,
-			Value:    "true",
-			Effect:   apiv1.TaintEffectPreferNoSchedule,
-		})
+	// Advertise limit - request so operators can size node swap. Not the actual
+	// LimitedSwap grant (which is proportional); see docs/swap.md.
+	annotations := map[string]string{}
+	if headroom := burstHeadroomGiB(cfg.ProcessResources); headroom > 0 {
+		annotations["scaleodm.hotosm.org/burst-headroom-gib"] = fmt.Sprintf("%d", headroom)
+	}
+	if len(annotations) == 0 {
+		annotations = nil
 	}
 
 	// Create workflow
@@ -818,6 +971,7 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "odm-pipeline-",
 			Namespace:    c.namespace,
+			Annotations:  annotations,
 		},
 		Spec: wfv1.WorkflowSpec{
 			Entrypoint:            "main",
@@ -829,14 +983,19 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 				SecondsAfterSuccess: &ttlSuccess,
 				SecondsAfterFailure: &ttlFailure,
 			},
-			PodGC:     toPodGC(cfg.RuntimeGuardrails.PodGCStrategy, cfg.RuntimeGuardrails.PodGCDeleteDelaySecond),
-			Templates: []wfv1.Template{mainTemplate, cleanupTemplate},
-			NodeSelector: map[string]string{
-				"node-type":                  "cpu",
-				"karpenter.sh/capacity-type": capacityType,
-			},
-			Tolerations: tolerations,
+			PodGC:        toPodGC(cfg.RuntimeGuardrails.PodGCStrategy, cfg.RuntimeGuardrails.PodGCDeleteDelaySecond),
+			Templates:    []wfv1.Template{mainTemplate, cleanupTemplate},
+			NodeSelector: nodeSelector,
+			Tolerations:  tolerations,
 		},
+	}
+
+	// Protect long jobs from voluntary Karpenter disruption (consolidation,
+	// drift). Spot interruption and node failure can still evict; retries cover it.
+	if config.SCALEODM_WORKFLOW_DO_NOT_DISRUPT {
+		wf.Spec.PodMetadata = &wfv1.Metadata{
+			Annotations: map[string]string{"karpenter.sh/do-not-disrupt": "true"},
+		}
 	}
 
 	if useWorkspacePVC {
