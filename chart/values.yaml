@@ -177,7 +177,8 @@ config:
     traceSampleRatio: 0.1
 
   workflow:
-    activeDeadlineSeconds: 21600
+    # 48hrs processing deadline
+    activeDeadlineSeconds: 172800
     workspace:
       mode: auto
       size: "30Gi"
@@ -210,7 +211,7 @@ config:
     retryLimit: 1
     retryBackoffDuration: "60s"
     retryBackoffFactor: "2"
-    retryBackoffMaxDuration: "6h"
+    retryBackoffMaxDuration: "48h"
     # Argo retryStrategy.retryPolicy. Which non-success phases trigger a retry:
     #   OnFailure        - phase=Failed (container exit != 0, e.g. ODM crash)
     #   OnError          - phase=Error  (infra: node loss, image pull)

@@ -387,11 +387,11 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs | `8` |
 | `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `70` |
 | `config.workflow.workspace.dynamicSize.standard.gibPerImage` | Count-based GiB-per-image floor for standard jobs | `0.10` |
-| `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `21600` |
+| `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `172800` |
 | `config.workflow.retryLimit` | Number of retry attempts on failure | `1` |
 | `config.workflow.retryBackoffDuration` | Initial backoff wait between retries | `"60s"` |
 | `config.workflow.retryBackoffFactor` | Exponential backoff factor | `"2"` |
-| `config.workflow.retryBackoffMaxDuration` | Total time window from workflow start in which retries are allowed | `"6h"` |
+| `config.workflow.retryBackoffMaxDuration` | Total time window from workflow start in which retries are allowed | `"48h"` |
 | `config.ui.enabled` | Enable built-in `/ui` operator pages | `false` |
 | `config.ui.readOnly` | Keep UI in read-only mode | `true` |
 | `config.observability.enabled` | Enable OpenTelemetry bootstrap | `false` |

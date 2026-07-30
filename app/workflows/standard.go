@@ -886,7 +886,7 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 
 	activeDeadline := cfg.RuntimeGuardrails.ActiveDeadlineSeconds
 	if activeDeadline <= 0 {
-		activeDeadline = 21600
+		activeDeadline = 172800
 	}
 
 	ttlSuccess := cfg.RuntimeGuardrails.TTLSuccessSeconds
