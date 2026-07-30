@@ -290,8 +290,9 @@ config:
     memoryMaxGiB: 256
     # Swap-aware sizing: request = peak / (1 + swapRatio), swap absorbs the peak.
     # Default 0 (off): a reduced request on a no-swap node just OOMs, so only set
-    # > 0 with a nodeSelector pinning pods to swap nodes. Prod uses 2.0. See
-    # docs/swap.md.
+    # > 0 with a nodeSelector pinning pods to swap nodes. Prod uses 1.0
+    # (request = half the peak); see docs/swap.md for why not the more
+    # aggressive 2.0.
     swapRatio: 0
     # Floor for the RAM request after the split.
     memoryRequestMinGiB: 4

@@ -8,7 +8,7 @@ ScaleODM requests only the steady-state RAM and lets the kernel spill the peak t
 swap under Kubernetes' `LimitedSwap` policy:
 
 ```
-request (real RAM)   = peak / (1 + SWAP_RATIO)          # default 2.0, so ~1/3 of peak
+request (real RAM)   = peak / (1 + SWAP_RATIO)          # prod 1.0, so ~1/2 of peak
 limit   (OOM ceiling) = peak * (1 + MARGIN_PERCENT/100)  # backed by RAM + swap
 ```
 
@@ -110,7 +110,7 @@ the scheduling labels/taints differ.
 
 | Env / Helm value | Default | Purpose |
 |---|---|---|
-| `SCALEODM_PROCESS_SWAP_RATIO` / `processSizing.swapRatio` | `0` (prod `2.0`) | `request = peak/(1+ratio)`; `0` disables. Only set > 0 with a swap-node selector |
+| `SCALEODM_PROCESS_SWAP_RATIO` / `processSizing.swapRatio` | `0` (prod `1.0`) | `request = peak/(1+ratio)`; `0` disables. Only set > 0 with a swap-node selector. Prod ran `2.0` until a node-pressure eviction (see `decisions/0003-swap.md`) showed the resident set exceeds peak/3 |
 | `SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB` / `processSizing.memoryRequestMinGiB` | `4` | floor for the RAM request |
 | `SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT` | `20` | headroom above the peak for the limit |
 | `SCALEODM_PROCESS_CPU_PER_GIB` / `processSizing.cpuPerGiB` | `0.125` | CPU request per GiB of RAM request (0.125 = r-family) |
