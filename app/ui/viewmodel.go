@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 
@@ -59,6 +60,11 @@ type tasksPageData struct {
 	Status     string
 	ProjectID  string
 	Limit      int
+	Page       int
+	HasPrev    bool
+	HasNext    bool
+	PrevQuery  string
+	NextQuery  string
 	BannerText string
 	Version    string
 }
@@ -69,6 +75,26 @@ type taskDetailPageData struct {
 	Task       taskDetail
 	BannerText string
 	Version    string
+}
+
+// buildTasksQuery renders the /ui querystring for a given page while preserving
+// the active status/project/limit filters, so pagination links keep the view.
+func buildTasksQuery(status, projectID string, limit, page int) string {
+	if page < 1 {
+		page = 1
+	}
+	values := url.Values{}
+	if status != "" {
+		values.Set("status", status)
+	}
+	if projectID != "" {
+		values.Set("projectID", projectID)
+	}
+	if limit > 0 {
+		values.Set("limit", strconv.Itoa(limit))
+	}
+	values.Set("page", strconv.Itoa(page))
+	return "?" + values.Encode()
 }
 
 func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {
@@ -101,7 +127,7 @@ func toTaskDetail(job *meta.JobMetadata, now time.Time) taskDetail {
 		WriteS3: job.WriteS3Path,
 		Region:  job.S3Region,
 		Options: parseOptions(job.ODMFlags),
-		Assets:  taskAssets(job.WorkflowName),
+		Assets:  completedAssets(job.WorkflowName, job.JobStatus, job.WriteS3Path),
 	}
 	if job.ErrorMessage != nil {
 		detail.Error = *job.ErrorMessage
@@ -178,14 +204,36 @@ func parseOptions(raw json.RawMessage) []taskOption {
 	return options
 }
 
-func taskAssets(uuid string) []taskAsset {
-	assetNames := []string{"all.zip", "orthophoto.tif", "dsm.tif", "dtm.tif"}
-	assets := make([]taskAsset, 0, len(assetNames))
-	for _, asset := range assetNames {
-		assets = append(assets, taskAsset{
-			Name: asset,
-			URL:  path.Join("/task", url.PathEscape(uuid), "download", asset),
-		})
+// primaryAssetDef maps an output's display name to its download alias: the
+// single path segment for /task/{uuid}/download/{asset} that the API resolves to
+// the real object (synthesizing all.zip) at download time.
+type primaryAssetDef struct {
+	name  string
+	alias string
+}
+
+var primaryAssetDefs = []primaryAssetDef{
+	{name: "all.zip", alias: "all.zip"},
+	{name: "orthophoto.tif", alias: "orthophoto"},
+	{name: "dsm.tif", alias: "dsm"},
+	{name: "dtm.tif", alias: "dtm"},
+	{name: "point cloud", alias: "point_cloud"},
+}
+
+func taskDownloadURL(uuid, alias string) string {
+	return path.Join("/task", url.PathEscape(uuid), "download", alias)
+}
+
+// completedAssets returns the download links for a finished task, or nil (JSON
+// null) while it is still processing. The API validates each link at download
+// time, so an output the run didn't produce simply 404s - no S3 probing here.
+func completedAssets(uuid, status, writeS3Path string) []taskAsset {
+	if strings.TrimSpace(writeS3Path) == "" || strings.ToLower(strings.TrimSpace(status)) != "completed" {
+		return nil
+	}
+	assets := make([]taskAsset, 0, len(primaryAssetDefs))
+	for _, def := range primaryAssetDefs {
+		assets = append(assets, taskAsset{Name: def.name, URL: taskDownloadURL(uuid, def.alias)})
 	}
 	return assets
 }

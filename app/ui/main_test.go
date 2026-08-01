@@ -212,7 +212,10 @@ func TestTaskDetailEndpoints(t *testing.T) {
 	server.ServeHTTP(pageResp, pageReq)
 	assert.Equal(t, http.StatusOK, pageResp.Code)
 	assert.Contains(t, pageResp.Body.String(), "wf-ui-4")
-	assert.Contains(t, pageResp.Body.String(), "/task/wf-ui-4/download/all.zip")
+	// Downloads are populated client-side from the UI detail endpoint (only
+	// assets that actually exist are shown), so the page carries the container,
+	// not hardcoded links.
+	assert.Contains(t, pageResp.Body.String(), `data-detail-url="/ui/api/tasks/wf-ui-4"`)
 
 	jsonReq := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-4", nil)
 	jsonResp := httptest.NewRecorder()
@@ -223,7 +226,10 @@ func TestTaskDetailEndpoints(t *testing.T) {
 	require.NoError(t, json.Unmarshal(jsonResp.Body.Bytes(), &detail))
 	assert.Equal(t, "wf-ui-4", detail.Task.UUID)
 	assert.Equal(t, "project-detail", detail.Task.ProjectID)
-	require.NotEmpty(t, detail.Assets)
+	// The task hasn't completed, so no outputs exist yet: assets is null rather
+	// than a list of links that would 404 on download.
+	assert.Nil(t, detail.Assets)
+	assert.Contains(t, jsonResp.Body.String(), `"assets":null`)
 }
 
 func TestMissingTaskReturns404(t *testing.T) {

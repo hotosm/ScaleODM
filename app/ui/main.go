@@ -94,8 +94,13 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	page, err := parsePage(r.URL.Query().Get("page"))
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
 
-	jobs, err := h.metadataStore.ListJobs(r.Context(), status, projectID, limit)
+	jobs, hasNext, err := h.listJobsPage(r.Context(), status, projectID, limit, page)
 	if err != nil {
 		http.Error(w, "failed to list jobs", http.StatusInternalServerError)
 		return
@@ -117,6 +122,11 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 		Status:     status,
 		ProjectID:  projectID,
 		Limit:      limit,
+		Page:       page,
+		HasPrev:    page > 1,
+		HasNext:    hasNext,
+		PrevQuery:  buildTasksQuery(status, projectID, limit, page-1),
+		NextQuery:  buildTasksQuery(status, projectID, limit, page+1),
 		BannerText: "No authentication is enabled. Use this UI only on trusted internal networks.",
 		Version:    h.version,
 	}
@@ -217,8 +227,13 @@ func (h *Handler) handleTasksJSON(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
 		return
 	}
+	page, err := parsePage(r.URL.Query().Get("page"))
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": err.Error()})
+		return
+	}
 
-	jobs, err := h.metadataStore.ListJobs(r.Context(), status, projectID, limit)
+	jobs, hasNext, err := h.listJobsPage(r.Context(), status, projectID, limit, page)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, map[string]string{"error": "failed to list jobs"})
 		return
@@ -234,8 +249,10 @@ func (h *Handler) handleTasksJSON(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"tasks": tasks,
-		"count": len(tasks),
+		"tasks":   tasks,
+		"count":   len(tasks),
+		"page":    page,
+		"hasNext": hasNext,
 	})
 }
 
@@ -300,15 +317,34 @@ func (h *Handler) handleTaskOutput(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func parseMetadataMap(metadataJSON []byte) map[string]interface{} {
-	if len(metadataJSON) == 0 {
-		return map[string]interface{}{}
+func parsePage(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 1, nil
 	}
-	metaMap := map[string]interface{}{}
-	if err := json.Unmarshal(metadataJSON, &metaMap); err != nil {
-		return map[string]interface{}{}
+	value, err := strconv.Atoi(raw)
+	if err != nil {
+		return 0, errors.New("invalid page")
 	}
-	return metaMap
+	if value <= 0 {
+		return 0, errors.New("page must be greater than 0")
+	}
+	return value, nil
+}
+
+// listJobsPage fetches one page of jobs plus a lookahead row so the caller can
+// tell whether a next page exists. It returns the trimmed page and hasNext.
+func (h *Handler) listJobsPage(ctx context.Context, status, projectID string, limit, page int) ([]*meta.JobMetadata, bool, error) {
+	offset := (page - 1) * limit
+	jobs, err := h.metadataStore.ListJobs(ctx, status, projectID, limit+1, offset)
+	if err != nil {
+		return nil, false, err
+	}
+	hasNext := len(jobs) > limit
+	if hasNext {
+		jobs = jobs[:limit]
+	}
+	return jobs, hasNext, nil
 }
 
 func parseLimit(raw string) (int, error) {

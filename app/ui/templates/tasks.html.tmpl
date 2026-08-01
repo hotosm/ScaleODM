@@ -48,6 +48,20 @@
       {{ end }}
     </tbody>
   </table>
+
+  <nav class="pagination" aria-label="Task pages">
+    {{ if .HasPrev }}
+    <a class="page-link" href="/ui{{ .PrevQuery }}" rel="prev">&larr; Previous</a>
+    {{ else }}
+    <span class="page-link disabled">&larr; Previous</span>
+    {{ end }}
+    <span class="page-current">Page {{ .Page }}</span>
+    {{ if .HasNext }}
+    <a class="page-link" href="/ui{{ .NextQuery }}" rel="next">Next &rarr;</a>
+    {{ else }}
+    <span class="page-link disabled">Next &rarr;</span>
+    {{ end }}
+  </nav>
 </section>
 {{ template "layout.end" . }}
 {{ end }}

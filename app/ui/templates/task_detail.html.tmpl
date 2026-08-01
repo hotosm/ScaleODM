@@ -28,14 +28,19 @@
   </ul>
 
   <h2>Downloads</h2>
-  <ul>
-    {{ range .Task.Assets }}
-    <li><a href="{{ .URL }}">{{ .Name }}</a></li>
-    {{ end }}
+  <ul id="task-downloads" data-detail-url="/ui/api/tasks/{{ .Task.Task.UUID }}" data-status="{{ .Task.Task.Status }}">
+    <li class="downloads-hint">Checking for available assets&hellip;</li>
   </ul>
 
-  <h2>Logs</h2>
-  <pre id="task-output" data-output-url="/ui/api/tasks/{{ .Task.Task.UUID }}/output">Loading logs...</pre>
+  <div class="log-header">
+    <h2>Logs</h2>
+    <div class="log-toolbar">
+      <span id="log-updated" class="log-updated"></span>
+      <label class="log-wrap-toggle"><input type="checkbox" id="log-wrap" /> Wrap lines</label>
+      <a class="log-download" href="/ui/api/tasks/{{ .Task.Task.UUID }}/output" download="{{ .Task.Task.UUID }}.log">Download raw</a>
+    </div>
+  </div>
+  <pre id="task-output" data-output-url="/ui/api/tasks/{{ .Task.Task.UUID }}/output" data-status="{{ .Task.Task.Status }}">Loading logs...</pre>
 </section>
 {{ template "layout.end" . }}
 {{ end }}

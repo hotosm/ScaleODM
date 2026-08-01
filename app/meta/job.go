@@ -464,8 +464,9 @@ func (s *Store) RestartJobMetadata(
 	})
 }
 
-// ListJobs retrieves jobs with optional filters
-func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit int) ([]*JobMetadata, error) {
+// ListJobs retrieves jobs with optional filters. A positive offset skips that
+// many rows, enabling paginated listings.
+func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit, offset int) ([]*JobMetadata, error) {
 	query := `
 		SELECT id, workflow_name, odm_project_id, read_s3_path, write_s3_path,
 		       odm_flags, s3_region, job_status, created_at, started_at, completed_at,
@@ -494,6 +495,12 @@ func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit in
 		argCount++
 		query += fmt.Sprintf(" LIMIT $%d", argCount)
 		args = append(args, limit)
+	}
+
+	if offset > 0 {
+		argCount++
+		query += fmt.Sprintf(" OFFSET $%d", argCount)
+		args = append(args, offset)
 	}
 
 	rows, err := s.db.Pool.Query(ctx, query, args...)

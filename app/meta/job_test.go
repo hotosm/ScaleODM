@@ -264,12 +264,12 @@ func TestListJobs(t *testing.T) {
 	}
 
 	// List all jobs – we mainly verify that the query executes without error.
-	jobs, err := store.ListJobs(ctx, "", "", 0)
+	jobs, err := store.ListJobs(ctx, "", "", 0, 0)
 	require.NoError(t, err)
 
 	// List with limit – the limit should cap the number of results returned,
 	// regardless of how many additional jobs exist in the database.
-	jobs, err = store.ListJobs(ctx, "", "", 3)
+	jobs, err = store.ListJobs(ctx, "", "", 3, 0)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(jobs), 3)
 }
@@ -316,7 +316,7 @@ func TestListJobs_ByProjectID(t *testing.T) {
 	require.NoError(t, err)
 
 	// List jobs for project-1
-	jobs, err := store.ListJobs(ctx, "", "project-1", 0)
+	jobs, err := store.ListJobs(ctx, "", "project-1", 0, 0)
 	require.NoError(t, err)
 	assert.Len(t, jobs, 2)
 	for _, job := range jobs {

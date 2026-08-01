@@ -94,7 +94,7 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 	}
 
 	// List jobs
-	jobs, err := store.ListJobs(ctx, "", "", 0)
+	jobs, err := store.ListJobs(ctx, "", "", 0, 0)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(jobs), 3)
 }
