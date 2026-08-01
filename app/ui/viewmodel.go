@@ -220,8 +220,11 @@ var primaryAssetDefs = []primaryAssetDef{
 	{name: "point cloud", alias: "point_cloud"},
 }
 
+// taskDownloadURL points at the /ui-scoped download route (an alias for the
+// NodeODM /task/{uuid}/download/{asset} handler) so links resolve through the
+// UI-only ingress, which routes only /ui.
 func taskDownloadURL(uuid, alias string) string {
-	return path.Join("/task", url.PathEscape(uuid), "download", alias)
+	return path.Join("/ui/api/tasks", url.PathEscape(uuid), "download", alias)
 }
 
 // completedAssets returns the download links for a finished task, or nil (JSON

@@ -18,7 +18,7 @@ func TestCompletedAssets(t *testing.T) {
 	if len(got) != len(primaryAssetDefs) {
 		t.Fatalf("completed job: got %d assets, want %d", len(got), len(primaryAssetDefs))
 	}
-	if got[0].Name != "all.zip" || got[0].URL != "/task/wf-1/download/all.zip" {
+	if got[0].Name != "all.zip" || got[0].URL != "/ui/api/tasks/wf-1/download/all.zip" {
 		t.Errorf("unexpected first asset: %+v", got[0])
 	}
 }
@@ -29,9 +29,9 @@ func TestTaskDownloadURL(t *testing.T) {
 		alias string
 		want  string
 	}{
-		{"wf-1", "all.zip", "/task/wf-1/download/all.zip"},
-		{"wf-1", "orthophoto", "/task/wf-1/download/orthophoto"},
-		{"wf with space", "dsm", "/task/wf%20with%20space/download/dsm"},
+		{"wf-1", "all.zip", "/ui/api/tasks/wf-1/download/all.zip"},
+		{"wf-1", "orthophoto", "/ui/api/tasks/wf-1/download/orthophoto"},
+		{"wf with space", "dsm", "/ui/api/tasks/wf%20with%20space/download/dsm"},
 	}
 	for _, tc := range cases {
 		if got := taskDownloadURL(tc.uuid, tc.alias); got != tc.want {

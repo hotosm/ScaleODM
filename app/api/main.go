@@ -105,6 +105,10 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	// so we can issue proper HTTP redirects to pre-signed S3 URLs.
 	if apiObj.downloadHandler != nil {
 		router.Handle("GET /task/{uuid}/download/{asset}", apiObj.downloadHandler)
+		// Mirror the download under /ui so the browser UI can reach it through the
+		// UI-only ingress (which routes only /ui). Same handler, same {uuid}/{asset}
+		// path values; the NodeODM /task path stays for API compatibility.
+		router.Handle("GET /ui/api/tasks/{uuid}/download/{asset}", apiObj.downloadHandler)
 	}
 
 	if config.SCALEODM_UI_ENABLED {
