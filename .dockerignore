@@ -7,5 +7,6 @@
 !**/*.tmpl
 !**/*.css
 !**/*.js
+!**/*.svg
 !go.mod
 !go.sum
