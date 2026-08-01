@@ -873,10 +873,10 @@ func TestDetectWorkflowInfraFailure(t *testing.T) {
 			name: "detect failed pull in workflow message",
 			workflow: &wfv1.Workflow{
 				Status: wfv1.WorkflowStatus{
-					Message: "failed to pull image ghcr.io/hotosm/odm:3.6.0",
+					Message: "failed to pull image ghcr.io/hotosm/odm:3.6.1",
 				},
 			},
-			expected: "failed to pull image ghcr.io/hotosm/odm:3.6.0",
+			expected: "failed to pull image ghcr.io/hotosm/odm:3.6.1",
 		},
 		{
 			name: "no infra failure",

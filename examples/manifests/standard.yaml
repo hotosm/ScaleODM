@@ -48,7 +48,7 @@ spec:
               value: us-east-1
 
         - name: process
-          image: ghcr.io/hotosm/odm:3.6.0
+          image: ghcr.io/hotosm/odm:3.6.1
           command: ["/bin/bash", "-c"]
           args:
             - |

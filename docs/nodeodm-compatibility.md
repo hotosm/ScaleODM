@@ -181,7 +181,7 @@ Returns node information including queue count and engine version.
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
-  "engineVersion": "ghcr.io/hotosm/odm:3.6.0"
+  "engineVersion": "ghcr.io/hotosm/odm:3.6.1"
 }
 ```
 
@@ -415,7 +415,7 @@ api:
   replicaCount: 2  # HA - also creates a PodDisruptionBudget
 
 config:
-  odmImage: "ghcr.io/hotosm/odm:3.6.0"
+  odmImage: "ghcr.io/hotosm/odm:3.6.1"
 ```
 
 ```bash

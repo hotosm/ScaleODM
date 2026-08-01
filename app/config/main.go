@@ -62,7 +62,7 @@ func envFloat(key string, fallback float64) float64 {
 
 var SCALEODM_ODM_IMAGE = cmp.Or(
 	os.Getenv("SCALEODM_ODM_IMAGE"),
-	"ghcr.io/hotosm/odm:3.6.0",
+	"ghcr.io/hotosm/odm:3.6.1",
 )
 
 var SCALEODM_DATABASE_URL = cmp.Or(
