@@ -18,7 +18,6 @@ func TestHealthCheck(t *testing.T) {
 
 	metadataStore := meta.NewStore(db)
 
-	// The health check should work
 	ctx := context.Background()
 	err := metadataStore.HealthCheck(ctx)
 	require.NoError(t, err)

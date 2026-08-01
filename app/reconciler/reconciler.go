@@ -159,10 +159,10 @@ func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.W
 			updateErr = store.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, errMsg)
 		}
 		if updateErr != nil {
-			log.Printf("reconciler: failed to update job %q %s→%s: %v", job.WorkflowName, job.JobStatus, liveStatus, updateErr)
+			log.Printf("reconciler: failed to update job %q %s->%s: %v", job.WorkflowName, job.JobStatus, liveStatus, updateErr)
 			errors++
 		} else {
-			log.Printf("reconciler: synced job %q %s→%s", job.WorkflowName, job.JobStatus, liveStatus)
+			log.Printf("reconciler: synced job %q %s->%s", job.WorkflowName, job.JobStatus, liveStatus)
 			synced++
 			// Notify the caller's webhook, terminal transitions only.
 			if meta.IsTerminalJobStatus(liveStatus) {

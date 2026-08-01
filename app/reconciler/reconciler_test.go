@@ -84,7 +84,7 @@ func TestBuildFailureDetails_NilWhenNothingFailed(t *testing.T) {
 	}
 	raw, err := buildFailureDetails(wf)
 	require.NoError(t, err)
-	assert.Nil(t, raw, "no failed pods → leave failure_details unchanged")
+	assert.Nil(t, raw, "no failed pods -> leave failure_details unchanged")
 }
 
 func TestBuildFailureDetails_NilWorkflow(t *testing.T) {

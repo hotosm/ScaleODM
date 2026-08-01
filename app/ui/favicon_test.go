@@ -18,7 +18,6 @@ func TestFaviconServed(t *testing.T) {
 	rec := httptest.NewRecorder()
 	mux.ServeHTTP(rec, req)
 
-	t.Logf("status=%d content-type=%q len=%d", rec.Code, rec.Header().Get("Content-Type"), rec.Body.Len())
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
@@ -26,8 +25,8 @@ func TestFaviconServed(t *testing.T) {
 		t.Errorf("content-type = %q, want image/svg+xml", ct)
 	}
 
-	// HEAD must succeed too (curl -I, health/uptime probes) - the security
-	// middleware previously rejected every non-GET method with 405.
+	// HEAD must also succeed: the security middleware once rejected every
+	// non-GET method with 405, breaking curl -I and uptime probes.
 	headReq := httptest.NewRequest(http.MethodHead, "/ui/static/favicon.svg", nil)
 	headRec := httptest.NewRecorder()
 	mux.ServeHTTP(headRec, headReq)

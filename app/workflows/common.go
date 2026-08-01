@@ -47,13 +47,11 @@ func NewClient(kubeconfig, namespace string) (*Client, error) {
 		return nil, fmt.Errorf("failed to create kubernetes config: %w", err)
 	}
 
-	// Set timeouts to avoid long waits during initialization
-	// These are reasonable defaults that prevent hanging
+	// Cap init-time API calls so a bad endpoint can't hang startup.
 	if config.Timeout == 0 {
 		config.Timeout = 10 * time.Second
 	}
 
-	// Create Argo Workflows clientset
 	wfClientset, err := workflowclient.NewForConfig(config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create workflow clientset: %w", err)
@@ -290,7 +288,6 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 
 	// Watch for workflow completion, with automatic reconnection on watch failures
 	for {
-		// Set up watcher
 		watcher, err := c.wfClientset.ArgoprojV1alpha1().Workflows(c.namespace).Watch(
 			ctx,
 			metav1.ListOptions{
@@ -303,7 +300,6 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 		}
 		log.Printf("workflow watch started workflow=%s", workflowName)
 
-		// Watch for events
 		for {
 			select {
 			case <-ctx.Done():
@@ -339,7 +335,6 @@ func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.
 					continue
 				}
 
-				// Check if workflow is complete
 				if wf.Status.Phase == wfv1.WorkflowSucceeded ||
 					wf.Status.Phase == wfv1.WorkflowFailed ||
 					wf.Status.Phase == wfv1.WorkflowError {

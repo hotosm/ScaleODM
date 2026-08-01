@@ -656,7 +656,7 @@ func TestApplyDynamicWorkspaceSize_EnabledPVCComputesSize(t *testing.T) {
 		config.SCALEODM_WORKFLOW_WORKSPACE_DYNAMIC_SIZE_MAX_GIB = prevMax
 	})
 
-	// nil flags → standard profile with multiplier=4, min=30; 10 GiB × 4 = 40 GiB
+	// nil flags -> standard profile with multiplier=4, min=30; 10 GiB x 4 = 40 GiB
 	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
 	cfg.Workspace.Mode = "pvc"
 	cfg.Workspace.Size = "30Gi"

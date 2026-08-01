@@ -6,10 +6,9 @@ import (
 	"testing"
 )
 
-// TestUIDownloadRouteCoexists guards the pattern registered in app/api/main.go
-// against the UI's own /ui/api/tasks/{uuid}* routes: a more specific
-// .../download/{asset} path must reach the download handler, not the detail
-// handler, and ServeMux must accept both without a conflict panic.
+// The download route registered in app/api/main.go must coexist with the UI's
+// own /ui/api/tasks/{uuid} routes: the more specific .../download/{asset} path
+// reaches the download handler, and ServeMux accepts both without panicking.
 func TestUIDownloadRouteCoexists(t *testing.T) {
 	h, err := NewHandler(nil, nil, false, "test")
 	if err != nil {

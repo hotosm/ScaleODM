@@ -84,7 +84,6 @@ func main() {
 	defer database.Close()
 	log.Printf("Database connection established (took %v)", time.Since(dbStart))
 
-	// Initialize schema
 	log.Println("Initializing database schema...")
 	schemaStart := time.Now()
 	if err := database.InitSchema(ctx); err != nil {
@@ -92,7 +91,6 @@ func main() {
 	}
 	log.Printf("Schema initialization complete (took %v)", time.Since(schemaStart))
 
-	// Create metadata store
 	log.Println("Creating metadata store...")
 	metaStart := time.Now()
 	metadataStore := meta.NewStore(database)
@@ -103,7 +101,6 @@ func main() {
 	if docsOnly {
 		log.Println("SCALEODM_DOCS_ONLY=true, skipping Argo Workflows client initialization")
 	} else {
-		// Initialize Argo Workflows client
 		log.Println("Initializing Argo Workflows client...")
 		k8sStart := time.Now()
 		wfClient, err = workflows.NewClient(config.KUBECONFIG_PATH, config.K8S_NAMESPACE)
@@ -122,7 +119,6 @@ func main() {
 	serverCh := make(chan *http.Server, 1)
 
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {
-		// Create API (register routes and get the HTTP handler)
 		apiObj, handler := api.NewAPI(metadataStore, wfClient)
 		_ = apiObj
 		handler = observability.WrapHTTPHandler(handler)

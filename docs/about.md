@@ -1,48 +1,102 @@
 # About ScaleODM
 
-ScaleODM exists to run ODM processing in Kubernetes-native environments without requiring the traditional NodeODM + ClusterODM control model. The core tension is straightforward: ODM tooling is mature and widely used, but the operational model of long-lived nodes and VM-centric scaling does not map cleanly to modern cluster workloads that prefer ephemeral jobs, declarative orchestration, and cloud object storage.
+ScaleODM runs OpenDroneMap (ODM) processing on Kubernetes.
 
-## Why this project exists
+It is built for clusters that expect ephemeral jobs, declarative orchestration,
+and object storage. The existing ODM tools are excellent, but they were not
+designed with this in mind. This page explains where they struggle at scale, and
+why we took a different approach.
 
-ClusterODM, NodeODM, and ODM are all strong projects with proven production use. ScaleODM is not a replacement born from feature dissatisfaction; it is a response to deployment constraints that appear when teams need autoscaling, workload isolation, and cloud-native operations.
+## The existing tools
 
-In Kubernetes contexts, teams commonly need:
+ODM already has two tools for running jobs at scale:
 
-- per-task isolation with ephemeral compute,
-- queueing and scheduling semantics that are cluster-aware,
-- input/output patterns aligned to object storage instead of API uploads,
-- horizontal scaling driven by native platform primitives.
+- **NodeODM** runs a single ODM job behind a REST API.
+- **ClusterODM** spreads jobs across several NodeODM instances.
 
-## Constraints observed with existing patterns
+Both are robust and widely used, and ODM itself is mature and well proven. None
+of what follows is a criticism of the projects. The problem is only their
+deployment model, which does not fit Kubernetes well.
 
-### ClusterODM in Kubernetes
+## Why NodeODM struggles to scale on Kubernetes
 
-ClusterODM scales by managing machine/node style capacity. That paradigm is practical for VM pools, but it is less aligned with Kubernetes-native scaling strategies built around Jobs, controllers, and autoscaler policies.
+There are four main issues.
 
-### NodeODM in Kubernetes
+### 1. ClusterODM scales machines, not containers
 
-NodeODM is designed around direct upload (`create_task`) and related chunked flows, while output S3 support is only one side of the data lifecycle. For cluster operations, this introduces friction when imagery already lives in object storage and processing should pull from S3 directly.
+ClusterODM scales by adding and removing whole machines (VMs). This works well
+for a pool of virtual machines.
 
-## v1 to v2 evolution
+Kubernetes scales differently. It thinks in terms of Jobs, Deployments, and
+autoscalers such as the HPA, KEDA, or Karpenter. ClusterODM uses none of these,
+so you lose the native scaling that Kubernetes is good at.
 
-### v1 experiments
+### 2. NodeODM is a long-running, stateful server
 
-The first iteration kept NodeODM/ClusterODM expectations and introduced ScaleODM mainly as a queueing mediator (PostgreSQL with `SKIP LOCKED`) plus scaling glue. That validated some operational patterns, but two constraints remained:
+A NodeODM container is a server that stays running and keeps each project on
+local disk.
 
-1. NodeODM queueing and lifecycle assumptions are not ideal for highly ephemeral distributed workers.
-2. Input ingestion still centered on uploads or archive URLs, creating avoidable I/O and orchestration overhead.
+Kubernetes prefers pods that are ephemeral and stateless. They start, do one
+job, then go away. A long-lived server that holds state on local disk fights
+this model. It makes scaling down, and moving work between nodes, awkward.
 
-### v2 direction
+### 3. The NodeODM queue is local, not distributed
 
-The architecture shifted from orchestrating NodeODM instances to orchestrating ODM workloads directly as Kubernetes Jobs/Argo Workflows. In this model, each task is an isolated workflow that:
+NodeODM queues jobs using local files on a single instance. There is no shared
+queue across the cluster.
 
-1. reads imagery from S3,
-2. processes with ODM,
-3. writes artifacts back to S3,
-4. exposes task state through a NodeODM-compatible API surface.
+Once you want to run many jobs across many nodes, a local file-based queue is not
+enough to coordinate them.
 
-This preserves familiar client interactions (including pyodm task monitoring/download methods) while adopting infrastructure patterns that scale more naturally in Kubernetes.
+### 4. Getting imagery in means an upload
+
+NodeODM expects you to upload imagery over HTTP, or to pass a `zip_url` for it to
+download.
+
+In our case the imagery already lives in S3. Pushing it back through an upload
+API is extra I/O and extra friction for no benefit. S3 is only supported for
+output too, so the input path still has to run through the API.
+
+## The ScaleODM approach
+
+ScaleODM drops the NodeODM and ClusterODM control plane. Instead it runs each ODM
+task directly as an [Argo Workflow](https://github.com/argoproj/argo-workflows)
+on Kubernetes.
+
+Every task is one isolated workflow with three steps:
+
+1. Download the imagery from S3.
+2. Process it with the standard ODM container.
+3. Upload the results back to S3.
+
+This maps cleanly onto how Kubernetes already works:
+
+- Jobs are stateless, isolated, and can be restarted if they fail.
+- Scaling, scheduling, retries, and cleanup are all handled by Kubernetes and
+  Argo. We do not maintain our own queue or scaling glue.
+- S3 is the single source of truth for both input and output.
+
+Importantly, ScaleODM still exposes a **NodeODM-compatible API**. Existing tools
+keep working, including pyodm's task monitoring and download methods. So you get
+Kubernetes-native scaling without rewriting your clients.
+
+The main trade-off is that ScaleODM depends fully on Kubernetes, and on Argo
+Workflows being installed in the cluster. For our use, that is a fair price for
+scaling that just works.
+
+## A note on history (v1 to v2)
+
+The first version of ScaleODM kept NodeODM and ClusterODM, and added a queueing
+layer on top (PostgreSQL with `SKIP LOCKED`) plus some scaling glue.
+
+It proved the queueing idea worked, but two problems remained. NodeODM's
+long-lived, stateful model still did not suit ephemeral workers, and getting
+imagery in still meant uploads or archive URLs.
+
+v2 is the current approach described above: Argo Workflows, S3 for input and
+output, and a NodeODM-compatible API on top.
 
 ## Decision records
 
-For technical ADRs and architectural context, see [decisions/README.md](../decisions/README.md).
+For the full technical reasoning and architecture decisions, see the
+[decision records](../decisions/README.md).

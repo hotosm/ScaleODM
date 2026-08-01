@@ -966,7 +966,6 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 		annotations = nil
 	}
 
-	// Create workflow
 	wf := &wfv1.Workflow{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: "odm-pipeline-",

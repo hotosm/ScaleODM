@@ -9,7 +9,7 @@ import (
 // The mode informs both pipeline behaviour and resource sizing - pick the one
 // that matches the dataset size and post-processing needs.
 //
-//   - "standard" (default): the regular ODM pipeline (download → process →
+//   - "standard" (default): the regular ODM pipeline (download -> process ->
 //     upload). readS3Path is downloaded with the configured s3ScanDepth and
 //     all matched imagery is fed into a single ODM run. Use a shallow depth
 //     for one task's imagery dir, or a deeper depth to roll up several task

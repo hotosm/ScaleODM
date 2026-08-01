@@ -450,9 +450,9 @@ func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Pa
 // affects pre-flight resource sizing, never final output correctness.
 //
 // Patterns supported (covers everything in DefaultProjectExcludes):
-//   - "name/**" or "**/name/**"   → exclude any path with `name` as a directory segment
-//   - "name" or "**/name"         → exclude exact basename match
-//   - "*.ext"                     → exclude by extension
+//   - "name/**" or "**/name/**"   -> exclude any path with `name` as a directory segment
+//   - "name" or "**/name"         -> exclude exact basename match
+//   - "*.ext"                     -> exclude by extension
 //
 // Patterns this function doesn't recognise are ignored at the API layer; rclone
 // will still apply them in-pod.
@@ -532,7 +532,7 @@ func compileExcludeMatcher(patterns []string) excludeMatcher {
 		if p == "" {
 			continue
 		}
-		// Directory pattern: "name/**" or "**/name/**" → exclude segment "name"
+		// Directory pattern: "name/**" or "**/name/**" -> exclude segment "name"
 		trimmed := strings.TrimPrefix(p, "**/")
 		if strings.HasSuffix(trimmed, "/**") {
 			name := strings.TrimSuffix(trimmed, "/**")
@@ -541,7 +541,7 @@ func compileExcludeMatcher(patterns []string) excludeMatcher {
 				continue
 			}
 		}
-		// Trailing-slash directory form: "name/" → exclude segment "name"
+		// Trailing-slash directory form: "name/" -> exclude segment "name"
 		if strings.HasSuffix(trimmed, "/") {
 			name := strings.TrimSuffix(trimmed, "/")
 			if name != "" && !strings.ContainsAny(name, "*?[]/") {

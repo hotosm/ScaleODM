@@ -370,8 +370,8 @@ type TaskNewRequest struct {
 	// configured separately via S3ScanDepth.
 	//
 	// Supported today:
-	//   - "standard" (default): the regular ODM pipeline (download → process
-	//     → upload). Imagery under readS3Path is gathered into a single ODM
+	//   - "standard" (default): the regular ODM pipeline (download -> process
+	//     -> upload). Imagery under readS3Path is gathered into a single ODM
 	//     run; how deep the scan walks beneath readS3Path is controlled by
 	//     s3ScanDepth.
 	//
@@ -782,7 +782,6 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, "writeS3Path must be an s3:// path")
 		}
 
-		// Create workflow config
 		projectID := req.Name
 		if projectID == "" {
 			projectID = "odm-project"

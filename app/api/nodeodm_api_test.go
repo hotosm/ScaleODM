@@ -70,12 +70,10 @@ func TestOptionsEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Huma may return array directly or wrapped in body
-	// Try direct array first (Huma often unwraps arrays)
+	// Huma unwraps arrays in most cases, but can wrap them in a body field.
 	var directResponse []OptionResponse
 	err := json.Unmarshal(w.Body.Bytes(), &directResponse)
 	if err != nil {
-		// Fallback to wrapped format
 		var response struct {
 			Body []OptionResponse `json:"body"`
 		}
@@ -96,12 +94,10 @@ func TestTaskNewEndpoint(t *testing.T) {
 
 	_, handler := NewAPI(metadataStore, wfClient)
 
-	// Set up test S3 bucket
 	ctx := context.Background()
 	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
-	// Create task request
 	request := TaskNewRequest{
 		Name:        "test-project",
 		ReadS3Path:  "s3://test-bucket/images/",
@@ -301,21 +297,17 @@ func TestTaskListEndpoint(t *testing.T) {
 
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Huma may return array directly or wrapped in body
-	// Try direct array first (Huma often unwraps arrays)
+	// Huma unwraps arrays in most cases, but can wrap them in a body field.
 	var directResponse []TaskListItem
 	err := json.Unmarshal(w.Body.Bytes(), &directResponse)
 	if err != nil {
-		// Fallback to wrapped format
 		var response struct {
 			Body []TaskListItem `json:"body"`
 		}
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
-		// Just verify we got a valid response (may be empty if no workflows exist)
-		assert.NotNil(t, response.Body)
+		assert.NotNil(t, response.Body) // may be empty if no workflows exist
 	} else {
-		// Just verify we got a valid response (may be empty if no workflows exist)
 		assert.NotNil(t, directResponse)
 	}
 }
@@ -327,7 +319,7 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
 
-	// Create job metadata (workflow may or may not exist in cluster)
+	// The workflow may or may not exist in the cluster; only the metadata matters here.
 	ctx := context.Background()
 
 	workflowName := "test-workflow-info"
@@ -342,7 +334,6 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Verify job was created before calling API handler
 	job, err := metadataStore.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist before API call")
@@ -350,7 +341,7 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	_, handler := NewAPI(metadataStore, wfClient)
 
 	req := httptest.NewRequest(http.MethodGet, "/task/"+workflowName+"/info", nil)
-	req = req.WithContext(ctx) // Use the same context as the test
+	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
 	handler.ServeHTTP(w, req)
@@ -358,14 +349,13 @@ func TestTaskInfoEndpoint(t *testing.T) {
 	// Should return OK even if workflow doesn't exist in cluster (metadata exists)
 	assert.Equal(t, http.StatusOK, w.Code)
 
-	// Huma may return the body wrapped in a Body field or directly
+	// Huma may wrap the body in a Body field or return it directly.
 	var response TaskInfo
 	var wrappedResponse TaskInfoResponse
 	err = json.Unmarshal(w.Body.Bytes(), &wrappedResponse)
 	if err == nil && wrappedResponse.Body.UUID != "" {
 		response = wrappedResponse.Body
 	} else {
-		// Try direct unmarshaling
 		err = json.Unmarshal(w.Body.Bytes(), &response)
 		require.NoError(t, err)
 	}
@@ -450,7 +440,6 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 	metadataStore := meta.NewStore(db)
 	wfClient := testWorkflowClient(t)
 
-	// Create job metadata
 	ctx := context.Background()
 
 	workflowName := "test-workflow-remove"
@@ -479,10 +468,8 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// Huma may return 204 No Content for successful delete operations
-	// or 200 OK with JSON body
+	// A successful delete is either 204 No Content or 200 OK with a JSON body.
 	if w.Code == http.StatusNoContent {
-		// 204 No Content - no body to parse
 		assert.Empty(t, w.Body.Bytes())
 	} else {
 		assert.Equal(t, http.StatusOK, w.Code)
@@ -492,7 +479,6 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 		assert.True(t, response.Success)
 	}
 
-	// Verify metadata was deleted
 	job, err := metadataStore.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	assert.Nil(t, job)

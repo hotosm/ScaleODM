@@ -9,18 +9,14 @@ import (
 	"github.com/hotosm/scaleodm/testutil"
 )
 
-// testDB creates a test database connection for meta tests
 func testDB(t *testing.T) (*db.DB, func()) {
 	t.Helper()
 
-	dbURL := testutil.TestDBURL()
-
-	database, err := db.NewDB(dbURL)
+	database, err := db.NewDB(testutil.TestDBURL())
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// Initialize schema
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -29,14 +25,10 @@ func testDB(t *testing.T) (*db.DB, func()) {
 		t.Fatalf("Failed to initialize schema: %v", err)
 	}
 
-	// Cleanup function
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-
 		database.Close()
 	}
 

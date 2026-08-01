@@ -46,7 +46,6 @@ func TestGetJob(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create a job
 	created, err := store.CreateJob(
 		ctx,
 		"test-workflow-2",
@@ -58,7 +57,6 @@ func TestGetJob(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Retrieve the job
 	job, err := store.GetJob(ctx, "test-workflow-2")
 	require.NoError(t, err)
 	require.NotNil(t, job)
@@ -87,7 +85,6 @@ func TestUpdateJobStatus(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create a job
 	_, err := store.CreateJob(
 		ctx,
 		"test-workflow-3",
@@ -101,28 +98,24 @@ func TestUpdateJobStatus(t *testing.T) {
 
 	workflowName := "test-workflow-3"
 
-	// Update status to running
 	err = store.UpdateJobStatus(ctx, workflowName, "running", nil)
 	require.NoError(t, err)
 
-	// Verify status was updated
 	job, err := store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
-	require.NotNil(t, job, "Job should exist after updating to running")
+	require.NotNil(t, job)
 	assert.Equal(t, "running", job.JobStatus)
-	assert.NotNil(t, job.StartedAt, "StartedAt should be set when status changes to running")
+	assert.NotNil(t, job.StartedAt, "StartedAt should be set once running")
 	assert.False(t, job.StartedAt.IsZero())
 
-	// Update status to completed
 	err = store.UpdateJobStatus(ctx, workflowName, "completed", nil)
 	require.NoError(t, err)
 
-	// Verify status was updated
 	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
-	require.NotNil(t, job, "Job should exist after updating to completed")
+	require.NotNil(t, job)
 	assert.Equal(t, "completed", job.JobStatus)
-	assert.NotNil(t, job.CompletedAt, "CompletedAt should be set when status changes to completed")
+	assert.NotNil(t, job.CompletedAt, "CompletedAt should be set once completed")
 	assert.False(t, job.CompletedAt.IsZero())
 }
 
@@ -133,7 +126,6 @@ func TestUpdateJobStatus_WithError(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create a job
 	_, err := store.CreateJob(
 		ctx,
 		"test-workflow-4",
@@ -149,7 +141,6 @@ func TestUpdateJobStatus_WithError(t *testing.T) {
 	err = store.UpdateJobStatus(ctx, "test-workflow-4", "failed", &errorMsg)
 	require.NoError(t, err)
 
-	// Verify error message was set
 	job, err := store.GetJob(ctx, "test-workflow-4")
 	require.NoError(t, err)
 	require.NotNil(t, job)
@@ -213,7 +204,6 @@ func TestUpdateJobMetadata(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create a job
 	_, err := store.CreateJob(
 		ctx,
 		"test-workflow-5",
@@ -225,7 +215,6 @@ func TestUpdateJobMetadata(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Update metadata
 	metadata := map[string]interface{}{
 		"image_count": 10,
 		"progress":    50,
@@ -234,7 +223,6 @@ func TestUpdateJobMetadata(t *testing.T) {
 	err = store.UpdateJobMetadata(ctx, "test-workflow-5", metadata)
 	require.NoError(t, err)
 
-	// Verify metadata was updated
 	job, err := store.GetJob(ctx, "test-workflow-5")
 	require.NoError(t, err)
 	require.NotNil(t, job)
@@ -249,7 +237,6 @@ func TestListJobs(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create multiple jobs
 	for i := 0; i < 5; i++ {
 		_, createErr := store.CreateJob(
 			ctx,
@@ -263,12 +250,10 @@ func TestListJobs(t *testing.T) {
 		require.NoError(t, createErr)
 	}
 
-	// List all jobs – we mainly verify that the query executes without error.
 	jobs, err := store.ListJobs(ctx, "", "", 0, 0)
 	require.NoError(t, err)
 
-	// List with limit – the limit should cap the number of results returned,
-	// regardless of how many additional jobs exist in the database.
+	// A limit caps the result count regardless of how many jobs exist.
 	jobs, err = store.ListJobs(ctx, "", "", 3, 0)
 	require.NoError(t, err)
 	assert.LessOrEqual(t, len(jobs), 3)
@@ -281,7 +266,6 @@ func TestListJobs_ByProjectID(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create jobs with different project IDs
 	_, err := store.CreateJob(
 		ctx,
 		"test-workflow-project1-1",
@@ -315,7 +299,6 @@ func TestListJobs_ByProjectID(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// List jobs for project-1
 	jobs, err := store.ListJobs(ctx, "", "project-1", 0, 0)
 	require.NoError(t, err)
 	assert.Len(t, jobs, 2)
@@ -331,7 +314,6 @@ func TestDeleteJob(t *testing.T) {
 	store := NewStore(db)
 	ctx := context.Background()
 
-	// Create a job
 	_, err := store.CreateJob(
 		ctx,
 		"test-workflow-delete",
@@ -343,11 +325,9 @@ func TestDeleteJob(t *testing.T) {
 	)
 	require.NoError(t, err)
 
-	// Delete the job
 	err = store.DeleteJob(ctx, "test-workflow-delete")
 	require.NoError(t, err)
 
-	// Verify job is deleted
 	job, err := store.GetJob(ctx, "test-workflow-delete")
 	require.NoError(t, err)
 	assert.Nil(t, job)

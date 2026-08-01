@@ -1,8 +1,11 @@
 # NodeODM API Compatibility
 
-ScaleODM implements the NodeODM API specification with S3-native storage, making it a scalable replacement for NodeODM via Argo Workflows.
+ScaleODM implements the NodeODM API, but stores data in S3 and runs jobs as Argo
+Workflows. This makes it a drop-in, scalable replacement for NodeODM.
 
-Looking for the shortest pyodm migration path first? Start with the [quick migration guide](./nodeodm-migrate.md), then return here for full endpoint and behavior reference details.
+Just want the shortest pyodm migration path? Start with the
+[quick migration guide](./nodeodm-migrate.md), then come back here for the full
+endpoint and behaviour reference.
 
 ## Quick Start: Deploy to Existing Cluster
 

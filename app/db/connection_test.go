@@ -10,18 +10,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testDB creates a test database connection
 func testDB(t *testing.T) (*DB, func()) {
 	t.Helper()
 
-	dbURL := testutil.TestDBURL()
-
-	database, err := NewDB(dbURL)
+	database, err := NewDB(testutil.TestDBURL())
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// Initialize schema
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -30,14 +26,10 @@ func testDB(t *testing.T) (*DB, func()) {
 		t.Fatalf("Failed to initialize schema: %v", err)
 	}
 
-	// Cleanup function
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-
 		database.Close()
 	}
 
@@ -51,7 +43,6 @@ func TestNewDB(t *testing.T) {
 	require.NoError(t, err)
 	defer db.Close()
 
-	// Test ping
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
@@ -71,8 +62,7 @@ func TestInitSchema(t *testing.T) {
 	err = db.InitSchema(ctx)
 	require.NoError(t, err)
 
-	// Schema should already be initialized
-	// But we can verify it by checking if tables exist
+	// Confirm the schema landed by checking the table exists.
 	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel2()
 
@@ -102,7 +92,6 @@ func TestClose(t *testing.T) {
 	_, cleanup := testDB(t)
 	defer cleanup()
 
-	// Close should not panic
 	assert.NotPanics(t, func() {
 		cleanup()
 	})

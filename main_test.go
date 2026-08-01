@@ -18,18 +18,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// testDB creates a test database connection for E2E tests
 func testDB(t *testing.T) (*db.DB, func()) {
 	t.Helper()
 
-	dbURL := testutil.TestDBURL()
-
-	database, err := db.NewDB(dbURL)
+	database, err := db.NewDB(testutil.TestDBURL())
 	if err != nil {
 		t.Fatalf("Failed to connect to test database: %v", err)
 	}
 
-	// Initialize schema
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -38,14 +34,10 @@ func testDB(t *testing.T) (*db.DB, func()) {
 		t.Fatalf("Failed to initialize schema: %v", err)
 	}
 
-	// Cleanup function
 	cleanup := func() {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
-
-		// Clean up test data
 		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-
 		database.Close()
 	}
 
@@ -75,11 +67,9 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 	store := meta.NewStore(db)
 	ctx := context.Background()
 
-	// Set up test S3 bucket
 	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
-	// Create multiple jobs
 	for i := 0; i < 3; i++ {
 		_, createErr := store.CreateJob(
 			ctx,
@@ -93,7 +83,6 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 		require.NoError(t, createErr)
 	}
 
-	// List jobs
 	jobs, err := store.ListJobs(ctx, "", "", 0, 0)
 	require.NoError(t, err)
 	assert.GreaterOrEqual(t, len(jobs), 3)
@@ -111,7 +100,7 @@ func TestE2E_WorkflowClient_WithK8s(t *testing.T) {
 	require.NoError(t, err)
 	assert.NotNil(t, client)
 
-	// List workflows (should work even if empty)
+	// Listing must succeed even when no workflows exist.
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -127,11 +116,9 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	store := meta.NewStore(db)
 	ctx := context.Background()
 
-	// Set up test S3 bucket
 	err := testutil.SetupTestS3Bucket(ctx, "test-bucket")
 	require.NoError(t, err, "Failed to set up test S3 bucket")
 
-	// Create job
 	workflowName := "e2e-lifecycle-workflow"
 	job, err := store.CreateJob(
 		ctx,
@@ -144,10 +131,10 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should be created successfully")
-	// The default status for new jobs in the metadata store is 'queued'
+	// New jobs default to 'queued' in the metadata store.
 	assert.Equal(t, "queued", job.JobStatus)
 
-	// Verify job exists before updating - use a small retry in case of timing issues
+	// Retry the read to absorb any replication/timing lag before the update.
 	var retrievedJob *meta.JobMetadata
 	for i := 0; i < 5; i++ {
 		retrievedJob, err = store.GetJob(ctx, workflowName)
@@ -162,7 +149,6 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	require.NotNil(t, retrievedJob, "Job should exist before status update")
 	job = retrievedJob
 
-	// Update to running
 	err = store.UpdateJobStatus(ctx, workflowName, "running", nil)
 	require.NoError(t, err)
 
@@ -172,7 +158,6 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	assert.Equal(t, "running", job.JobStatus)
 	assert.NotNil(t, job.StartedAt)
 
-	// Update to completed
 	err = store.UpdateJobStatus(ctx, workflowName, "completed", nil)
 	require.NoError(t, err)
 
@@ -182,7 +167,6 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	assert.Equal(t, "completed", job.JobStatus)
 	assert.NotNil(t, job.CompletedAt)
 
-	// Delete job
 	err = store.DeleteJob(ctx, workflowName)
 	require.NoError(t, err)
 

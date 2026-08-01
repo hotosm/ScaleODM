@@ -1,12 +1,16 @@
-# pyodm migration: NodeODM → ScaleODM (quick guide)
+# pyodm migration: NodeODM to ScaleODM (quick guide)
 
-Use this guide when you want the smallest possible code change to keep using pyodm with ScaleODM.
+This guide covers the smallest code change needed to keep using pyodm with
+ScaleODM.
 
-## What changes vs what stays the same
+## What changes, and what stays the same
 
-**Changes:** task creation. `node.create_task([...])` uploads local files, but ScaleODM expects images already in S3.
+Only one thing changes: task creation. `node.create_task([...])` uploads local
+files, but ScaleODM expects the images to already be in S3.
 
-**Stays the same:** after you have a task UUID, pyodm `Task` methods still work for status polling, waiting, cancel/remove, and asset downloads.
+Everything else stays the same. Once you have a task UUID, the pyodm `Task`
+methods still work as before, for status polling, waiting, cancel/remove, and
+asset downloads.
 
 ## Minimal create-task migration
 
