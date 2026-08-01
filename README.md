@@ -1,6 +1,19 @@
-# ScaleODM
+<!-- markdownlint-disable -->
+<p align="center">
+    <!-- github-banner-start -->
+    <img src="https://raw.githubusercontent.com/hotosm/ScaleODM/main/app/ui/static/favicon.svg" alt="ScaleODM Logo" width="25%" height="auto" />
+    <!-- github-banner-end -->
+</p>
 
-Kubernetes-native orchestration for OpenDroneMap workloads, with a NodeODM-compatible API and S3-native task I/O.
+<div align="center">
+    <h1>ScaleODM</h1>
+    <p>Kubernetes-native orchestration for OpenDroneMap workloads, with a NodeODM-compatible API and S3-native task I/O.</p>
+    <a href="https://github.com/hotosm/ScaleODM/releases">
+        <img src="https://img.shields.io/github/v/release/hotosm/ScaleODM?logo=github" alt="Release Version" />
+    </a>
+</div>
+
+</br>
 
 ## Security
 
@@ -70,3 +83,12 @@ curl http://localhost:31100/task/{uuid}/info
 - [NodeODM compatibility reference](./docs/nodeodm-compatibility.md)
 - [Helm chart deployment/configuration reference](./chart/README.md)
 - [Testing guide](./docs/testing.md)
+
+## Logo
+
+The logo is a bit of a mashup between the Kubernete's ship wheel and
+OpenDroneMap's drone with rotors.
+
+Elements of both were used, and the colour scheme changed.
+
+If anyone has copyright concerns, please inform the author of the repo.
