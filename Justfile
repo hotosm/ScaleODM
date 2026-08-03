@@ -24,153 +24,17 @@ chart *args:
       -o {{justfile_directory()}}/tasks/chart.just;
     @just --justfile {{justfile_directory()}}/tasks/chart.just --set chart_name "scaleodm" {{args}}
 
-# Install curl if missing
-[private]
-_install-curl:
-  #!/usr/bin/env bash
-  set -e
-  
-  if ! command -v curl &> /dev/null; then
-      echo "📦 Installing curl..."
-      if command -v apt-get &> /dev/null; then
-          sudo apt-get update -qq && sudo apt-get install -y curl
-      elif command -v yum &> /dev/null; then
-          sudo yum install -y curl
-      elif command -v apk &> /dev/null; then
-          sudo apk add --no-cache curl
-      else
-          echo "❌ Error: curl is not installed and no package manager found"
-          echo "   Please install curl manually"
-          exit 1
-      fi
-      echo "✓ curl installed"
-  fi
-
-# Install jq if missing
-[private]
-_install-jq:
-  #!/usr/bin/env bash
-  set -e
-
-  if ! command -v jq &> /dev/null; then
-      echo "📦 Installing jq..."
-      if command -v apt-get &> /dev/null; then
-          sudo apt-get update -qq && sudo apt-get install -y jq
-      elif command -v yum &> /dev/null; then
-          sudo yum install -y jq
-      elif command -v apk &> /dev/null; then
-          sudo apk add --no-cache jq
-      else
-          echo "❌ Error: jq is not installed and no package manager found"
-          echo "   Please install jq manually"
-          exit 1
-      fi
-      echo "✓ jq installed"
-  fi
-
-# Install talosctl if missing
-[private]
-_install-talosctl:
-  #!/usr/bin/env bash
-  set -e
-  
-  if ! command -v talosctl &> /dev/null; then
-      echo "📦 Installing talosctl..."
-      curl -sL https://talos.dev/install | sh
-      # Ensure its in PATH (install script usually adds to ~/.local/bin)
-      if [ -f "$HOME/.local/bin/talosctl" ]; then
-          export PATH="$HOME/.local/bin:$PATH"
-      fi
-      # Verify installation
-      if ! command -v talosctl &> /dev/null; then
-          echo "❌ Error: Failed to install talosctl"
-          exit 1
-      fi
-      echo "✓ talosctl installed"
-  fi
-
-# Install kubectl if missing
-[private]
-_install-kubectl:
-  #!/usr/bin/env bash
-  set -e
-  
-  if ! command -v kubectl &> /dev/null; then
-      echo "📦 Installing kubectl..."
-      # Download latest stable kubectl
-      KUBECTL_VERSION=$(curl -L -s https://dl.k8s.io/release/stable.txt)
-      curl -LO "https://dl.k8s.io/release/$KUBECTL_VERSION/bin/linux/amd64/kubectl"
-      chmod +x kubectl
-      # Try to install to system path, fallback to user local bin
-      if sudo mv kubectl /usr/local/bin/kubectl 2>/dev/null; then
-          echo "✓ kubectl installed to /usr/local/bin"
-      else
-          mkdir -p "$HOME/.local/bin"
-          mv kubectl "$HOME/.local/bin/kubectl"
-          export PATH="$HOME/.local/bin:$PATH"
-          echo "✓ kubectl installed to ~/.local/bin"
-      fi
-      # Verify installation
-      if ! command -v kubectl &> /dev/null; then
-          echo "❌ Error: Failed to install kubectl"
-          exit 1
-      fi
-  fi
-
-# Install Helm if missing
-[private]
-_install-helm:
-  #!/usr/bin/env bash
-  set -e
-
-  if command -v helm &> /dev/null; then
-      exit 0
-  fi
-
-  echo "📦 Installing Helm..."
-
-  # Only Linux / amd64 automated install for now; otherwise instruct user
-  UNAME_S="$(uname -s || echo unknown)"
-  UNAME_M="$(uname -m || echo unknown)"
-
-  if [ "$UNAME_S" != "Linux" ] || { [ "$UNAME_M" != "x86_64" ] && [ "$UNAME_M" != "amd64" ]; }; then
-      echo "❌ Automatic Helm install only supported on Linux amd64."
-      echo "   Please install Helm manually: https://helm.sh/docs/intro/install/"
-      exit 1
-  fi
-
-  TMP_DIR="$(mktemp -d)"
-  trap 'rm -rf "$TMP_DIR"' EXIT
-
-  # Get latest Helm release tag
-  HELM_TAG="$(curl -sSL https://api.github.com/repos/helm/helm/releases/latest | grep -oE '\"tag_name\":\s*\"v[0-9.]+\"' | head -1 | sed -E 's/\"tag_name\":\s*\"(v[0-9.]+)\"/\1/')"
-  if [ -z "$HELM_TAG" ]; then
-      echo "❌ Failed to determine latest Helm version."
-      exit 1
-  fi
-
-  ARCHIVE="helm-${HELM_TAG}-linux-amd64.tar.gz"
-  URL="https://get.helm.sh/${ARCHIVE}"
-
-  echo "⬇️  Downloading ${URL}..."
-  curl -sSL "$URL" -o "$TMP_DIR/helm.tar.gz"
-  tar -xzf "$TMP_DIR/helm.tar.gz" -C "$TMP_DIR"
-
-  if sudo mv "$TMP_DIR/linux-amd64/helm" /usr/local/bin/helm 2>/dev/null; then
-      chmod +x /usr/local/bin/helm
-      echo "✓ Helm installed to /usr/local/bin/helm"
-  else
-      mkdir -p "$HOME/.local/bin"
-      mv "$TMP_DIR/linux-amd64/helm" "$HOME/.local/bin/helm"
-      chmod +x "$HOME/.local/bin/helm"
-      export PATH="$HOME/.local/bin:$PATH"
-      echo "✓ Helm installed to ~/.local/bin/helm"
-  fi
-
-  if ! command -v helm &> /dev/null; then
-      echo "❌ Error: Failed to install Helm"
-      exit 1
-  fi
+# Local Talos + Argo test-cluster lifecycle (see hotosm/justfiles k8s.just).
+# Tool prerequisites (curl/jq/talosctl/kubectl) are installed by the module.
+# Usage: just k8s cluster-init | cluster-available | cluster-destroy
+k8s *args:
+    @curl -sS https://raw.githubusercontent.com/hotosm/justfiles/main/k8s.just \
+      -o {{justfile_directory()}}/tasks/k8s.just;
+    @just --justfile {{justfile_directory()}}/tasks/k8s.just \
+      --set cluster_name "scaleodm-test" \
+      --set namespace "argo" \
+      --set secret_name "scaleodm-secrets" \
+      {{args}}
 
 # Start compose services (DB, S3, API)
 # Assumes Talos cluster is already running
@@ -448,12 +312,13 @@ example-curl:
   echo "Saving task logs to file..."
   LOG_FILE="/tmp/scaleodm-example-${UUID}.log"
   curl -fsS "${API_URL}/task/${UUID}/output?line=0" > "$LOG_FILE"
-  LOG_LINES=$(wc -l < "$LOG_FILE" | tr -d ' ')
-  echo "Workflow logs saved to: $LOG_FILE (${LOG_LINES} lines)"
-  echo "To view the workflow logs run: less $LOG_FILE"
+  just _log-preview "$LOG_FILE"
 
-  echo "Checking download redirect for orthophoto.tif..."
-  curl -fsSI "${API_URL}/task/${UUID}/download/orthophoto.tif" | sed -n '1,20p'
+  # "orthophoto" is the download alias the API resolves to the real object key
+  # (odm_orthophoto/odm_orthophoto.tif); a bare "orthophoto.tif" key does not
+  # exist and 404s. Expect a 302 redirect to a pre-signed URL.
+  echo "Checking download redirect for orthophoto..."
+  curl -fsSI "${API_URL}/task/${UUID}/download/orthophoto" | sed -n '1,20p'
 
   echo "Shutting down containers..."
   docker compose down --remove-orphans
@@ -601,16 +466,47 @@ _verify-archived-logs uuid:
 
   curl -fsS "${API_URL}/task/{{ uuid }}/output?line=0" > "$LOG_FILE"
 
-  if ! grep -Fq "Fetching archived logs from s3://" "$LOG_FILE"; then
-    echo "Archived log fallback did not appear to read from Argo archive"
-    echo "Workflow logs saved to: $LOG_FILE"
+  # With the workflow CR deleted, /output must fall back to the Argo S3 log
+  # archive (see GetWorkflowLogsWithArchiveFallback). Log capture now uses
+  # Argo's built-in archive rather than the old custom aggregation, so the
+  # fallback streams the raw process.log. The two strings below are the only
+  # non-log sentinels that path can emit, so their presence (or an empty body)
+  # means the archive fallback did not actually serve logs.
+  if ! [ -s "$LOG_FILE" ]; then
+    echo "Archived log fallback returned an empty body"
+    exit 1
+  fi
+  if grep -Fq "Archived logs not configured." "$LOG_FILE" \
+     || grep -Fq "No archived logs for this workflow." "$LOG_FILE"; then
+    echo "Archived log fallback did not read from the Argo archive:"
+    head -n 5 "$LOG_FILE"
     exit 1
   fi
 
   LOG_LINES=$(wc -l < "$LOG_FILE" | tr -d ' ')
   echo "Archived log fallback verified (${LOG_LINES} lines)."
-  echo "Workflow logs saved to: $LOG_FILE"
-  echo "To view the workflow logs run: less $LOG_FILE"
+  just _log-preview "$LOG_FILE"
+
+# Print a head+tail preview of a (potentially huge) log file instead of dumping
+# the whole thing to the terminal. `lines` is per end, so the default shows up
+# to 200 lines total. The full log stays on disk at the given path.
+[private]
+[no-cd]
+_log-preview file lines="100":
+  #!/usr/bin/env bash
+  set -euo pipefail
+  FILE="{{ file }}"
+  LINES="{{ lines }}"
+  TOTAL=$(wc -l < "$FILE" | tr -d ' ')
+  echo "----- $FILE (${TOTAL} lines; showing first/last ${LINES}) -----"
+  if [ "$TOTAL" -le $(( LINES * 2 )) ]; then
+    cat "$FILE"
+  else
+    head -n "$LINES" "$FILE"
+    echo "         ... [$(( TOTAL - LINES * 2 )) lines omitted] ..."
+    tail -n "$LINES" "$FILE"
+  fi
+  echo "----- end preview; full log: $FILE -----"
 
 # Echo to terminal with blue colour
 [no-cd]

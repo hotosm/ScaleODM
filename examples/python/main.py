@@ -129,54 +129,90 @@ def _is_s3_not_found_xml(body: str) -> bool:
     return code in {"NoSuchKey", "NotFound", "NoSuchBucket"}
 
 
-def validate_asset_exists(uuid: str, asset: str) -> None:
-    """Check that a download asset is available without downloading full content."""
-    url = f"{BASE_URL}/task/{uuid}/download/{asset}"
-    print(f"\nGET {url} (no redirect follow)")
-    resp = requests.get(url, allow_redirects=False, timeout=30)
-    print(f"Status: {resp.status_code}")
+def _short_body(resp: "requests.Response", limit: int = 300) -> str:
+    """Return a short, terminal-safe snippet of a response body.
 
-    if resp.status_code not in (301, 302, 307, 308):
-        print(f"Asset check failed for {asset}: expected redirect, got {resp.status_code}")
-        print(f"Body: {resp.text}")
-        return
+    Guards against dumping binary asset content (e.g. a streamed all.zip) to
+    the terminal. Only textual content types are shown; anything else is
+    summarised by size.
+    """
+    content_type = resp.headers.get("Content-Type", "")
+    if not any(t in content_type for t in ("json", "text", "xml")):
+        length = resp.headers.get("Content-Length", "?")
+        return f"<{length} bytes of {content_type or 'binary'} omitted>"
+    text = resp.text
+    return text if len(text) <= limit else text[:limit] + "…"
 
-    location = resp.headers.get("Location", "")
-    if not location:
-        print(f"Asset check failed for {asset}: missing redirect Location header")
-        return
 
-    print(f"Redirect URL present: {location[:120]}{'...' if len(location) > 120 else ''}")
-
+def _validate_ranged(asset: str, location: str) -> bool:
+    """Confirm a redirect target is fetchable via a 1-byte ranged GET."""
     ranged = requests.get(
         location,
         headers={"Range": "bytes=0-0"},
         stream=True,
         timeout=30,
     )
-    content_type = ranged.headers.get("Content-Type", "unknown")
-    content_length = ranged.headers.get("Content-Length", "unknown")
+    try:
+        content_type = ranged.headers.get("Content-Type", "unknown")
+        content_length = ranged.headers.get("Content-Length", "unknown")
+        prefix = f"Range GET status: {ranged.status_code} content-length={content_length} content-type={content_type}"
 
-    if ranged.status_code in (200, 206):
-        print(
-            f"Range GET status: {ranged.status_code} "
-            f"content-length={content_length} content-type={content_type}"
-        )
-        print(f"Asset exists: {asset}")
-    elif ranged.status_code == 404 and _is_s3_not_found_xml(ranged.text):
-        print(
-            f"Range GET status: 404 content-length={content_length} "
-            f"content-type={content_type}"
-        )
-        print(f"Asset missing in S3: {asset}")
-    else:
-        print(
-            f"Range GET status: {ranged.status_code} "
-            f"content-length={content_length} content-type={content_type}"
-        )
+        if ranged.status_code in (200, 206):
+            print(prefix)
+            print(f"Asset exists: {asset}")
+            return True
+        if ranged.status_code == 404 and _is_s3_not_found_xml(ranged.text):
+            print(prefix)
+            print(f"Asset missing in S3: {asset}")
+            return False
+        print(prefix)
         print(f"Unexpected response while validating asset {asset}")
+        return False
+    finally:
+        ranged.close()
 
-    ranged.close()
+
+def validate_asset_exists(uuid: str, asset: str) -> bool:
+    """Check that a download asset is available without downloading full content.
+
+    The download endpoint has two success shapes:
+      - a 3xx redirect to a pre-signed S3 URL (real object on disk), or
+      - a direct 200 stream (synthetic all.zip assembled on the fly).
+    Both count as "available".
+    """
+    url = f"{BASE_URL}/task/{uuid}/download/{asset}"
+    print(f"\nGET {url} (no redirect follow)")
+    # stream=True so we never pull a large (possibly binary) body into memory
+    # just to inspect status/headers.
+    resp = requests.get(url, allow_redirects=False, stream=True, timeout=30)
+    try:
+        status = resp.status_code
+        content_type = resp.headers.get("Content-Type", "unknown")
+        print(f"Status: {status} content-type={content_type}")
+
+        # Real object in S3: redirect to a pre-signed URL.
+        if status in (301, 302, 307, 308):
+            location = resp.headers.get("Location", "")
+            if not location:
+                print(f"Asset check FAILED for {asset}: redirect without Location header")
+                return False
+            print(f"Redirect -> {location[:120]}{'…' if len(location) > 120 else ''}")
+            return _validate_ranged(asset, location)
+
+        # Synthetic all.zip: streamed directly rather than redirected.
+        if status == 200:
+            length = resp.headers.get("Content-Length", "unknown")
+            print(f"Asset streamed directly: {asset} content-length={length}")
+            return True
+
+        if status == 404:
+            print(f"Asset MISSING for {asset}: {_short_body(resp)}")
+            return False
+
+        print(f"Asset check FAILED for {asset}: unexpected status {status}: {_short_body(resp)}")
+        return False
+    finally:
+        resp.close()
 
 def wait_for_task(uuid: str, timeout: int = 7200, interval: int = 60) -> None:
     """
@@ -236,11 +272,22 @@ def main() -> None:
         print("\nFinal task summary:")
         print(json.dumps(info, indent=2))
         print_log_summary(uuid)
-        validate_asset_exists(uuid, "all.zip")
-        validate_asset_exists(uuid, "orthophoto.tif")
+        # "orthophoto" is the alias the download endpoint resolves to the real
+        # object key (odm_orthophoto/odm_orthophoto.tif); the bare "orthophoto.tif"
+        # key does not exist. "all.zip" is streamed synthetically.
+        results = {
+            asset: validate_asset_exists(uuid, asset)
+            for asset in ("all.zip", "orthophoto")
+        }
     except Exception as exc:
         print(f"Error during follow-up calls: {exc}", file=sys.stderr)
         sys.exit(1)
+
+    missing = [asset for asset, ok in results.items() if not ok]
+    if missing:
+        print(f"\nExpected assets not available: {', '.join(missing)}", file=sys.stderr)
+        sys.exit(1)
+    print(f"\nAll expected assets available: {', '.join(results)}")
 
 
 if __name__ == "__main__":
