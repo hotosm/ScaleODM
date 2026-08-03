@@ -50,7 +50,7 @@ stop:
 
 # Setup Talos cluster and start all services for development
 dev:
-  just test cluster-init
+  just k8s cluster-init
   just start
 
 # Verify chart version, appVersion, and any literal x.y.z strings in source
@@ -216,7 +216,7 @@ example-curl:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just k8s cluster-available
   just test build-api-image
   docker compose down --remove-orphans
   SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
@@ -336,7 +336,7 @@ example-python:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just k8s cluster-available
   just test build-api-image
   docker compose down --remove-orphans
   SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery
@@ -397,7 +397,7 @@ example-pyodm:
   set -euo pipefail
   trap 'docker compose down --remove-orphans' EXIT
 
-  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just test cluster-available
+  SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just k8s cluster-available
   just test build-api-image
   docker compose down --remove-orphans
   SCALEODM_LOCAL_S3_ENDPOINT=http://localhost:31102 AWS_ACCESS_KEY_ID=admin AWS_SECRET_ACCESS_KEY=somelongpassword just _seed-example-imagery

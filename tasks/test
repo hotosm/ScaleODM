@@ -3,21 +3,6 @@
 default:
   just --justfile {{justfile()}} --list test
 
-# Thin wrappers over the shared k8s module so existing `just test cluster-*`
-# call sites (and the compose test recipes below) keep working unchanged.
-
-# Ensure a local Talos + Argo test cluster is available (idempotent).
-cluster-available:
-  just k8s cluster-available
-
-# Setup Talos cluster + Argo Workflows for testing (delegates to k8s module).
-cluster-init:
-  just k8s cluster-init
-
-# Destroy the Talos test cluster (delegates to k8s module).
-cluster-destroy:
-  just k8s cluster-destroy
-
 # Build the local API image used by compose test runs
 build-api-image:
   #!/usr/bin/env bash
@@ -125,7 +110,7 @@ all:
   cd {{justfile_directory()}}
 
   just test chart-ingress-guardrails
-  just test cluster-available
+  just k8s cluster-available
   just test build-api-image
 
   echo "Running tests..."
@@ -171,7 +156,7 @@ e2e:
 
   cd {{justfile_directory()}}
 
-  just test cluster-available
+  just k8s cluster-available
   just test build-api-image
   echo "Running E2E tests..."
   docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
