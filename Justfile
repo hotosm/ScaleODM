@@ -199,7 +199,14 @@ _seed-example-imagery:
         --progress
     '
 
-# Run the manual workflow example (loads .env automatically via dotenv-load)
+# Unlike example-python/pyodm/curl this recipe does NOT set anything up: it
+# assumes the Talos cluster, seeded imagery, workflow S3 secret, and API are
+# already running (e.g. bring them up once via the setup at the top of
+# `just example-python`, then run this against the live stack). It also passes
+# s3Endpoint=localhost:31102 by default, which only works when the workflow pod
+# can reach the host on that address.
+#
+# Run the manual workflow example (loads .env automatically via dotenv-load).
 example-manual:
   go run examples/manual_workflow.go
 
