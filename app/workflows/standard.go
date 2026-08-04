@@ -274,8 +274,19 @@ func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, f
 		marginMultiplier = 1
 	}
 
-	// memoryLimitGiB is the OOM ceiling (peak + margin), backed by RAM + swap.
+	// memoryLimitGiB is memory.max: it caps resident (non-swapped) memory. With
+	// swap on it targets below node RAM so reclaim pushes the peak into swap
+	// (above node RAM the cgroup gets no pressure and kubelet's swap-blind
+	// eviction kills the pod), and stays above the request so the pod is
+	// Burstable (Guaranteed gets no swap). Not guaranteed below node RAM when
+	// the request lands near a node-size boundary. See decisions/0003-swap.md.
 	memoryLimitGiB := peakRAMGiB * marginMultiplier
+	if config.SCALEODM_PROCESS_SWAP_RATIO > 0 {
+		memoryLimitGiB = requestGiB * marginMultiplier
+		if memoryLimitGiB <= requestGiB {
+			memoryLimitGiB = requestGiB * 1.05
+		}
+	}
 
 	// CPU scales off the RAM request so it never forces a bigger instance than
 	// RAM does; ODM uses every node core regardless of the request.
@@ -439,9 +450,10 @@ func parseTolerations(raw string) []apiv1.Toleration {
 	return tolerations
 }
 
-// burstHeadroomGiB is ceil(memory limit - request) in GiB: how much the pod may
-// use above its request, i.e. the swap the node must provide. 0 when unset or
-// request == limit (Guaranteed, no swap).
+// burstHeadroomGiB is ceil(limit - request) in GiB, a rough guide. 0 when unset
+// or request == limit (Guaranteed, no swap). With swap on the limit is a resident
+// cap below node RAM, so this is just the RAM margin, not the full swap span; the
+// real per-pod allowance is container_swap_limit_bytes. See docs/swap.md.
 func burstHeadroomGiB(r ContainerResources) int64 {
 	if r.Requests.Memory == "" || r.Limits.Memory == "" {
 		return 0
@@ -956,8 +968,8 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 
 	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
 
-	// Advertise limit - request so operators can size node swap. Not the actual
-	// LimitedSwap grant (which is proportional); see docs/swap.md.
+	// Advertise limit - request as a rough guide (not the real LimitedSwap grant,
+	// which is proportional); see docs/swap.md.
 	annotations := map[string]string{}
 	if headroom := burstHeadroomGiB(cfg.ProcessResources); headroom > 0 {
 		annotations["scaleodm.hotosm.org/burst-headroom-gib"] = fmt.Sprintf("%d", headroom)

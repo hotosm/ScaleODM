@@ -289,6 +289,9 @@ var SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_CPU = cmp.Or(os.Getenv("SCALEODM_W
 var SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_MEMORY = cmp.Or(os.Getenv("SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_MEMORY"), "1Gi")
 var SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_EPHEMERAL_STORAGE = cmp.Or(os.Getenv("SCALEODM_WORKFLOW_RESOURCES_CLEANUP_LIMIT_EPHEMERAL_STORAGE"), "2Gi")
 
+// SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT is the memory limit margin. Swap
+// off: above the peak. Swap on: above the request, so the limit stays below node
+// RAM (and the pod Burstable). See docs/swap.md.
 var SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT = envFloat("SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT", 20)
 var SCALEODM_PROCESS_MEMORY_MIN_GIB = envFloat("SCALEODM_PROCESS_MEMORY_MIN_GIB", 4)
 var SCALEODM_PROCESS_MEMORY_MAX_GIB = envFloat("SCALEODM_PROCESS_MEMORY_MAX_GIB", 256)
@@ -296,7 +299,7 @@ var SCALEODM_PROCESS_MEMORY_MAX_GIB = envFloat("SCALEODM_PROCESS_MEMORY_MAX_GIB"
 // SCALEODM_PROCESS_SWAP_RATIO enables swap-aware sizing: when > 0, request =
 // peak / (1 + ratio) as RAM and the peak spills to swap (LimitedSwap). Default 0
 // (off): a reduced request on a no-swap node just OOMs, so only set > 0 with a
-// nodeSelector pinning pods to swap nodes. Prod uses 2.0. See docs/swap.md.
+// nodeSelector pinning pods to swap nodes. Prod uses 1.0. See docs/swap.md.
 var SCALEODM_PROCESS_SWAP_RATIO = envFloat("SCALEODM_PROCESS_SWAP_RATIO", 0)
 
 // SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB floors the RAM request after the split.

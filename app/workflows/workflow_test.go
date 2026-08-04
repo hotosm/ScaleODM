@@ -313,17 +313,36 @@ func TestEstimateProcessResourcesFromImageCount_SplitsRequestAndLimit(t *testing
 	withSwapRatio(t, 2.0)
 	fallback := ContainerResources{}
 	// 250 images interpolates to a 27 GiB peak. With swap ratio 2.0 the RAM
-	// request is peak/3 = 9 GiB, while the OOM limit stays at the peak plus margin
-	// (27 * 1.2 = 32.4 GiB), backed by swap. CPU/ephemeral still scale off the
-	// peak, not the reduced request.
+	// request is peak/3 = 9 GiB. With swap on, the limit is a resident ceiling
+	// (request * 1.2 = 10.8 GiB, below node RAM), so the cgroup forces the peak's
+	// overflow into swap. CPU/ephemeral still scale off the peak, not the request.
 	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
-	assert.Equal(t, "9216Mi", resources.Requests.Memory) // 9 GiB * 1024 (27 / 3)
-	assert.Equal(t, "33178Mi", resources.Limits.Memory)  // ceil(27 * 1.2 * 1024)
+	assert.Equal(t, "9216Mi", resources.Requests.Memory)  // 9 GiB * 1024 (27 / 3)
+	assert.Equal(t, "11060Mi", resources.Limits.Memory)   // ceil(9 * 1.2 * 1024)
 	// CPU is requested off the 9 GiB RAM request: 9 * 0.125 = 1.125 cores.
 	assert.Equal(t, "1125m", resources.Requests.CPU)
 	assert.Equal(t, "1688m", resources.Limits.CPU) // ceil(1.125 * 1.5 * 1000)
 	assert.NotEmpty(t, resources.Requests.EphemeralStorage)
 	assert.NotEmpty(t, resources.Limits.EphemeralStorage)
+}
+
+func TestEstimateProcessResourcesFromImageCount_SwapLimitTracksRequestNotPeak(t *testing.T) {
+	fallback := ContainerResources{}
+
+	// Same 27 GiB peak (250 images), two swap modes.
+	withSwapRatio(t, 0)
+	off := estimateProcessResourcesFromImageCount(250, nil, fallback)
+	assert.Equal(t, "27648Mi", off.Requests.Memory) // no swap: request == peak
+	assert.Equal(t, "33178Mi", off.Limits.Memory)   // limit == peak * 1.2
+
+	withSwapRatio(t, 1.0)
+	on := estimateProcessResourcesFromImageCount(250, nil, fallback)
+	// Swap on: request = peak/2, and the limit is a resident ceiling based on the
+	// request (below node RAM), strictly above it for Burstable QoS -- NOT the
+	// peak-based limit, which would sit above node RAM and defeat swap by letting
+	// the resident set fill the node into swap-blind node-pressure eviction.
+	assert.Equal(t, "13824Mi", on.Requests.Memory)
+	assert.Equal(t, "16589Mi", on.Limits.Memory) // request * 1.2, well below off's peak-based limit
 }
 
 func TestEstimateProcessResourcesFromImageCount_ScalesCPUOffRAMRequest(t *testing.T) {
@@ -433,21 +452,22 @@ func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing
 	fallback := ContainerResources{}
 
 	// 250 images base = 27 GiB peak; --fast-orthophoto halves it to a 13.5 GiB
-	// peak. RAM request = peak/3 = 4.5 GiB; limit = peak * 1.2.
+	// peak. RAM request = peak/3 = 4.5 GiB; with swap on the limit is the resident
+	// ceiling request * 1.2, not peak * 1.2.
 	fast := estimateProcessResourcesFromImageCount(250, []string{"--fast-orthophoto"}, fallback)
 	assert.Equal(t, "4608Mi", fast.Requests.Memory) // 4.5 GiB * 1024 (13.5 / 3)
-	assert.Equal(t, "16589Mi", fast.Limits.Memory)  // ceil(13.5 * 1.2 * 1024)
+	assert.Equal(t, "5530Mi", fast.Limits.Memory)   // ceil(4.5 * 1.2 * 1024)
 
 	// --dsm scales the peak up by 1.5x: 27 * 1.5 = 40.5 GiB; request = 13.5 GiB.
 	dsm := estimateProcessResourcesFromImageCount(250, []string{"--dsm"}, fallback)
 	assert.Equal(t, "13824Mi", dsm.Requests.Memory) // 13.5 GiB * 1024 (40.5 / 3)
-	assert.Equal(t, "49767Mi", dsm.Limits.Memory)   // ceil(40.5 * 1.2 * 1024)
+	assert.Equal(t, "16589Mi", dsm.Limits.Memory)   // ceil(13.5 * 1.2 * 1024)
 
 	// Small job (7 images) returns the first table point (18 GiB) * dsm 1.5 = 27
 	// GiB peak; request = peak/3 = 9 GiB.
 	small := estimateProcessResourcesFromImageCount(7, []string{"--dsm"}, fallback)
 	assert.Equal(t, "9216Mi", small.Requests.Memory) // 9 GiB * 1024 (27 / 3)
-	assert.Equal(t, "33178Mi", small.Limits.Memory)  // ceil(27 * 1.2 * 1024)
+	assert.Equal(t, "11060Mi", small.Limits.Memory)  // ceil(9 * 1.2 * 1024)
 }
 
 func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
