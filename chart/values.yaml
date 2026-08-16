@@ -142,6 +142,8 @@ workspaceStorageClass:
 config:
   # ODM image to use in workflows
   odmImage: "ghcr.io/hotosm/odm:3.6.1"
+  # Repos allowed for the per-task odmImage override, any tag. Empty allows any.
+  allowedOdmImages: "ghcr.io/hotosm/odm,docker.io/opendronemap/odm,docker.io/webodm/odx"
 
   s3EndpointPolicy:
     enforceAllowlist: false

@@ -65,6 +65,9 @@ var SCALEODM_ODM_IMAGE = cmp.Or(
 	"ghcr.io/hotosm/odm:3.6.1",
 )
 
+// Repos allowed for the per-task odmImage override, comma separated, any tag.
+var SCALEODM_ALLOWED_ODM_IMAGES = strings.TrimSpace(os.Getenv("SCALEODM_ALLOWED_ODM_IMAGES"))
+
 var SCALEODM_DATABASE_URL = cmp.Or(
 	os.Getenv("SCALEODM_DATABASE_URL"),
 	"",

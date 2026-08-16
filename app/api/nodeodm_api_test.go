@@ -15,6 +15,7 @@ import (
 	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
+	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/version"
@@ -904,6 +905,52 @@ func TestParseAllowedEndpointAllowlist(t *testing.T) {
 	assert.True(t, hasLocal)
 	assert.True(t, hasAWS)
 	assert.True(t, hasMinio)
+}
+
+func TestResolveODMImage(t *testing.T) {
+	original := config.SCALEODM_ALLOWED_ODM_IMAGES
+	defer func() { config.SCALEODM_ALLOWED_ODM_IMAGES = original }()
+
+	config.SCALEODM_ALLOWED_ODM_IMAGES = ""
+	image, err := resolveODMImage("")
+	require.NoError(t, err)
+	assert.Equal(t, config.SCALEODM_ODM_IMAGE, image)
+
+	_, err = resolveODMImage("webodm/odx")
+	require.Error(t, err)
+
+	config.SCALEODM_ALLOWED_ODM_IMAGES = "ghcr.io/hotosm/odm,docker.io/opendronemap/odm,docker.io/webodm/odx"
+
+	for _, requested := range []string{
+		"webodm/odx",
+		"webodm/odx:gpu",
+		"docker.io/webodm/odx:latest",
+		"docker.io/webodm/odx@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+		"ghcr.io/hotosm/odm:3.7.0",
+		"opendronemap/odm:latest",
+	} {
+		image, err = resolveODMImage(requested)
+		require.NoError(t, err, requested)
+		assert.Equal(t, requested, image)
+	}
+
+	for _, requested := range []string{
+		"evil/image",
+		"ghcr.io/evil/odm:3.7.0",
+		"webodm/odx-evil",
+		"evil.io/webodm/odx",
+	} {
+		_, err = resolveODMImage(requested)
+		require.Error(t, err, requested)
+	}
+}
+
+func TestODMImageRepo(t *testing.T) {
+	assert.Equal(t, "ghcr.io/hotosm/odm", odmImageRepo("ghcr.io/hotosm/odm:3.6.1"))
+	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx:gpu"))
+	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("docker.io/webodm/odx"))
+	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx@sha256:abc"))
+	assert.Equal(t, "localhost:5000/hotosm/odm", odmImageRepo("localhost:5000/hotosm/odm:dev"))
 }
 
 func TestMetadataImageCount(t *testing.T) {

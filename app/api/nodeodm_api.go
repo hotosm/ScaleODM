@@ -114,6 +114,38 @@ func enforceEndpointAllowlist(endpoint string) error {
 	return fmt.Errorf("s3 endpoint %q is not in SCALEODM_ALLOWED_S3_ENDPOINTS", endpoint)
 }
 
+// Drops any tag or digest and qualifies bare names with docker.io.
+func odmImageRepo(image string) string {
+	image = strings.TrimSpace(image)
+	if at := strings.Index(image, "@"); at != -1 {
+		image = image[:at]
+	}
+	// Only a colon after the final slash is a tag; an earlier one is a registry port.
+	lastSlash := strings.LastIndex(image, "/")
+	if colon := strings.Index(image[lastSlash+1:], ":"); colon != -1 {
+		image = image[:lastSlash+1+colon]
+	}
+	host, _, hasHost := strings.Cut(image, "/")
+	if !hasHost || (!strings.ContainsAny(host, ".:") && host != "localhost") {
+		image = "docker.io/" + image
+	}
+	return image
+}
+
+func resolveODMImage(requested string) (string, error) {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || requested == config.SCALEODM_ODM_IMAGE {
+		return config.SCALEODM_ODM_IMAGE, nil
+	}
+	repo := odmImageRepo(requested)
+	for _, allowed := range strings.Split(config.SCALEODM_ALLOWED_ODM_IMAGES, ",") {
+		if strings.TrimSpace(allowed) != "" && odmImageRepo(allowed) == repo {
+			return requested, nil
+		}
+	}
+	return "", fmt.Errorf("odmImage %q is not in SCALEODM_ALLOWED_ODM_IMAGES", requested)
+}
+
 func resolveTaskS3Client(metadataJSON []byte) (*minio.Client, string, error) {
 	endpoint := normalizedEndpointFromMetadata(metadataJSON)
 	if endpoint != "" {
@@ -391,6 +423,8 @@ type TaskNewRequest struct {
 	// Use "on-demand" for VIP or time-sensitive jobs that cannot tolerate spot
 	// interruption. Defaults to "spot" when omitted.
 	CapacityType string `json:"capacityType,omitempty" form:"capacityType" doc:"Node capacity type for workflow pods: 'spot' (default) or 'on-demand' for VIP jobs."`
+
+	OdmImage string `json:"odmImage,omitempty" form:"odmImage" doc:"Alternative ODM image for this task (must be allowlisted; defaults to the configured image)."`
 
 	// S3ScanDepth caps how deep the download stage walks beneath readS3Path.
 	// Defaults to 1 (only files directly under the given path - the right
@@ -671,6 +705,14 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, fmt.Sprintf("invalid capacityType %q (supported: spot, on-demand)", capacityType))
 		}
 
+		odmImage, imageErr := resolveODMImage(req.OdmImage)
+		if imageErr != nil {
+			metricResult = "failure"
+			metricReason = "invalid_odm_image"
+			log.Printf("POST /task/new: rejected odmImage=%q", req.OdmImage)
+			return nil, huma.NewError(400, imageErr.Error())
+		}
+
 		s3ScanDepth := 0
 		if req.S3ScanDepth != nil {
 			s3ScanDepth = *req.S3ScanDepth
@@ -863,6 +905,7 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.ImageTotalBytes = imageTotalBytes
 		wfConfig.ProcessingMode = processingMode
 		wfConfig.CapacityType = capacityType
+		wfConfig.ODMImage = odmImage
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
 
