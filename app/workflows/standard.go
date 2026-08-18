@@ -104,6 +104,8 @@ type interpolationPoint struct {
 
 // Peak RAM fit: ~0.042*images + 16 GiB (from testing). The ~16 GiB SIFT/OpenSFM
 // baseline dominates small jobs. MEMORY_LIMIT_MARGIN_PERCENT pads the limit.
+// Demand steepens past 5k images, where OpenMVS per-view scene state starts to
+// dominate; see docs/system-requirements.md.
 var odmMemoryEstimationPoints = []interpolationPoint{
 	{images: 40, ramGiB: 18},
 	{images: 200, ramGiB: 25},
@@ -113,6 +115,7 @@ var odmMemoryEstimationPoints = []interpolationPoint{
 	{images: 2500, ramGiB: 121},
 	{images: 3500, ramGiB: 163},
 	{images: 5000, ramGiB: 227},
+	{images: 12000, ramGiB: 800},
 }
 
 // NewDefaultODMConfig returns default configuration

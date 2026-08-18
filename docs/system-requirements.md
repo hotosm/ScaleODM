@@ -6,12 +6,13 @@ ScaleODM turns these numbers into pod requests/limits, see
 
 ## The short version
 
-RAM demand is a brief **peak** during `mvs-texturing`, not a sustained resident
-set. With swap at ~2x RAM to absorb that spike, a 62Gi machine can process ~5000
-images. The linear estimate below is total RAM **+ swap**; provision real RAM
-lower and let swap cover the peaks.
+- RAM demand is a brief **peak**, not sustained across the workflow.
+- The table below is total RAM **+ swap**. Provision less real RAM and let swap
+  cover the peaks. With ~2x swap, a 62Gi machine handles ~5000 images.
+- Past ~5000 images the peak lands in OpenMVS `DensifyPointCloud` and grows
+  faster than linearly. It scales with **view count**, not depth-map resolution.
 
-## Linear scaling estimate
+## Scaling estimate
 
 | Images | RAM + swap |
 |-------:|-----------:|
@@ -22,31 +23,44 @@ lower and let swap cover the peaks.
 | 2500   | 128 GB     |
 | 3500   | 192 GB     |
 | 5000   | 256 GB     |
+| 12000  | 800 GB     |
 
-Extrapolating: ~13k images needs ~200 GB resident / 600-700 GB with swap, and
-~45k images is roughly the ceiling for 768 GB RAM + ~1.5 TB swap (assuming a
-Ceres integer overflow doesn't stop you first).
+Don't go much above 12000 images in a single scene. Past that, pass ODM's
+`--split` / `--split-overlap` and let ODM build submodels internally, then merge
+them. Note this still runs in one pod, with no fan out across workers.
 
 ## Observed datapoints
 
-64 GB RAM machine (12 core):
+64 GB RAM machine (12 core), no swap: ~4000 image ceiling. With ~2x swap
+(127 GB):
 
-- **Without swap:** ~4000 image ceiling.
-- **With ~2x swap (127 GB):**
-  - 1589 images: barely touches swap.
-  - 1869 images: nearly exhausts swap.
-  - 2658 images: runs out of swap, OOM-killed in OpenMVS, but recovers and finishes.
-  - 4778 images: OOM-killed in OpenMVS (survives), then OOM-killed again in mvs-texturing and dies.
+- Comfortable to ~1600. Swap nearly exhausted at 1869.
+- 2658 images: out of swap, OOM-killed in OpenMVS, recovers and finishes.
+- 4778 images: OOM-killed in OpenMVS, then again in mvs-texturing, and dies.
+- ~144 GB peak for 3000 images, so ~4000 per submodel is the practical limit.
+  Freetown WJ (34k images) used `--split 8000` to stay inside that.
 
-Peak usage was ~144 GB for 3000 images on a 64 GB + swap server, which lines up
-with a practical ceiling near 4000 images per submodel. Freetown WJ (34k images)
-ran with `--split 8000` to keep each submodel within these bounds.
+11972 images, ODX 3.8.3 (OpenSfM v1), `--sfm-algorithm triangulation`, on a
+384 GiB node with 743 GiB of swap (`memory.max` 360 GiB):
+
+- Sparse SfM plus undistort took 8h20m at a ~192 GiB plateau. ODM 3.6.1 on the
+  default incremental SfM never finished it in 48h.
+- `pc-quality medium`: ~100 GiB steady, then one transient over 932 GiB in
+  depth-map estimation. Blew through resident + swap and the pod was killed.
+- `pc-quality low`: same shape, 709 GiB transient. Survived, but sat 27 minutes
+  pinned at `memory.max` pushing 344 GiB through swap.
+- Quartering the depth-map pixels only moved that peak ~25%, so `pc-quality`
+  isn't the right flag to optimise on. Size the node instead.
+- Everything after densify is cheap: fusion 67 GiB, filtering 18 GiB, meshing
+  45 GiB. Texturing hits 337 GiB but it's page cache, so swap stays flat.
 
 ## Notes
 
-- On AWS/Karpenter, `r7iz.8xlarge` benchmarked faster than `r8i.8xlarge`, but
-  Karpenter picks whatever capacity is available per run, so this rarely matters.
-- The same swap approach should work on non-Karpenter clusters that attach swap
-  from local disk instead of via Karpenter node config; see the generic setup in
-  [`swap.md`](./swap.md).
-- With a machine that has plenty of RAM, you can skip swap tuning entirely.
+- Prod sizes 12k jobs onto an `r6id.24xlarge` (96 vCPU, 768 GiB, 1.5 TiB NVMe
+  swap): 1200 GiB peak estimate, 600 GiB request, 720 GiB `memory.max`. See
+  `apps/karpenter/scaleodm-nodepool.yaml` in `k8s-infra`.
+- Depth-map estimation runs behind two worker threads, so cores past ~48 only
+  speed up matching and undistort.
+- The swap approach works on non-Karpenter clusters that attach swap from local
+  disk; see the generic setup in [`swap.md`](./swap.md).
+- With plenty of real RAM, skip swap tuning entirely.

@@ -283,11 +283,11 @@ func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
 	assert.InDelta(t, 27, estimateMemoryGiB(250), 0.001)
 	// Interpolation between (500, 37) and (1000, 58): ratio=200/500=0.4, ram=37+0.4*21=45.4.
 	assert.InDelta(t, 45.4, estimateMemoryGiB(700), 0.001)
-	// At the last point, return its value.
+	// Table value returned as-is when under the cap.
 	assert.InDelta(t, 227, estimateMemoryGiB(5000), 0.001)
-	// Beyond the table, extrapolate along the last segment slope
-	// (64/1500 = 0.04267/image), clamped by the 256 GiB default max:
-	// 8000 -> 227 + 3000*0.04267 = ~355, clamped to 256.
+	// Interpolation on the steep (5000, 227) -> (12000, 800) segment
+	// (573/7000 = 0.08186/image), clamped by the 256 GiB default max:
+	// 8000 -> 227 + 3000*0.08186 = ~473, clamped to 256.
 	assert.InDelta(t, 256, estimateMemoryGiB(8000), 0.001)
 }
 
@@ -297,8 +297,8 @@ func TestEstimateMemoryGiB_ExtrapolatesBeyondTable(t *testing.T) {
 	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
 
 	// With the cap raised, 13000 images extrapolate to
-	// 227 + (13000-5000)*0.04267 = ~568 GiB peak.
-	assert.InDelta(t, 568, estimateMemoryGiB(13000), 1.0)
+	// 800 + (13000-12000)*0.08186 = ~882 GiB peak.
+	assert.InDelta(t, 882, estimateMemoryGiB(13000), 1.0)
 }
 
 // withSwapRatio sets the swap ratio (default is 0/off) for tests that exercise
