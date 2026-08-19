@@ -51,14 +51,29 @@ kubectl logs -l workflows.argoproj.io/workflow=<uuid> --tail=200
 | Flag | Why |
 | --- | --- |
 | `sfm-algorithm=triangulation` | Places cameras from GPS instead of adding them one at a time. Needs OpenSfM 1.0, so ODX only. |
-| `matcher-neighbors=24` | Bounds matching to nearby frames on gridded aerial sets. |
-| `use-hybrid-bundle-adjustment` | Cheaper bundle adjustment past a few thousand images. |
-| `auto-boundary` | Trims the ragged edge of the reconstruction. |
+| `boundary=<AOI GeoJSON>` | Clips the reconstruction to the real project area. Prefer this over `auto-boundary`. |
 | `split=400` + `split-overlap=150` | Caps submodel size on stock ODM, where reconstruction cost grows superlinearly. |
 
 `sfm-algorithm=triangulation` on an image without OpenSfM 1.0 fails at the
 sparse stage, so change one variable at a time and keep a stock-image run of the
 same dataset to compare against.
+
+### Flags to avoid on large datasets
+
+Both of these were previously recommended here. They buy speed by removing
+global consistency, and stacked on a 12k-image scene they produced a
+reconstruction spanning 20 x 13 km over a 3 x 3 km site.
+
+| Flag | Why not |
+| --- | --- |
+| `matcher-neighbors=<n>` | Any value > 0 forces `matching_graph_rounds: 0` in ODM/ODX, removing the long-range candidate pairs that make a large block globally rigid. Leave it unset to get 20 rounds (ODX) / 50 (ODM). |
+| `use-hybrid-bundle-adjustment` | Sets `local_bundle_radius: 1` (immediate neighbours only). Unset gives `0`, which uses the global solver. |
+| `auto-boundary` | Buffers the convex hull of the camera shots by `avg_gsd * 100`, where the GSD is in cm but the buffer is applied in metres — a 4.3 cm GSD becomes a 433 m buffer. It rarely trims anything useful. |
+
+Independently of any flag, ODX/OpenSfM swaps global bundle adjustment for a
+stochastic 500-camera-per-round solver above **4,000 shots**, and that path holds
+camera intrinsics fixed. Keeping submodels under 4,000 images is the only way to
+get focal length and distortion refined.
 
 ## Notes
 

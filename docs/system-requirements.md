@@ -51,8 +51,14 @@ them. Note this still runs in one pod, with no fan out across workers.
   pinned at `memory.max` pushing 344 GiB through swap.
 - Quartering the depth-map pixels only moved that peak ~25%, so `pc-quality`
   isn't the right flag to optimise on. Size the node instead.
-- Everything after densify is cheap: fusion 67 GiB, filtering 18 GiB, meshing
-  45 GiB. Texturing hits 337 GiB but it's page cache, so swap stays flat.
+- Fusion 67 GiB, filtering 18 GiB, meshing 45 GiB. Texturing hits 337 GiB but
+  it's page cache, so swap stays flat.
+- `odm_dem` + `odm_orthophoto` then pinned `memory.max` for **1h52m** and pushed
+  419 GiB of swap — longer and larger than the densify transient. Most of that
+  was wasted: a broken reconstruction inflated the ortho canvas to 77 Gpixels of
+  which 92% was cropped away. Rendering cost tracks reconstruction *extent*, so
+  bad geometry is also a sizing problem. See
+  [`plans/DEBUG-odx-reconstruction-quality.md`](../plans/DEBUG-odx-reconstruction-quality.md).
 
 ## Notes
 
