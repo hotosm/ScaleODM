@@ -635,6 +635,22 @@ func workflowContainerSecurityContext() *apiv1.SecurityContext {
 	}
 }
 
+// ODM hardcodes its AI model cache here; EROFS is swallowed by opendm/opc.py,
+// silently skipping DTM classification.
+const odmModelCachePath = "/code/storage"
+
+// Redirect caches to /tmp; uid 1000's home is on the read-only root filesystem.
+func odmProcessEnvVars() []apiv1.EnvVar {
+	return []apiv1.EnvVar{
+		{Name: "TMPDIR", Value: "/tmp"},
+		{Name: "HOME", Value: "/tmp/home"},
+		{Name: "XDG_CACHE_HOME", Value: "/tmp/home/.cache"},
+		{Name: "XDG_CONFIG_HOME", Value: "/tmp/home/.config"},
+		{Name: "XDG_DATA_HOME", Value: "/tmp/home/.local/share"},
+		{Name: "MPLCONFIGDIR", Value: "/tmp/home/.config/matplotlib"},
+	}
+}
+
 // s3SecretEnvVars returns env vars that reference credentials from the unified
 // runtime Kubernetes Secret via secretKeyRef. This keeps credentials out of the
 // Argo Workflow spec and resolves them only at pod runtime.
@@ -810,10 +826,11 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 			Command:         []string{"/bin/bash", "-c"},
 			Resources:       containerRequirements(cfg.ProcessResources),
 			SecurityContext: workflowContainerSecurityContext(),
-			Env: []apiv1.EnvVar{
+			Env:             odmProcessEnvVars(),
+			VolumeMounts: []apiv1.VolumeMount{
 				{
-					Name:  "TMPDIR",
-					Value: "/tmp",
+					Name:      "odm-model-cache",
+					MountPath: odmModelCachePath,
 				},
 			},
 			Args: []string{
@@ -822,6 +839,7 @@ set -e
 set -o pipefail
 JOB_ID="{{workflow.name}}"
 echo "=== process attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
+mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$MPLCONFIGDIR"
 echo "Running ODM processing..."
 echo "Processing job: $JOB_ID"
 echo "ODM Project ID: %s"
@@ -953,7 +971,17 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 			},
 		},
 	}
-	mainTemplate.Volumes = []apiv1.Volume{tmpVolume}
+	modelCacheSizeLimit := resource.MustParse("2Gi")
+	modelCacheVolume := apiv1.Volume{
+		Name: "odm-model-cache",
+		VolumeSource: apiv1.VolumeSource{
+			EmptyDir: &apiv1.EmptyDirVolumeSource{
+				SizeLimit: &modelCacheSizeLimit,
+			},
+		},
+	}
+
+	mainTemplate.Volumes = []apiv1.Volume{tmpVolume, modelCacheVolume}
 	// Cleanup container only reads the workspace - no /tmp scratch needed
 	// since it doesn't run rclone or any tool that writes outside the mount.
 	cleanupTemplate.Volumes = nil

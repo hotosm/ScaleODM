@@ -545,13 +545,11 @@ func TestBuildODMWorkflow_UsesEmptyDirWorkspaceInEmptyDirMode(t *testing.T) {
 	require.NotNil(t, wf)
 	require.Empty(t, wf.Spec.VolumeClaimTemplates)
 	require.Len(t, wf.Spec.Templates, 2)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 2)
-	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
-	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
-	assert.Equal(t, "workspace", wf.Spec.Templates[0].Volumes[1].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[1].EmptyDir)
+	tmpVol := volumeByName(t, wf.Spec.Templates[0].Volumes, "tmp")
+	require.NotNil(t, tmpVol.EmptyDir)
+	require.NotNil(t, tmpVol.EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", tmpVol.EmptyDir.SizeLimit.String())
+	require.NotNil(t, volumeByName(t, wf.Spec.Templates[0].Volumes, "workspace").EmptyDir)
 }
 
 func TestBuildODMWorkflow_UsesPVCWorkspaceInPVCMode(t *testing.T) {
@@ -571,11 +569,12 @@ func TestBuildODMWorkflow_UsesPVCWorkspaceInPVCMode(t *testing.T) {
 
 	require.NotNil(t, wf)
 	require.Len(t, wf.Spec.VolumeClaimTemplates, 1)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
-	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
-	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
+	assert.NotContains(t, volumeNames(wf.Spec.Templates[0].Volumes), "workspace",
+		"workspace comes from the volumeClaimTemplate in PVC mode")
+	tmpVol := volumeByName(t, wf.Spec.Templates[0].Volumes, "tmp")
+	require.NotNil(t, tmpVol.EmptyDir)
+	require.NotNil(t, tmpVol.EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", tmpVol.EmptyDir.SizeLimit.String())
 
 	claim := wf.Spec.VolumeClaimTemplates[0]
 	assert.Equal(t, "workspace", claim.Name)
@@ -603,11 +602,12 @@ func TestBuildODMWorkflow_UsesPVCWorkspaceInAutoModeWhenStorageClassSet(t *testi
 
 	require.NotNil(t, wf)
 	require.Len(t, wf.Spec.VolumeClaimTemplates, 1)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 1)
-	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
-	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
+	assert.NotContains(t, volumeNames(wf.Spec.Templates[0].Volumes), "workspace",
+		"workspace comes from the volumeClaimTemplate in PVC mode")
+	tmpVol := volumeByName(t, wf.Spec.Templates[0].Volumes, "tmp")
+	require.NotNil(t, tmpVol.EmptyDir)
+	require.NotNil(t, tmpVol.EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", tmpVol.EmptyDir.SizeLimit.String())
 
 	claim := wf.Spec.VolumeClaimTemplates[0]
 	require.NotNil(t, claim.Spec.StorageClassName)
@@ -632,13 +632,11 @@ func TestBuildODMWorkflow_UsesEmptyDirWorkspaceInAutoModeWithoutStorageClass(t *
 
 	require.NotNil(t, wf)
 	require.Empty(t, wf.Spec.VolumeClaimTemplates)
-	require.Len(t, wf.Spec.Templates[0].Volumes, 2)
-	assert.Equal(t, "tmp", wf.Spec.Templates[0].Volumes[0].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit)
-	assert.Equal(t, "20Gi", wf.Spec.Templates[0].Volumes[0].EmptyDir.SizeLimit.String())
-	assert.Equal(t, "workspace", wf.Spec.Templates[0].Volumes[1].Name)
-	require.NotNil(t, wf.Spec.Templates[0].Volumes[1].EmptyDir)
+	tmpVol := volumeByName(t, wf.Spec.Templates[0].Volumes, "tmp")
+	require.NotNil(t, tmpVol.EmptyDir)
+	require.NotNil(t, tmpVol.EmptyDir.SizeLimit)
+	assert.Equal(t, "20Gi", tmpVol.EmptyDir.SizeLimit.String())
+	require.NotNil(t, volumeByName(t, wf.Spec.Templates[0].Volumes, "workspace").EmptyDir)
 }
 
 func TestApplyDynamicWorkspaceSize_DisabledKeepsStaticSize(t *testing.T) {
@@ -988,4 +986,111 @@ func TestApplyDynamicWorkspaceSize_EmptyDirUnaffected(t *testing.T) {
 	applyDynamicWorkspaceSize(cfg)
 
 	assert.Equal(t, "30Gi", cfg.Workspace.Size)
+}
+
+func TestBuildODMWorkflow_ProcessContainerHasWritableHome(t *testing.T) {
+	cfg := NewDefaultODMConfig(
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--fast-orthophoto"},
+	)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	require.NotNil(t, wf.Spec.Templates[0].ContainerSet)
+
+	var process *wfv1.ContainerNode
+	for i := range wf.Spec.Templates[0].ContainerSet.Containers {
+		if wf.Spec.Templates[0].ContainerSet.Containers[i].Name == "process" {
+			process = &wf.Spec.Templates[0].ContainerSet.Containers[i]
+			break
+		}
+	}
+	require.NotNil(t, process)
+
+	env := map[string]string{}
+	for _, e := range process.Env {
+		env[e.Name] = e.Value
+	}
+
+	for _, name := range []string{
+		"TMPDIR", "HOME", "XDG_CACHE_HOME", "XDG_CONFIG_HOME",
+		"XDG_DATA_HOME", "MPLCONFIGDIR",
+	} {
+		value, ok := env[name]
+		require.True(t, ok, "%s must be set on the process container", name)
+		assert.True(t, strings.HasPrefix(value, "/tmp"),
+			"%s=%s must live on the writable /tmp emptyDir", name, value)
+	}
+
+	// Some tools expect $HOME to exist rather than creating it.
+	require.Len(t, process.Args, 1)
+	assert.Contains(t, process.Args[0], `mkdir -p "$HOME"`)
+	assert.Contains(t, process.Args[0], `"$MPLCONFIGDIR"`)
+}
+
+func TestBuildODMWorkflow_ProcessContainerHasWritableModelCache(t *testing.T) {
+	cfg := NewDefaultODMConfig(
+		"test-project",
+		"s3://bucket/images/",
+		"s3://bucket/output/",
+		[]string{"--dtm"},
+	)
+
+	client := &Client{namespace: "test-namespace"}
+	wf := client.buildODMWorkflow(cfg)
+
+	main := wf.Spec.Templates[0]
+	require.NotNil(t, main.ContainerSet)
+
+	var volume *apiv1.Volume
+	for i := range main.Volumes {
+		if main.Volumes[i].Name == "odm-model-cache" {
+			volume = &main.Volumes[i]
+			break
+		}
+	}
+	require.NotNil(t, volume, "model cache volume must be declared on the template")
+	require.NotNil(t, volume.EmptyDir, "model cache must be an emptyDir, not the read-only root")
+	assert.NotNil(t, volume.EmptyDir.SizeLimit, "emptyDir needs a sizeLimit or it can fill the node")
+
+	for _, ctr := range main.ContainerSet.Containers {
+		var mounted bool
+		for _, m := range ctr.VolumeMounts {
+			if m.Name == "odm-model-cache" {
+				mounted = true
+				assert.Equal(t, odmModelCachePath, m.MountPath)
+			}
+		}
+		assert.Equal(t, ctr.Name == "process", mounted,
+			"model cache mount on %q: got %v", ctr.Name, mounted)
+	}
+
+	for _, tmpl := range wf.Spec.Templates[1:] {
+		for _, v := range tmpl.Volumes {
+			assert.NotEqual(t, "odm-model-cache", v.Name,
+				"template %q does not need the model cache", tmpl.Name)
+		}
+	}
+}
+
+func volumeByName(t *testing.T, volumes []apiv1.Volume, name string) apiv1.Volume {
+	t.Helper()
+	for _, v := range volumes {
+		if v.Name == name {
+			return v
+		}
+	}
+	require.Failf(t, "volume not found", "no volume %q in %v", name, volumeNames(volumes))
+	return apiv1.Volume{}
+}
+
+func volumeNames(volumes []apiv1.Volume) []string {
+	names := make([]string, 0, len(volumes))
+	for _, v := range volumes {
+		names = append(names, v.Name)
+	}
+	return names
 }
