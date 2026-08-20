@@ -79,6 +79,7 @@ func TestE2E_CreateAndListJobs(t *testing.T) {
 			"s3://test-bucket/output/",
 			[]string{"--fast-orthophoto"},
 			"us-east-1",
+			nil,
 		)
 		require.NoError(t, createErr)
 	}
@@ -128,6 +129,7 @@ func TestE2E_JobLifecycle(t *testing.T) {
 		"s3://test-bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should be created successfully")
