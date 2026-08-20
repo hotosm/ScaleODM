@@ -51,7 +51,8 @@ kubectl logs -l workflows.argoproj.io/workflow=<uuid> --tail=200
 | Flag | Why |
 | --- | --- |
 | `sfm-algorithm=triangulation` | Places cameras from GPS instead of adding them one at a time. Needs OpenSfM 1.0, so ODX only. |
-| `boundary=<AOI GeoJSON>` | Clips the reconstruction to the real project area. Prefer this over `auto-boundary`. |
+| `boundary=<AOI GeoJSON>` | Clips the reconstruction to the real project area. Must be a single Polygon: ODM reads it with fiona and refuses a MultiPolygon or a multi-feature FeatureCollection. ODM renders the DEM and orthophoto over the whole reconstruction extent and crops afterwards, so a run that sprawls pays for the wasted pixels first. Pass inline GeoJSON or an `s3://` URL, see [Boundary](./nodeodm-compatibility.md#boundary). |
+| `rolling-shutter` | Corrects the skew from the sensor reading out row by row while the aircraft moves. An electronic shutter at 12 m/s and a 4 cm GSD is ~6 px of skew. ODM holds a readout time per camera model (`opendm/rollingshutter.py`), but an unlisted camera silently gets a 30 ms guess, so check the log line and set `rolling-shutter-readout` if the camera is missing. |
 | `split=400` + `split-overlap=150` | Caps submodel size on stock ODM, where reconstruction cost grows superlinearly. |
 
 `sfm-algorithm=triangulation` on an image without OpenSfM 1.0 fails at the
@@ -74,6 +75,32 @@ Independently of any flag, ODX/OpenSfM swaps global bundle adjustment for a
 stochastic 500-camera-per-round solver above **4,000 shots**, and that path holds
 camera intrinsics fixed. Keeping submodels under 4,000 images is the only way to
 get focal length and distortion refined.
+
+## Defects no flag can fix
+
+Measured on a 12,000-image project flown with four DJI Mini 4 Pro airframes.
+All three need fixing at ingest, before ODM sees the imagery.
+
+- **The altitude datum resets on every power cycle.** `AbsoluteAltitude` is
+  `RelativeAltitude` plus a constant fixed at power-on: across 36 flights the
+  difference had a standard deviation of 0.0000 in 33 of them. Two flights over
+  the same ground 37 minutes apart reported altitudes 92 m apart, median 41 m
+  across all co-located pairs. ODM picks matching candidates in 3D, so repeat
+  passes over the same ground drop out of each other's candidate list and never
+  match. Use `RelativeAltitude`, or normalise onto one datum against a DEM and
+  write it back into the EXIF, since ODM reads the file and not your database.
+- **Digital zoom does not change the reported focal length.**
+  `DigitalZoomRatio` was 2 on 11.9% of images, which on a Mini 4 Pro is a
+  sensor crop, yet `FocalLength`, `FocalLengthIn35mmFormat` and `FOV` were
+  identical on every image. ODM fits one camera model across images whose real
+  focal length differs by 2x. Drop the zoomed frames.
+- **Nadir is not -90.** Gimbal pitch was exactly -80.0 on 12,145 of 12,338
+  images, consistent across all four aircraft, so it is the platform and not a
+  crew choice. A filter expressed as a tolerance around -90 will not do what it
+  says. Derive the held angle from the data.
+
+A 249 g airframe with an electronic shutter, no RTK and `SurveyingMode: 0` will
+not match survey-grade kit whatever flags it is processed with.
 
 ## Notes
 

@@ -25,6 +25,7 @@ func TestCreateJob(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 
 	require.NoError(t, err)
@@ -54,6 +55,7 @@ func TestGetJob(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -93,6 +95,7 @@ func TestUpdateJobStatus(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -134,6 +137,7 @@ func TestUpdateJobStatus_WithError(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -212,6 +216,7 @@ func TestUpdateJobMetadata(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -246,6 +251,7 @@ func TestListJobs(t *testing.T) {
 			"s3://bucket/output/",
 			[]string{"--fast-orthophoto"},
 			"us-east-1",
+			nil,
 		)
 		require.NoError(t, createErr)
 	}
@@ -274,6 +280,7 @@ func TestListJobs_ByProjectID(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -285,6 +292,7 @@ func TestListJobs_ByProjectID(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -296,6 +304,7 @@ func TestListJobs_ByProjectID(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -322,6 +331,7 @@ func TestDeleteJob(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -360,6 +370,7 @@ func TestMergeJobMetadata(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -395,6 +406,7 @@ func TestRestartJobMetadata_AtomicSwap(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateJobMetadata(ctx, "test-workflow-old", map[string]interface{}{"s3_endpoint": "http://localhost:9000", "image_count": 10, "image_total_bytes": 2048}))

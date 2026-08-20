@@ -415,3 +415,33 @@ fi
 echo ""
 echo "Workspace snapshot complete."`
 }
+
+// GenerateBoundaryFetchScript writes or downloads a boundary during the download stage.
+func GenerateBoundaryFetchScript(destPath, s3Path, geoJSON string) string {
+	switch {
+	case s3Path != "":
+		return `
+echo "Fetching ODM boundary from ` + s3Path + `..."
+BOUNDARY_REMOTE=$(echo "` + s3Path + `" | sed 's|^s3://|s3:|')
+if ! rclone copyto "$BOUNDARY_REMOTE" "` + destPath + `"; then
+  echo "ERROR: could not fetch boundary from ` + s3Path + `" >&2
+  exit 1
+fi
+if [ ! -s "` + destPath + `" ]; then
+  echo "ERROR: boundary fetched from ` + s3Path + ` is empty" >&2
+  exit 1
+fi
+echo "Boundary written to ` + destPath + ` ($(wc -c < "` + destPath + `") bytes)"
+`
+	case geoJSON != "":
+		return `
+echo "Writing inline ODM boundary..."
+cat > "` + destPath + `" <<'SCALEODM_BOUNDARY_EOF'
+` + geoJSON + `
+SCALEODM_BOUNDARY_EOF
+echo "Boundary written to ` + destPath + ` ($(wc -c < "` + destPath + `") bytes)"
+`
+	default:
+		return ""
+	}
+}

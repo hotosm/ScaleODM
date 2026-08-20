@@ -56,12 +56,67 @@ const (
 	metadataUseDefaultExcludesKey    = "use_default_excludes"
 	metadataS3ScanDepthKey           = "s3_scan_depth"
 	metadataCapacityTypeKey          = "capacity_type"
+	metadataBoundaryGeoJSONKey       = "boundary_geojson"
+	metadataBoundaryS3PathKey        = "boundary_s3_path"
 )
 
 const (
 	taskAssetsDefaultAdditionalLimit = 100
 	taskAssetsMaxAdditionalLimit     = 1000
 )
+
+// odmFlagsFromOptions converts NodeODM options to flags and handles boundaries separately.
+func odmFlagsFromOptions(options []TaskOption) ([]string, workflows.BoundarySource, error) {
+	var (
+		odmFlags []string
+		boundary workflows.BoundarySource
+	)
+
+	for _, opt := range options {
+		if opt.Value == nil {
+			continue
+		}
+		// Skip options explicitly set to false.
+		if boolVal, ok := opt.Value.(bool); ok && !boolVal {
+			continue
+		}
+
+		if opt.Name == workflows.BoundaryOptionName {
+			source, passthrough, err := workflows.ParseBoundaryValue(boundaryOptionString(opt.Value))
+			if err != nil {
+				return nil, workflows.BoundarySource{}, err
+			}
+			if source.IsSet() {
+				boundary = source
+				continue
+			}
+			odmFlags = append(odmFlags, fmt.Sprintf("--%s=%s", opt.Name, passthrough))
+			continue
+		}
+
+		flag := fmt.Sprintf("--%s", opt.Name)
+		if boolVal, ok := opt.Value.(bool); ok && boolVal {
+			odmFlags = append(odmFlags, flag)
+		} else {
+			odmFlags = append(odmFlags, fmt.Sprintf("%s=%v", flag, opt.Value))
+		}
+	}
+
+	return odmFlags, boundary, nil
+}
+
+// boundaryOptionString preserves GeoJSON objects when converting a boundary to text.
+func boundaryOptionString(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case map[string]any, []any:
+		if encoded, err := json.Marshal(v); err == nil {
+			return string(encoded)
+		}
+	}
+	return fmt.Sprintf("%v", value)
+}
 
 func normalizeOptionalS3Endpoint(endpoint string) (string, error) {
 	if strings.TrimSpace(endpoint) == "" {
@@ -228,6 +283,19 @@ func metadataExcludePaths(metadataJSON []byte) ([]string, bool) {
 		}
 	}
 	return out, true
+}
+
+// metadataBoundary reads the boundary saved when the task was submitted.
+func metadataBoundary(metadataJSON []byte) workflows.BoundarySource {
+	metaMap := parseMetadataMap(metadataJSON)
+	var boundary workflows.BoundarySource
+	if v, ok := metaMap[metadataBoundaryGeoJSONKey].(string); ok {
+		boundary.GeoJSON = v
+	}
+	if v, ok := metaMap[metadataBoundaryS3PathKey].(string); ok {
+		boundary.S3Path = v
+	}
+	return boundary
 }
 
 func metadataUseDefaultExcludes(metadataJSON []byte) bool {
@@ -752,6 +820,7 @@ func (a *API) registerNodeODMRoutes() {
 		// Parse options if provided
 		var options []TaskOption
 		var odmFlags []string
+		var boundary workflows.BoundarySource
 		if req.Options != "" {
 			if err := json.Unmarshal([]byte(req.Options), &options); err != nil {
 				metricResult = "failure"
@@ -762,15 +831,14 @@ func (a *API) registerNodeODMRoutes() {
 			}
 
 			// Convert options to ODM flags
-			for _, opt := range options {
-				flag := fmt.Sprintf("--%s", opt.Name)
-				if opt.Value != nil && opt.Value != false {
-					if boolVal, ok := opt.Value.(bool); ok && boolVal {
-						odmFlags = append(odmFlags, flag)
-					} else {
-						odmFlags = append(odmFlags, fmt.Sprintf("%s=%v", flag, opt.Value))
-					}
-				}
+			var flagsErr error
+			odmFlags, boundary, flagsErr = odmFlagsFromOptions(options)
+			if flagsErr != nil {
+				metricResult = "failure"
+				metricReason = "invalid_options"
+				span.AddEvent("task.new.rejected", trace.WithAttributes(attribute.String("reason", metricReason)))
+				log.Printf("POST /task/new: invalid options: %v", flagsErr)
+				return nil, huma.NewError(400, flagsErr.Error())
 			}
 		}
 
@@ -908,6 +976,7 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.ODMImage = odmImage
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
+		wfConfig.Boundary = boundary
 
 		// Submit workflow to Argo
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
@@ -943,6 +1012,11 @@ func (a *API) registerNodeODMRoutes() {
 			writePath,
 			odmFlags,
 			s3Region,
+			// Save the boundary with the job so restarts cannot lose it.
+			map[string]any{
+				metadataBoundaryGeoJSONKey: boundary.GeoJSON,
+				metadataBoundaryS3PathKey:  boundary.S3Path,
+			},
 		)
 		if err != nil {
 			metricResult = "failure"
@@ -1188,6 +1262,18 @@ func (a *API) registerNodeODMRoutes() {
 			} else {
 				log.Printf("GET /task/%s/info: failed to unmarshal stored ODM flags: %v", input.UUID, err)
 			}
+		}
+
+		// Add the saved boundary back to the options returned to clients.
+		if boundary := metadataBoundary(job.Metadata); boundary.IsSet() {
+			value := boundary.GeoJSON
+			if value == "" {
+				value = boundary.S3Path
+			}
+			info.Options = append(info.Options, TaskOption{
+				Name:  workflows.BoundaryOptionName,
+				Value: value,
+			})
 		}
 
 		// Get console output if requested
@@ -1453,26 +1539,24 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Parse new options if provided
 		var odmFlags []string
+		var boundary workflows.BoundarySource
 		if input.Body.Options != "" {
 			var options []TaskOption
 			if err := json.Unmarshal([]byte(input.Body.Options), &options); err != nil {
 				log.Printf("POST /task/restart: invalid options JSON for %q: %v", input.Body.UUID, err)
 				return nil, huma.NewError(400, "Invalid options JSON", err)
 			}
-			for _, opt := range options {
-				flag := fmt.Sprintf("--%s", opt.Name)
-				if opt.Value != nil && opt.Value != false {
-					if boolVal, ok := opt.Value.(bool); ok && boolVal {
-						odmFlags = append(odmFlags, flag)
-					} else {
-						odmFlags = append(odmFlags, fmt.Sprintf("%s=%v", flag, opt.Value))
-					}
-				}
+			var flagsErr error
+			odmFlags, boundary, flagsErr = odmFlagsFromOptions(options)
+			if flagsErr != nil {
+				log.Printf("POST /task/restart: invalid options for %q: %v", input.Body.UUID, flagsErr)
+				return nil, huma.NewError(400, flagsErr.Error())
 			}
 		} else {
 			if err := json.Unmarshal(metadata.ODMFlags, &odmFlags); err != nil {
 				return nil, huma.NewError(500, "Failed to parse stored task options", err)
 			}
+			boundary = metadataBoundary(metadata.Metadata)
 		}
 		for _, flag := range odmFlags {
 			if err := validateShellSafe(flag, "options flag"); err != nil {
@@ -1530,6 +1614,7 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.CapacityType = capacityType
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
+		wfConfig.Boundary = boundary
 
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
 		if err != nil {
@@ -1541,6 +1626,8 @@ func (a *API) registerNodeODMRoutes() {
 			metadataImageCountKey:            imageCount,
 			metadataImageTotalBytesKey:       imageTotalBytes,
 			metadataWorkflowMissingFirstSeen: nil,
+			metadataBoundaryGeoJSONKey:       boundary.GeoJSON,
+			metadataBoundaryS3PathKey:        boundary.S3Path,
 		}
 		if s3Endpoint != "" {
 			metadataPatch[metadataS3EndpointKey] = s3Endpoint

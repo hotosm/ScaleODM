@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -85,6 +86,9 @@ type ODMPipelineConfig struct {
 	// directly under the given path. Values > 1 let callers point at a
 	// higher-level project root and pick up imagery in nested task subdirs.
 	S3ScanDepth int
+
+	// Boundary is written to the workspace before ODM starts.
+	Boundary BoundarySource
 
 	RuntimeGuardrails WorkflowRuntimeGuardrails
 	Workspace         WorkspaceConfig
@@ -221,6 +225,7 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 
 	applyOnDemandUpgrade(cfg)
 	applyDynamicWorkspaceSize(cfg)
+	applyMaxConcurrencyFromCPULimit(cfg)
 
 	wf := c.buildODMWorkflow(cfg)
 
@@ -237,6 +242,52 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 	observability.RecordWorkflowCreate("success", "none", time.Since(createStart))
 
 	return created, nil
+}
+
+// applyMaxConcurrencyFromCPULimit caps ODM workers to the pod limit unless already set.
+func applyMaxConcurrencyFromCPULimit(cfg *ODMPipelineConfig) {
+	for _, f := range cfg.ODMFlags {
+		if f == "--max-concurrency" || strings.HasPrefix(f, "--max-concurrency=") {
+			return
+		}
+	}
+
+	cores := parseCPUCores(cfg.ProcessResources.Limits.CPU)
+	if cores < 1 {
+		return
+	}
+	cfg.ODMFlags = append(cfg.ODMFlags, fmt.Sprintf("--max-concurrency=%d", cores))
+}
+
+// parseCPUCores converts a Kubernetes CPU quantity to whole cores.
+func parseCPUCores(quantity string) int {
+	value := strings.TrimSpace(quantity)
+	if value == "" {
+		return 0
+	}
+
+	cores := 0.0
+	if milli, ok := strings.CutSuffix(value, "m"); ok {
+		parsed, err := strconv.Atoi(milli)
+		if err != nil {
+			return 0
+		}
+		cores = float64(parsed) / 1000
+	} else {
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return 0
+		}
+		cores = parsed
+	}
+
+	if cores <= 0 {
+		return 0
+	}
+	if cores < 1 {
+		return 1
+	}
+	return int(cores)
 }
 
 // flagMemoryMultiplier adjusts RAM estimates for high/low-cost ODM modes.
@@ -810,7 +861,10 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 			Args: []string{fmt.Sprintf(`set -e
 set -o pipefail
 echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
-%s`, s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth))},
+%s%s`,
+				s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth),
+				s3.GenerateBoundaryFetchScript(BoundaryFilePath(jobID), cfg.Boundary.S3Path, cfg.Boundary.GeoJSON),
+			)},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
 			SecurityContext: workflowContainerSecurityContext(),
@@ -818,7 +872,12 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 	}
 
 	// Run ODM with unbuffered Python so partial logs are flushed promptly.
-	odmFlagsStr := strings.Join(cfg.ODMFlags, " ")
+	processFlags := cfg.ODMFlags
+	if cfg.Boundary.IsSet() {
+		processFlags = append(append([]string{}, processFlags...),
+			fmt.Sprintf("--boundary=%s", BoundaryFilePath(jobID)))
+	}
+	odmFlagsStr := strings.Join(processFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:            "process",

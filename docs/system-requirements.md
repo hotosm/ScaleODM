@@ -57,8 +57,8 @@ them. Note this still runs in one pod, with no fan out across workers.
   419 GiB of swap — longer and larger than the densify transient. Most of that
   was wasted: a broken reconstruction inflated the ortho canvas to 77 Gpixels of
   which 92% was cropped away. Rendering cost tracks reconstruction *extent*, so
-  bad geometry is also a sizing problem. See
-  [`plans/DEBUG-odx-reconstruction-quality.md`](../plans/DEBUG-odx-reconstruction-quality.md).
+  bad geometry is also a sizing problem: pass a real `--boundary`, and avoid the
+  flags listed in [`testing-alternative-images.md`](./testing-alternative-images.md).
 
 ## Notes
 
@@ -67,6 +67,10 @@ them. Note this still runs in one pod, with no fan out across workers.
   `apps/karpenter/scaleodm-nodepool.yaml` in `k8s-infra`.
 - Depth-map estimation runs behind two worker threads, so cores past ~48 only
   speed up matching and undistort.
+- When the pod has a CPU limit, ODM is given a matching `--max-concurrency`,
+  since its own default is every core on the node and would oversubscribe the
+  quota. With no limit set (as in prod) ODM keeps that default, and an explicit
+  caller value always wins.
 - The swap approach works on non-Karpenter clusters that attach swap from local
   disk; see the generic setup in [`swap.md`](./swap.md).
 - With plenty of real RAM, skip swap tuning entirely.

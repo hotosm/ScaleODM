@@ -74,17 +74,25 @@ func retryOnDeadlock(ctx context.Context, maxRetries int, fn func() error) error
 	return lastErr
 }
 
-// CreateJob records a new job metadata entry
-func (s *Store) CreateJob(ctx context.Context, workflowName, projectID, readPath, writePath string, odmFlags []string, s3Region string) (*JobMetadata, error) {
+// CreateJob records a new job and its initial metadata in one insert.
+func (s *Store) CreateJob(ctx context.Context, workflowName, projectID, readPath, writePath string, odmFlags []string, s3Region string, initialMetadata map[string]any) (*JobMetadata, error) {
 	flagsJSON, err := json.Marshal(odmFlags)
 	if err != nil {
 		return nil, fmt.Errorf("failed to marshal odm_flags: %w", err)
 	}
 
+	metadataJSON := []byte("{}")
+	if len(initialMetadata) > 0 {
+		metadataJSON, err = json.Marshal(initialMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+		}
+	}
+
 	query := `
 		INSERT INTO scaleodm_job_metadata
-		(workflow_name, odm_project_id, read_s3_path, write_s3_path, odm_flags, s3_region)
-		VALUES ($1, $2, $3, $4, $5, $6)
+		(workflow_name, odm_project_id, read_s3_path, write_s3_path, odm_flags, s3_region, metadata)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
 		RETURNING id, workflow_name, odm_project_id, read_s3_path, write_s3_path,
 		          odm_flags, s3_region, job_status, created_at
 	`
@@ -92,7 +100,7 @@ func (s *Store) CreateJob(ctx context.Context, workflowName, projectID, readPath
 	var job *JobMetadata
 	err = retryOnDeadlock(ctx, 3, func() error {
 		job = &JobMetadata{}
-		scanErr := s.db.Pool.QueryRow(ctx, query, workflowName, projectID, readPath, writePath, flagsJSON, s3Region).Scan(
+		scanErr := s.db.Pool.QueryRow(ctx, query, workflowName, projectID, readPath, writePath, flagsJSON, s3Region, metadataJSON).Scan(
 			&job.ID, &job.WorkflowName, &job.ODMProjectID, &job.ReadS3Path,
 			&job.WriteS3Path, &job.ODMFlags, &job.S3Region, &job.JobStatus, &job.CreatedAt,
 		)

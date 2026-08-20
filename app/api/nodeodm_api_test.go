@@ -332,6 +332,7 @@ func TestTaskInfoEndpoint(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -382,6 +383,7 @@ func TestTaskInfoDoesNotRegressPersistedStatusFromLiveUnknownPhase(t *testing.T)
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.UpdateJobStatus(ctx, workflowName, "running", nil))
@@ -452,6 +454,7 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 		"s3://bucket/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -517,6 +520,7 @@ func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -594,6 +598,7 @@ func TestTaskAssetsEndpoint_ErrorScenarios(t *testing.T) {
 		"",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 
@@ -621,6 +626,7 @@ func TestTaskAssetsEndpoint_AdditionalLimitClampFloor(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -659,6 +665,7 @@ func TestDownloadEndpoint_StillRedirectsForExistingAsset(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -695,6 +702,7 @@ func TestDownloadEndpoint_AliasResolvesNestedOrthophoto(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -733,6 +741,7 @@ func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -786,6 +795,7 @@ func TestDownloadEndpoint_AllZipMissingWithoutOutputsReturns404(t *testing.T) {
 		"s3://"+bucket+"/output/",
 		[]string{"--fast-orthophoto"},
 		"us-east-1",
+		nil,
 	)
 	require.NoError(t, err)
 	require.NoError(t, metadataStore.MergeJobMetadata(ctx, workflowName, map[string]interface{}{
@@ -1089,7 +1099,7 @@ func TestTaskNew_MetadataCreateFailureCompensatesWorkflow(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
-	_, err = metadataStore.CreateJob(ctx, "wf-new-fail", "existing", "s3://x/in", "s3://x/out", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err = metadataStore.CreateJob(ctx, "wf-new-fail", "existing", "s3://x/in", "s3://x/out", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	handler.ServeHTTP(w, req)
@@ -1105,7 +1115,7 @@ func TestTaskRestart_CreateFailureDoesNotDeleteOldWorkflowFirst(t *testing.T) {
 	ctx := context.Background()
 
 	metadataStore := meta.NewStore(db)
-	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	wfClient := &recordingWorkflowClient{
@@ -1133,9 +1143,9 @@ func TestTaskRestart_MetadataSwapFailureDeletesNewWorkflow(t *testing.T) {
 	ctx := context.Background()
 
 	metadataStore := meta.NewStore(db)
-	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
-	_, err = metadataStore.CreateJob(ctx, "new-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err = metadataStore.CreateJob(ctx, "new-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	wfClient := &recordingWorkflowClient{
@@ -1164,7 +1174,7 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 	ctx := context.Background()
 
 	metadataStore := meta.NewStore(db)
-	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	wfClient := &recordingWorkflowClient{

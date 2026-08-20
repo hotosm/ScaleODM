@@ -126,7 +126,7 @@ func TestTasksPageRendersAndEscapes(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-1", "<script>alert(1)</script>", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-1", "<script>alert(1)</script>", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/ui", nil)
@@ -145,11 +145,11 @@ func TestTasksJSONFiltersAndLimit(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-2", "project-a", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-2", "project-a", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateJobStatus(ctx, "wf-ui-2", "running", nil))
 
-	_, err = store.CreateJob(ctx, "wf-ui-3", "project-b", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err = store.CreateJob(ctx, "wf-ui-3", "project-b", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 	require.NoError(t, store.UpdateJobStatus(ctx, "wf-ui-3", "completed", nil))
 
@@ -178,7 +178,7 @@ func TestTasksJSONStatusFilterIsAppliedAfterReconcile(t *testing.T) {
 	})
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-reconcile-filter", "project-a", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-reconcile-filter", "project-a", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks?status=queued&projectID=project-a&limit=25", nil)
@@ -204,7 +204,7 @@ func TestTaskDetailEndpoints(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-4", "project-detail", "s3://bucket/in/", "s3://bucket/out/", []string{"--orthophoto-resolution=5"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-4", "project-detail", "s3://bucket/in/", "s3://bucket/out/", []string{"--orthophoto-resolution=5"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	pageReq := httptest.NewRequest(http.MethodGet, "/ui/tasks/wf-ui-4", nil)
@@ -250,7 +250,7 @@ func TestTaskOutputStreamsPlainText(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-5", "project-output", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-5", "project-output", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-5/output", nil)
@@ -265,7 +265,7 @@ func TestTaskOutputWithWriteS3PathUsesArchiveFallback(t *testing.T) {
 	store, server := setupServer(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-7", "project-output", "s3://bucket/in/", "s3://bucket/out/", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-7", "project-output", "s3://bucket/in/", "s3://bucket/out/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-7/output", nil)
@@ -280,7 +280,7 @@ func TestTaskOutputWithoutWorkflowClientReturns500(t *testing.T) {
 	store, server := setupServerWithoutWorkflowClient(t)
 	ctx := context.Background()
 
-	_, err := store.CreateJob(ctx, "wf-ui-6", "project-output", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1")
+	_, err := store.CreateJob(ctx, "wf-ui-6", "project-output", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodGet, "/ui/api/tasks/wf-ui-6/output", nil)
