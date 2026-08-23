@@ -1204,3 +1204,214 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 	require.NoError(t, err)
 	require.NotNil(t, newJob)
 }
+
+// boundaryTaskNewRequest builds a task/new body carrying an s3:// boundary.
+func boundaryTaskNewRequest(t *testing.T, bucket, boundaryPath string) []byte {
+	t.Helper()
+
+	options, err := json.Marshal([]TaskOption{{Name: "boundary", Value: boundaryPath}})
+	require.NoError(t, err)
+
+	body, err := json.Marshal(TaskNewRequest{
+		Name:        "boundary-project",
+		ReadS3Path:  "s3://" + bucket + "/images/",
+		WriteS3Path: "s3://" + bucket + "/output/",
+		S3Region:    "us-east-1",
+		S3Endpoint:  "http://" + testutil.TestS3Endpoint(),
+		Options:     string(options),
+	})
+	require.NoError(t, err)
+	return body
+}
+
+// A missing AOI is rejected at submit, not in the download stage.
+func TestTaskNew_RejectsUnreadableBoundary(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-boundary-missing"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new",
+		bytes.NewReader(boundaryTaskNewRequest(t, bucket, "s3://"+bucket+"/aoi-buffered.geojson")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Unable to read boundary")
+	assert.Empty(t, wfClient.createdNames, "no workflow should be submitted")
+}
+
+func TestTaskNew_RejectsEmptyBoundary(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-boundary-empty"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+	ensureTestObjectInBucket(ctx, t, bucket, "aoi-buffered.geojson", "")
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new",
+		bytes.NewReader(boundaryTaskNewRequest(t, bucket, "s3://"+bucket+"/aoi-buffered.geojson")))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Boundary object is empty")
+	assert.Empty(t, wfClient.createdNames, "no workflow should be submitted")
+}
+
+func TestTaskNew_AcceptsPresentBoundary(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-boundary-present"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+	ensureTestObjectInBucket(ctx, t, bucket, "aoi-buffered.geojson",
+		`{"type":"Polygon","coordinates":[[[115.45,-8.35],[115.48,-8.35],[115.48,-8.39],[115.45,-8.35]]]}`)
+
+	boundaryPath := "s3://" + bucket + "/aoi-buffered.geojson"
+	var submitted *workflows.ODMPipelineConfig
+	wfClient := &recordingWorkflowClient{
+		createFn: func(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error) {
+			submitted = cfg
+			return &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf-boundary-ok"}}, nil
+		},
+	}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new",
+		bytes.NewReader(boundaryTaskNewRequest(t, bucket, boundaryPath)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotNil(t, submitted)
+	assert.Equal(t, boundaryPath, submitted.Boundary.S3Path)
+}
+
+// The AOI can be deleted between the original submission and the restart.
+func TestTaskRestart_RejectsBoundaryDeletedSinceSubmit(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-boundary-restart"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+
+	metadataStore := meta.NewStore(db)
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project",
+		"s3://"+bucket+"/images/", "s3://"+bucket+"/output/", []string{"--fast-orthophoto"}, "us-east-1",
+		map[string]any{
+			metadataBoundaryS3PathKey: "s3://" + bucket + "/aoi-buffered.geojson",
+			metadataS3EndpointKey:     "http://" + testutil.TestS3Endpoint(),
+		})
+	require.NoError(t, err)
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/restart", bytes.NewReader([]byte(`{"uuid":"old-wf"}`)))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Unable to read boundary")
+	assert.Empty(t, wfClient.createdNames, "no workflow should be resubmitted")
+}
+
+// Omitting s3Endpoint must not leave the API and the workflow on different stores.
+func TestTaskNew_OmittedEndpointFallsBackToDeploymentDefault(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-endpoint-fallback"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+
+	var submitted *workflows.ODMPipelineConfig
+	wfClient := &recordingWorkflowClient{
+		createFn: func(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error) {
+			submitted = cfg
+			return &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf-endpoint-fallback"}}, nil
+		},
+	}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	body, err := json.Marshal(TaskNewRequest{
+		Name:        "endpoint-fallback",
+		ReadS3Path:  "s3://" + bucket + "/images/",
+		WriteS3Path: "s3://" + bucket + "/output/",
+		S3Region:    "us-east-1",
+		// S3Endpoint deliberately omitted.
+	})
+	require.NoError(t, err)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.NotNil(t, submitted)
+	require.NotEmpty(t, config.AWS_S3_ENDPOINT, "test env must configure a deployment endpoint")
+	assert.Equal(t, config.AWS_S3_ENDPOINT, submitted.S3Endpoint,
+		"workflow must use the same endpoint the preflight statted")
+}
+
+// Same guarantee for the boundary preflight.
+func TestTaskNew_OmittedEndpointStillValidatesBoundary(t *testing.T) {
+	db, cleanup := testDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	bucket := "test-bucket-endpoint-fallback-boundary"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+
+	options, err := json.Marshal([]TaskOption{{Name: "boundary", Value: "s3://" + bucket + "/aoi-buffered.geojson"}})
+	require.NoError(t, err)
+	body, err := json.Marshal(TaskNewRequest{
+		Name:        "endpoint-fallback-boundary",
+		ReadS3Path:  "s3://" + bucket + "/images/",
+		WriteS3Path: "s3://" + bucket + "/output/",
+		S3Region:    "us-east-1",
+		Options:     string(options),
+	})
+	require.NoError(t, err)
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusBadRequest, w.Code)
+	assert.Contains(t, w.Body.String(), "Unable to read boundary")
+	assert.Empty(t, wfClient.createdNames)
+}

@@ -513,3 +513,88 @@ func TestSanitizeZipEntryName_RejectsUnsafePaths(t *testing.T) {
 	assert.False(t, ok)
 	assert.Empty(t, name)
 }
+
+func TestStatObjectAtURL_RejectsMalformedPaths(t *testing.T) {
+	for name, path := range map[string]string{
+		"not s3":      "https://example.com/aoi.geojson",
+		"empty":       "",
+		"bucket only": "s3://bucket",
+		"no key":      "s3://bucket/",
+		"no bucket":   "s3:///aoi.geojson",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := StatObjectAtURL(context.Background(), nil, path)
+			assert.Error(t, err)
+		})
+	}
+}
+
+// parseS3Path appends a trailing slash to keys, hence the separate whole-URL stat.
+func TestStatObjectAtURL_ReturnsSizeAndDistinguishesMissing(t *testing.T) {
+	ctx := context.Background()
+	bucket := "test-bucket-stat-object-url"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+
+	client := testS3Client(t)
+	putTestObject(t, client, bucket, "projects/p1/aoi-buffered.geojson", `{"type":"Polygon"}`)
+	putTestObject(t, client, bucket, "projects/p1/empty.geojson", "")
+	putTestObject(t, client, bucket, "projects/p1/nested/inner.geojson", "{}")
+
+	size, err := StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/aoi-buffered.geojson")
+	require.NoError(t, err)
+	assert.Equal(t, int64(18), size)
+
+	// An empty object stats fine; the caller is what rejects size 0.
+	size, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/empty.geojson")
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), size)
+
+	_, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/missing.geojson")
+	assert.Error(t, err)
+
+	// A prefix is not an object; this is what makes rclone write a directory.
+	_, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/nested")
+	assert.Error(t, err)
+}
+
+// An explicit AWS endpoint must stay provider=AWS with no path-style forcing.
+func TestRcloneS3ConfigSnippet_InfersProviderFromHost(t *testing.T) {
+	for _, tc := range []struct {
+		endpoint     string
+		wantProvider string
+		wantEndpoint bool
+	}{
+		{"s3.amazonaws.com", "AWS", false},
+		{"https://s3.amazonaws.com", "AWS", false},
+		{"s3.eu-west-1.amazonaws.com", "AWS", false},
+		{"http://localhost:31102", "Minio", true},
+		{"https://minio.internal:9000", "Minio", true},
+		{"garage.example.org", "Minio", true},
+	} {
+		t.Run(tc.endpoint, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			scriptPath := filepath.Join(tmpDir, "snippet.sh")
+			configPath := filepath.Join(tmpDir, "rclone.conf")
+
+			script := "#!/bin/sh\nset -eu\nexport RCLONE_CONFIG=\"" + configPath +
+				"\"\nexport AWS_S3_ENDPOINT=\"" + tc.endpoint + "\"\n" + rcloneS3ConfigSnippet() + "\n"
+			require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
+
+			output, err := exec.Command("/bin/sh", scriptPath).CombinedOutput()
+			require.NoError(t, err, string(output))
+
+			contentBytes, err := os.ReadFile(configPath)
+			require.NoError(t, err)
+			content := string(contentBytes)
+
+			assert.Contains(t, content, "provider = "+tc.wantProvider)
+			if tc.wantEndpoint {
+				assert.Contains(t, content, "endpoint = "+tc.endpoint)
+				assert.Contains(t, content, "force_path_style = true")
+			} else {
+				assert.NotContains(t, content, "endpoint =")
+				assert.NotContains(t, content, "force_path_style")
+			}
+		})
+	}
+}

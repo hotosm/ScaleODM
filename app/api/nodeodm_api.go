@@ -939,11 +939,14 @@ func (a *API) registerNodeODMRoutes() {
 		}
 		log.Printf("POST /task/new: endpoint selection endpoint=%q region=%q allowlist_enforced=%t", s3Endpoint, s3Region, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
 
-		// Count images before workflow submission so resources can be sized.
-		taskClient, clientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
-		if s3Endpoint != "" {
-			taskClient, clientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
+		// One endpoint for both the preflight below and the workflow pods, so they agree.
+		effectiveS3Endpoint := s3Endpoint
+		if effectiveS3Endpoint == "" {
+			effectiveS3Endpoint = config.AWS_S3_ENDPOINT
 		}
+
+		// Count images before workflow submission so resources can be sized.
+		taskClient, clientErr := s3.GetS3ClientForEndpoint(effectiveS3Endpoint)
 		if clientErr != nil {
 			metricResult = "failure"
 			metricReason = "s3_client_init_failed"
@@ -958,6 +961,23 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, "Unable to read imagery from readS3Path", countErr)
 		}
 
+		// Fail here rather than in the download stage, whose logs are not always archived.
+		if boundary.S3Path != "" {
+			boundarySize, boundaryErr := s3.StatObjectAtURL(ctx, taskClient, boundary.S3Path)
+			switch {
+			case boundaryErr != nil:
+				metricResult = "failure"
+				metricReason = "boundary_unreadable"
+				log.Printf("POST /task/new: boundary unreadable at %q endpoint=%q: %v", boundary.S3Path, s3Endpoint, boundaryErr)
+				return nil, huma.NewError(400, fmt.Sprintf("Unable to read boundary from %s", boundary.S3Path), boundaryErr)
+			case boundarySize == 0:
+				metricResult = "failure"
+				metricReason = "boundary_empty"
+				log.Printf("POST /task/new: boundary is empty at %q endpoint=%q", boundary.S3Path, s3Endpoint)
+				return nil, huma.NewError(400, fmt.Sprintf("Boundary object is empty: %s", boundary.S3Path))
+			}
+		}
+
 		// S3 credentials are configured at the server level and injected into
 		// workflow pods via Kubernetes Secret references (secretKeyRef).
 		// No per-request credential handling needed.
@@ -968,7 +988,7 @@ func (a *API) registerNodeODMRoutes() {
 			odmFlags,
 		)
 		wfConfig.S3Region = s3Region
-		wfConfig.S3Endpoint = s3Endpoint
+		wfConfig.S3Endpoint = effectiveS3Endpoint
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
 		wfConfig.ProcessingMode = processingMode
@@ -1580,10 +1600,11 @@ func (a *API) registerNodeODMRoutes() {
 			s3ScanDepth = workflows.DefaultS3ScanDepth
 		}
 
-		taskClient, taskClientErr := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
-		if s3Endpoint != "" {
-			taskClient, taskClientErr = s3.GetS3ClientForEndpoint(s3Endpoint)
+		effectiveS3Endpoint := s3Endpoint
+		if effectiveS3Endpoint == "" {
+			effectiveS3Endpoint = config.AWS_S3_ENDPOINT
 		}
+		taskClient, taskClientErr := s3.GetS3ClientForEndpoint(effectiveS3Endpoint)
 
 		imageCount := metadataImageCount(metadata.Metadata)
 		imageTotalBytes := metadataImageTotalBytes(metadata.Metadata)
@@ -1600,6 +1621,25 @@ func (a *API) registerNodeODMRoutes() {
 			}
 		}
 
+		// Same check as task/new; the AOI may have been deleted since. Unlike the image
+		// count above, an unusable client fails rather than skipping the check.
+		if boundary.S3Path != "" {
+			if taskClientErr != nil {
+				log.Printf("POST /task/restart: cannot verify boundary %q, S3 client init failed endpoint=%q: %v", boundary.S3Path, s3Endpoint, taskClientErr)
+				return nil, huma.NewError(500, "Failed to initialize S3 client to verify boundary", taskClientErr)
+			}
+
+			boundarySize, boundaryErr := s3.StatObjectAtURL(ctx, taskClient, boundary.S3Path)
+			switch {
+			case boundaryErr != nil:
+				log.Printf("POST /task/restart: boundary unreadable at %q endpoint=%q: %v", boundary.S3Path, s3Endpoint, boundaryErr)
+				return nil, huma.NewError(400, fmt.Sprintf("Unable to read boundary from %s", boundary.S3Path), boundaryErr)
+			case boundarySize == 0:
+				log.Printf("POST /task/restart: boundary is empty at %q endpoint=%q", boundary.S3Path, s3Endpoint)
+				return nil, huma.NewError(400, fmt.Sprintf("Boundary object is empty: %s", boundary.S3Path))
+			}
+		}
+
 		wfConfig := workflows.NewDefaultODMConfig(
 			metadata.ODMProjectID,
 			metadata.ReadS3Path,
@@ -1607,7 +1647,7 @@ func (a *API) registerNodeODMRoutes() {
 			odmFlags,
 		)
 		wfConfig.S3Region = metadata.S3Region
-		wfConfig.S3Endpoint = s3Endpoint
+		wfConfig.S3Endpoint = effectiveS3Endpoint
 		wfConfig.ImageCount = imageCount
 		wfConfig.ImageTotalBytes = imageTotalBytes
 		wfConfig.ProcessingMode = processingMode

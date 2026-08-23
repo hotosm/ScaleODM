@@ -294,16 +294,19 @@ before the process stage runs.
 | `boundary` value | Handling |
 |---|---|
 | Inline GeoJSON | Compacted and written to `/workspace/{workflow}/boundary.geojson` by the download stage. Must hold exactly one `Polygon`, as a bare geometry, a `Feature` or a single-feature `FeatureCollection`, with at least one non-empty ring of numeric coordinate pairs, under 256 KiB. A `MultiPolygon`, a second feature or an empty ring is rejected with a 400, because ODM's own `load_boundary` refuses them once processing starts. |
-| `s3://bucket/key` | Fetched by the download stage using the task's credentials. A missing or empty object fails the task, rather than silently running unbounded. |
+| `s3://bucket/key` | Checked at submit: `POST /task/new` and `/task/restart` stat the object and return `400` if it is missing, unreadable or empty, so a bad AOI fails immediately instead of during the workflow. |
 | Plain path | Passed to ODM unchanged, as NodeODM does. |
 
 The value is recorded against the task, so `POST /task/restart` keeps the
 boundary without resending `options`.
 
 If `s3Endpoint` is provided, ScaleODM applies that endpoint to workflow pods and API-side
-S3 operations (image counting, log fallback, and pre-signed downloads). Endpoints are
-normalized to scheme+host[:port] and local S3-compatible systems use path-style bucket
-addressing.
+S3 operations (image counting, boundary preflight, log fallback, and pre-signed downloads).
+When it is omitted, both fall back to the deployment's `AWS_S3_ENDPOINT`, so the API and the
+workflow always resolve against the same store. Endpoints are normalized to
+scheme+host[:port]; whether a store is treated as AWS or as S3-compatible is decided by
+host, so an explicit `s3.amazonaws.com` keeps AWS addressing rather than being forced to
+path-style.
 
 **Response:** `{"uuid": "odm-pipeline-abc123"}`
 

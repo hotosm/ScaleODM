@@ -80,10 +80,12 @@ func renderRcloneFilterFile(excludePatterns []string) string {
 }
 
 func rcloneS3ConfigSnippet() string {
-	return `PROVIDER="AWS"
-if [ -n "${AWS_S3_ENDPOINT:-}" ]; then
-  PROVIDER="Minio"
-fi
+	// Provider by host, so an explicit s3.amazonaws.com stays AWS. Mirrors bucketLookupForEndpoint.
+	return `S3_HOST=$(echo "${AWS_S3_ENDPOINT:-}" | sed -e 's|^https\?://||' -e 's|/.*$||' -e 's|:.*$||')
+case "$S3_HOST" in
+  ""|amazonaws.com|*.amazonaws.com) PROVIDER="AWS" ;;
+  *) PROVIDER="Minio" ;;
+esac
 
 cat > "$RCLONE_CONFIG" <<EOF
 [s3]
@@ -94,7 +96,7 @@ region = ${AWS_DEFAULT_REGION:-us-east-1}
 no_check_bucket = true
 EOF
 
-if [ -n "${AWS_S3_ENDPOINT:-}" ]; then
+if [ "$PROVIDER" = "Minio" ]; then
   cat >> "$RCLONE_CONFIG" <<EOF
 endpoint = ${AWS_S3_ENDPOINT}
 force_path_style = true
@@ -417,21 +419,37 @@ echo "Workspace snapshot complete."`
 }
 
 // GenerateBoundaryFetchScript writes or downloads a boundary during the download stage.
+// A boundary is only fetched when the caller asked for one, so a failed fetch fails the stage.
 func GenerateBoundaryFetchScript(destPath, s3Path, geoJSON string) string {
 	switch {
 	case s3Path != "":
 		return `
 echo "Fetching ODM boundary from ` + s3Path + `..."
 BOUNDARY_REMOTE=$(echo "` + s3Path + `" | sed 's|^s3://|s3:|')
-if ! rclone copyto "$BOUNDARY_REMOTE" "` + destPath + `"; then
-  echo "ERROR: could not fetch boundary from ` + s3Path + `" >&2
+BOUNDARY_DEST="` + destPath + `"
+BOUNDARY_TMP="$BOUNDARY_DEST.part"
+
+# Retries share the workspace PVC. -rf, not -f: a prefix fetch writes a directory.
+rm -rf "$BOUNDARY_DEST" "$BOUNDARY_TMP"
+
+# Scratch path is always fresh, so "no transfer" can only mean the source did not resolve.
+if ! rclone copyto --error-on-no-transfer "$BOUNDARY_REMOTE" "$BOUNDARY_TMP"; then
+  echo "ERROR: boundary not found or unreadable at ` + s3Path + `" >&2
+  rm -rf "$BOUNDARY_TMP"
   exit 1
-fi
-if [ ! -s "` + destPath + `" ]; then
-  echo "ERROR: boundary fetched from ` + s3Path + ` is empty" >&2
+elif [ ! -f "$BOUNDARY_TMP" ]; then
+  # copyto against a prefix writes a directory, which satisfies -s.
+  echo "ERROR: boundary path ` + s3Path + ` is a prefix, not a single object" >&2
+  rm -rf "$BOUNDARY_TMP"
   exit 1
+elif [ ! -s "$BOUNDARY_TMP" ]; then
+  echo "ERROR: boundary at ` + s3Path + ` is empty" >&2
+  rm -rf "$BOUNDARY_TMP"
+  exit 1
+else
+  mv "$BOUNDARY_TMP" "$BOUNDARY_DEST"
+  echo "Boundary written to $BOUNDARY_DEST ($(wc -c < "$BOUNDARY_DEST") bytes)"
 fi
-echo "Boundary written to ` + destPath + ` ($(wc -c < "` + destPath + `") bytes)"
 `
 	case geoJSON != "":
 		return `

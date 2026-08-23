@@ -108,7 +108,8 @@ func compactBoundaryGeoJSON(value string) (string, error) {
 	return string(compacted), nil
 }
 
-// validateSinglePolygon enforces ODM's single Polygon boundary format.
+// validateSinglePolygon enforces ODM's single Polygon format: bare Polygon, Feature, or
+// single-feature FeatureCollection. MultiPolygon/GeometryCollection aren't handled by ODM.
 func validateSinglePolygon(doc map[string]any) error {
 	switch geomType, _ := doc["type"].(string); geomType {
 	case "":

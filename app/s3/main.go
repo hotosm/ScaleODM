@@ -257,6 +257,25 @@ func ObjectExistsInS3Path(ctx context.Context, client *minio.Client, writeS3Path
 	return false, fmt.Errorf("failed to stat object %q: %w", objectKey, err)
 }
 
+// StatObjectAtURL stats a whole s3://bucket/key URL and returns its size, without the
+// trailing-slash normalisation ObjectExistsInS3Path applies to keys.
+func StatObjectAtURL(ctx context.Context, client *minio.Client, s3URL string) (int64, error) {
+	if !strings.HasPrefix(s3URL, "s3://") {
+		return 0, fmt.Errorf("invalid S3 path: %s", s3URL)
+	}
+
+	bucket, key, found := strings.Cut(strings.TrimPrefix(s3URL, "s3://"), "/")
+	if !found || strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return 0, fmt.Errorf("S3 path must name an object as s3://bucket/key: %s", s3URL)
+	}
+
+	info, err := client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
+	if err != nil {
+		return 0, fmt.Errorf("failed to stat object %q in bucket %q: %w", key, bucket, err)
+	}
+	return info.Size, nil
+}
+
 // ListFilesInS3Path lists files in the S3 path.
 // writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
 // Returns a list of object names (without the prefix).
