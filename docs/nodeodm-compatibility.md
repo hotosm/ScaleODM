@@ -207,7 +207,7 @@ Creates a new processing task.
 | `webhook` | | Callback URL on completion. |
 | `skipPostProcessing` | | Skip point cloud tiles. |
 | `processingMode` | | Pipeline mode. See [Processing Modes](#processing-modes). Defaults to `standard`. |
-| `s3ScanDepth` | | Max depth for the rclone scan beneath `readS3Path`. Defaults to `1` (just the given dir). Range: `1`–`10`. See [Scan depth](#scan-depth). |
+| `s3ScanDepth` | | Max depth for the rclone scan beneath `readS3Path`. Defaults to `1` (just the given dir). Range: `1`-`10`. See [Scan depth](#scan-depth). |
 | `excludePaths` | | JSON array of rclone-style filter patterns appended to the default exclude set. |
 | `useDefaultExcludes` | | Apply the built-in ODM-output exclude list. Defaults to `true`. |
 
@@ -236,10 +236,10 @@ Reserved modes return HTTP 501 with a clear message so clients can probe support
 | `s3ScanDepth` | Behaviour | When to use |
 |---------------|-----------|-------------|
 | `1` (default) | Only files in the given directory itself. | `readS3Path` already points at the imagery dir, e.g. `s3://bucket/project-id/task-id/images/`. |
-| `2`–`10` | Walks N levels of subdirectories. | `readS3Path` points at a higher-level prefix that contains nested task layouts. For DroneTM-style `projectid/taskid/images/*.jpg`, a depth of `3` against `s3://bucket/projectid/` will pick up imagery in every task subdir in one run. |
+| `2`-`10` | Walks N levels of subdirectories. | `readS3Path` points at a higher-level prefix that contains nested task layouts. For DroneTM-style `projectid/taskid/images/*.jpg`, a depth of `3` against `s3://bucket/projectid/` will pick up imagery in every task subdir in one run. |
 | `0`/unset | Resolved to the default (`1`). | - |
 
-Values outside `1`–`10` are rejected with HTTP 400.
+Values outside `1`-`10` are rejected with HTTP 400.
 
 #### Exclude patterns
 

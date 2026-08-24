@@ -1,60 +1,52 @@
-# Testing Guide
+# Testing
 
-All tests require the full stack (DB, S3, K8s) running via Docker Compose. Tests use real services - no mocks.
-
-## Running Tests
+Everything runs against the real stack (DB, S3, Kubernetes) via Docker Compose.
+No mocks.
 
 ```bash
-# Start services and run all tests using the test override
+# start services, then run the whole suite
 docker compose -f compose.yaml -f compose.test.yaml up -d db s3
 docker compose -f compose.yaml -f compose.test.yaml run --rm api
 
-# Run specific test package
+# one package
 docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v ./app/meta/...
 
-# Run E2E tests (requires build tag)
+# E2E, behind a build tag
 docker compose -f compose.yaml -f compose.test.yaml run --rm api go test -v -tags=e2e .
 ```
 
-## Test Structure
+## Layout
 
-- **Integration Tests** (`app/*/*_test.go`) - Test components with real database, S3, and Kubernetes
-- **E2E Tests** (`main_test.go`) - Test full system end-to-end scenarios
+- **Integration** (`app/*/*_test.go`) against a real database, S3 and Kubernetes.
+- **E2E** (`main_test.go`) full system scenarios.
 
-## Test Helpers
+Helpers per package:
 
-Each test package provides helpers:
+- `testDB(t)` database connection with cleanup (`app/api`, `app/meta`, `app/db`)
+- `testWorkflowClient(t)` real Argo Workflows client (`app/api`)
+- `testutil.TestDBURL()` reads `SCALEODM_DATABASE_URL`
 
-- `testDB(t)` - Creates database connection with cleanup (in `app/api`, `app/meta`, `app/db`)
-- `testWorkflowClient(t)` - Creates real Argo Workflows client (in `app/api`)
-- `testutil.TestDBURL()` - Returns database URL from `SCALEODM_DATABASE_URL`
-
-**Example**:
 ```go
 func TestFeature(t *testing.T) {
     db, cleanup := testDB(t)
     defer cleanup()
-    
+
     store := meta.NewStore(db)
-    // ... test code
+    // ...
 }
 ```
 
-## Test Data
+## Test data
 
-- **Database**: Uses `SCALEODM_DATABASE_URL` (same as production). Tests automatically clean up after themselves.
-- **S3**: Uses `AWS_S3_ENDPOINT` (RustFS S3 in compose stack).
-- **Kubernetes**: Requires real cluster (Talos) with Argo Workflows installed.
+- **Database:** `SCALEODM_DATABASE_URL`, same var as prod. Tests clean up after
+  themselves.
+- **S3:** `AWS_S3_ENDPOINT`, the RustFS instance in the compose stack.
+- **Kubernetes:** needs a real cluster (Talos) with Argo Workflows installed.
 
-## Troubleshooting
+## When something breaks
 
 ```bash
-# Check services
-docker compose -f compose.yaml -f compose.test.yaml ps
-
-# Check database connection
-psql postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable
-
-# Check Kubernetes
-kubectl get pods -n argo
+docker compose -f compose.yaml -f compose.test.yaml ps           # services up?
+psql postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable # DB reachable?
+kubectl get pods -n argo                                         # Argo alive?
 ```
