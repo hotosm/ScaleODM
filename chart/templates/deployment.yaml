@@ -246,8 +246,6 @@ spec:
               value: {{ .Values.config.processSizing.ephemeralLimitMultiplier | quote }}
             - name: SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER
               value: {{ .Values.config.processSizing.fastOrthoMemoryMultiplier | quote }}
-            - name: SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
-              value: {{ .Values.config.processSizing.dsmDtmMemoryMultiplier | quote }}
             - name: SCALEODM_PROCESS_SWAP_RATIO
               value: {{ .Values.config.processSizing.swapRatio | quote }}
             - name: SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB

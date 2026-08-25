@@ -317,8 +317,8 @@ func TestEstimateProcessResourcesFromImageCount_SplitsRequestAndLimit(t *testing
 	// (request * 1.2 = 10.8 GiB, below node RAM), so the cgroup forces the peak's
 	// overflow into swap. CPU/ephemeral still scale off the peak, not the request.
 	resources := estimateProcessResourcesFromImageCount(250, nil, fallback)
-	assert.Equal(t, "9216Mi", resources.Requests.Memory)  // 9 GiB * 1024 (27 / 3)
-	assert.Equal(t, "11060Mi", resources.Limits.Memory)   // ceil(9 * 1.2 * 1024)
+	assert.Equal(t, "9216Mi", resources.Requests.Memory) // 9 GiB * 1024 (27 / 3)
+	assert.Equal(t, "11060Mi", resources.Limits.Memory)  // ceil(9 * 1.2 * 1024)
 	// CPU is requested off the 9 GiB RAM request: 9 * 0.125 = 1.125 cores.
 	assert.Equal(t, "1125m", resources.Requests.CPU)
 	assert.Equal(t, "1688m", resources.Limits.CPU) // ceil(1.125 * 1.5 * 1000)
@@ -440,11 +440,14 @@ func TestFlagMemoryMultiplier(t *testing.T) {
 	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{}))
 	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--orthophoto-resolution=5"}))
 	assert.Equal(t, 0.5, flagMemoryMultiplier([]string{"--fast-orthophoto"}))
-	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dsm"}))
-	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dtm"}))
-	assert.Equal(t, 1.5, flagMemoryMultiplier([]string{"--dsm", "--dtm"}))
-	// fast-orthophoto takes precedence even if dsm/dtm are also set
+	// Fast orthophoto takes precedence over other flags.
 	assert.Equal(t, 0.5, flagMemoryMultiplier([]string{"--fast-orthophoto", "--dsm"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--dsm"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--dtm"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--dsm", "--dtm"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--dsm", "--boundary=/b.geojson"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--dsm", "--auto-boundary"}))
+	assert.Equal(t, 1.0, flagMemoryMultiplier([]string{"--boundary=/b.geojson"}))
 }
 
 func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing.T) {
@@ -458,16 +461,17 @@ func TestEstimateProcessResourcesFromImageCount_AppliesFlagMultiplier(t *testing
 	assert.Equal(t, "4608Mi", fast.Requests.Memory) // 4.5 GiB * 1024 (13.5 / 3)
 	assert.Equal(t, "5530Mi", fast.Limits.Memory)   // ceil(4.5 * 1.2 * 1024)
 
-	// --dsm scales the peak up by 1.5x: 27 * 1.5 = 40.5 GiB; request = 13.5 GiB.
+	// Other flags use standard sizing.
 	dsm := estimateProcessResourcesFromImageCount(250, []string{"--dsm"}, fallback)
-	assert.Equal(t, "13824Mi", dsm.Requests.Memory) // 13.5 GiB * 1024 (40.5 / 3)
-	assert.Equal(t, "16589Mi", dsm.Limits.Memory)   // ceil(13.5 * 1.2 * 1024)
+	plain := estimateProcessResourcesFromImageCount(250, nil, fallback)
+	assert.Equal(t, plain, dsm)
+	assert.Equal(t, "9216Mi", dsm.Requests.Memory) // 9 GiB * 1024 (27 / 3)
+	assert.Equal(t, "11060Mi", dsm.Limits.Memory)  // ceil(9 * 1.2 * 1024)
 
-	// Small job (7 images) returns the first table point (18 GiB) * dsm 1.5 = 27
-	// GiB peak; request = peak/3 = 9 GiB.
+	// Small jobs use the first table point: 18 GiB peak and a 6 GiB request.
 	small := estimateProcessResourcesFromImageCount(7, []string{"--dsm"}, fallback)
-	assert.Equal(t, "9216Mi", small.Requests.Memory) // 9 GiB * 1024 (27 / 3)
-	assert.Equal(t, "11060Mi", small.Limits.Memory)  // ceil(9 * 1.2 * 1024)
+	assert.Equal(t, "6144Mi", small.Requests.Memory) // 6 GiB * 1024 (18 / 3)
+	assert.Equal(t, "7373Mi", small.Limits.Memory)   // ceil(6 * 1.2 * 1024)
 }
 
 func TestBuildODMWorkflow_AppliesGuardrailsAndResources(t *testing.T) {
@@ -583,6 +587,10 @@ func TestBuildODMWorkflow_UsesPVCWorkspaceInPVCMode(t *testing.T) {
 	require.Len(t, claim.Spec.AccessModes, 1)
 	assert.Equal(t, apiv1.ReadWriteOnce, claim.Spec.AccessModes[0])
 	assert.Equal(t, "40Gi", claim.Spec.Resources.Requests.Storage().String())
+
+	// Scratch PVCs are collected after every workflow.
+	require.NotNil(t, wf.Spec.VolumeClaimGC)
+	assert.Equal(t, wfv1.VolumeClaimGCOnCompletion, wf.Spec.VolumeClaimGC.Strategy)
 }
 
 func TestBuildODMWorkflow_UsesPVCWorkspaceInAutoModeWhenStorageClassSet(t *testing.T) {
@@ -632,6 +640,7 @@ func TestBuildODMWorkflow_UsesEmptyDirWorkspaceInAutoModeWithoutStorageClass(t *
 
 	require.NotNil(t, wf)
 	require.Empty(t, wf.Spec.VolumeClaimTemplates)
+	assert.Nil(t, wf.Spec.VolumeClaimGC, "no PVC to collect in emptyDir mode")
 	tmpVol := volumeByName(t, wf.Spec.Templates[0].Volumes, "tmp")
 	require.NotNil(t, tmpVol.EmptyDir)
 	require.NotNil(t, tmpVol.EmptyDir.SizeLimit)

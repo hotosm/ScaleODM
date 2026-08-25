@@ -31,21 +31,14 @@ Don't go much past 12000 in one scene. Above that use `--split` /
 ## Prod sizing at 12k
 
 `memoryMaxGiB 1200`, `swapRatio 1.0`, `memoryLimitMarginPercent 20`,
-`cpuPerGiB 0.125`, `ephemeralGiBPerGiBRAM 0.3`, with `--dsm --dtm`:
+`cpuPerGiB 0.125`, `ephemeralGiBPerGiBRAM 0.3`:
 
 | | peak est | request | `memory.max` | CPU | ephemeral | node |
 |---|---|---|---|---|---|---|
-| no boundary (1.5x) | 1200, clamped | 600 GiB | 720 GiB | 75 | 360 GiB | `r6id.24xlarge` |
-| `--boundary` (1.0x) | 800 | 400 GiB | 480 GiB | 50 | 240 GiB | `r6id.16xlarge` |
+| 12k | 800 | 400 GiB | 480 GiB | 50 | 240 GiB | `r6id.16xlarge` |
 
-- An explicit `--boundary` drops the `--dsm`/`--dtm` multiplier from 1.5x to 1.0x.
-  The 1.5x is there for `odm_dem` becoming the peak; with a boundary it isn't.
-- `--auto-boundary` does **not** count. It comes from the reconstruction, so a bad
-  one inflates the boundary along with the raster it was meant to bound.
-- That's a code conditional, not a knob. Only the 1.5x is tunable
-  (`SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER`).
 - Sizing counts **S3 objects**, ODM counts **usable images**. One 12k run sized off
-  >= 12000 while ODM loaded 11782. Reconcile before trusting either.
+  >= 12000 while ODM loaded 11782.
 
 ## Observed
 
@@ -140,6 +133,5 @@ recreated. Safe between jobs, since it's only read at PVC provisioning time.
 - With a CPU limit set, ODM gets a matching `--max-concurrency`, since its default
   is every node core and would oversubscribe the quota. With no limit (prod) it
   keeps that default, and an explicit caller value always wins.
-- Workspace PVCs are collected on workflow completion, not just success
-  (`volumeClaimGC`). Argo's default leaks them on every failed run.
+- Workspace PVCs are collected when workflows finish (`volumeClaimGC`).
 - With plenty of real RAM, skip swap tuning entirely.

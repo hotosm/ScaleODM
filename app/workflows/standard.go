@@ -290,16 +290,11 @@ func parseCPUCores(quantity string) int {
 	return int(cores)
 }
 
-// flagMemoryMultiplier adjusts RAM estimates for high/low-cost ODM modes.
+// flagMemoryMultiplier applies mode-specific RAM sizing.
 func flagMemoryMultiplier(odmFlags []string) float64 {
 	for _, f := range odmFlags {
 		if f == "--fast-orthophoto" {
 			return config.SCALEODM_PROCESS_FAST_ORTHO_MEMORY_MULTIPLIER
-		}
-	}
-	for _, f := range odmFlags {
-		if f == "--dsm" || f == "--dtm" {
-			return config.SCALEODM_PROCESS_DSM_DTM_MEMORY_MULTIPLIER
 		}
 	}
 	return 1.0
@@ -557,8 +552,7 @@ func estimateWorkspacePVCSize(imageTotalBytes int64, imageCount int, odmFlags []
 	return fmt.Sprintf("%dGi", int64(math.Ceil(estimatedGiB))), true
 }
 
-// flagWorkspaceProfile returns the bytes multiplier, GiB-per-image floor,
-// and min size for the ODM profile. Precedence matches flagMemoryMultiplier.
+// flagWorkspaceProfile returns the workspace sizing values for the selected ODM profile.
 func flagWorkspaceProfile(odmFlags []string) (multiplier, gibPerImage, minGiB float64) {
 	for _, f := range odmFlags {
 		if f == "--fast-orthophoto" {
@@ -1117,6 +1111,9 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 			workspaceClaim.Spec.StorageClassName = &workspaceStorageClass
 		}
 		wf.Spec.VolumeClaimTemplates = []apiv1.PersistentVolumeClaim{workspaceClaim}
+
+		// Delete the scratch PVC after successful or failed workflows.
+		wf.Spec.VolumeClaimGC = &wfv1.VolumeClaimGC{Strategy: wfv1.VolumeClaimGCOnCompletion}
 	}
 
 	return wf

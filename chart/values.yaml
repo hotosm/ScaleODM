@@ -327,7 +327,6 @@ config:
     ephemeralGiBPerGiBRAM: 0.3
     ephemeralLimitMultiplier: 1.2
     fastOrthoMemoryMultiplier: 0.5
-    dsmDtmMemoryMultiplier: 1.5
 
 # Argo Workflows subchart configuration
 argo:

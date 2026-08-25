@@ -51,7 +51,7 @@ kubectl logs -l workflows.argoproj.io/workflow=<uuid> --tail=200
 | Flag | Why |
 | --- | --- |
 | `sfm-algorithm=triangulation` | Places cameras from GPS instead of adding them one at a time. Needs OpenSfM 1.0, so ODX only. |
-| `boundary=<AOI GeoJSON>` | Clips the reconstruction to the real project area. Must be a single Polygon: ODM reads it with fiona and refuses a MultiPolygon or a multi-feature FeatureCollection. ODM renders the DEM and orthophoto over the whole reconstruction extent and crops afterwards, so a run that sprawls pays for the wasted pixels first. Also a sizing control - an explicit `--boundary` drops the `--dsm`/`--dtm` memory multiplier and cuts render cost ~10x, see [`system-requirements.md`](./system-requirements.md). Pass inline GeoJSON or an `s3://` URL, see [Boundary](./nodeodm-compatibility.md#boundary). |
+| `boundary=<AOI GeoJSON>` | Clips output to one Polygon AOI and can greatly reduce render cost. Pass inline GeoJSON or an `s3://` URL; see [Boundary](./nodeodm-compatibility.md#boundary). |
 | `rolling-shutter` | Corrects the skew from the sensor reading out row by row while the aircraft moves. An electronic shutter at 12 m/s and a 4 cm GSD is ~6 px of skew. ODM holds a readout time per camera model (`opendm/rollingshutter.py`), but an unlisted camera silently gets a 30 ms guess, so check the log line and set `rolling-shutter-readout` if the camera is missing. |
 | `split=400` + `split-overlap=150` | Caps submodel size on stock ODM, where reconstruction cost grows superlinearly. |
 
