@@ -245,8 +245,16 @@ To deploy in-cluster RustFS for local chart testing:
 --set s3.rustfs.auth.secretKey="somelongpassword"
 ```
 
-In this mode the chart synthesizes `AWS_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`,
+In this mode the chart uses and maps the `AWS_S3_ENDPOINT`, `AWS_ACCESS_KEY_ID`,
 `AWS_SECRET_ACCESS_KEY`, and `AWS_DEFAULT_REGION` in the unified runtime secret.
+
+`AWS_S3_ENDPOINT` is derived automatically from the rustfs deployed service.
+
+The `rustfs` block in `values.yaml` overrides the subchart's production defaults:
+standalone rather than distributed across four anti-affine replicas, a 20Gi
+volume rather than 256Mi, logs to stdout rather than a second PVC, and no
+ingress. Set `rustfs.storageclass.name` if the cluster has no default
+StorageClass.
 
 
 ### Deploy Argo Workflows via Subchart
@@ -362,6 +370,10 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `database.postgres.enabled` | Deploy bundled Postgres subchart | `false` |
 | `s3.external.enabled` | Use external S3 from pre-created runtime secret | `true` |
 | `s3.rustfs.enabled` | Deploy RustFS subchart for in-cluster S3 | `false` |
+| `rustfs.secret.existingSecret` | Suppresses the subchart's generated keypair; keep equal to `secrets.runtime.name` | `"scaleodm-secrets"` |
+| `rustfs.extraEnv` | Maps the runtime secret's AWS keys onto the store's env names | two `secretKeyRef`s |
+| `rustfs.storageclass.name` | StorageClass for the store's volume (empty uses the cluster default) | `""` |
+| `rustfs.storageclass.dataStorageSize` | Size of the store's volume | `20Gi` |
 | `s3.rustfs.endpoint` | Optional override for RustFS service host used in runtime secret | `""` |
 | `s3.rustfs.port` | RustFS service port used in runtime secret | `9000` |
 | `s3.rustfs.auth.accessKey` | RustFS access key for synthesized runtime secret | `"admin"` |

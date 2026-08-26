@@ -88,15 +88,62 @@ s3:
 
   # Optional: deploy RustFS in-cluster for local development/testing.
   # When enabled, set s3.external.enabled=false so the chart can synthesize
-  # runtime secret S3 keys from these values.
+  # runtime secret S3 keys from these values. The store reads the same keys, so
+  # this is the only place to set them.
   rustfs:
     enabled: false
+    # Defaults to the subchart's Service. Override only for a store this chart
+    # did not deploy.
     endpoint: ""
     port: 9000
     auth:
       accessKey: "admin"
       secretKey: "somelongpassword"
     region: "us-east-1"
+
+# RustFS subchart values, rendered only when s3.rustfs.enabled=true. Upstream
+# defaults aim at a production erasure-coded cluster: distributed across 4
+# anti-affine replicas on 256Mi volumes, plus an ingress on example.rustfs.com.
+# Four replicas cannot schedule on the single-node clusters this mode exists
+# for; standalone pins them to 1 itself.
+rustfs:
+  mode:
+    standalone:
+      enabled: true
+    distributed:
+      enabled: false
+  secret:
+    # Stops the subchart generating a keypair of its own; credentials come from
+    # extraEnv below.
+    existingSecret: "scaleodm-secrets"
+  # The store takes the API's AWS credentials, under its own env names.
+  # Repeated from secrets.runtime because Helm values cannot reference each
+  # other; the chart refuses to render if the two disagree.
+  extraEnv:
+    - name: RUSTFS_ACCESS_KEY
+      valueFrom:
+        secretKeyRef:
+          name: "scaleodm-secrets"
+          key: "AWS_ACCESS_KEY_ID"
+    - name: RUSTFS_SECRET_KEY
+      valueFrom:
+        secretKeyRef:
+          name: "scaleodm-secrets"
+          key: "AWS_SECRET_ACCESS_KEY"
+  config:
+    rustfs:
+      # Empty logs to stdout and skips the separate logs PVC.
+      obs_log_directory: ""
+  storageclass:
+    # Empty uses the cluster default. Size for the imagery a test run holds.
+    name: ""
+    dataStorageSize: 20Gi
+  # Local dev only, so nothing needs the store from outside the cluster.
+  ingress:
+    enabled: false
+  resources:
+    requests: { cpu: 100m, memory: 256Mi }
+    limits: { cpu: "1", memory: 1Gi }
 
 # Kubernetes configuration
 kubernetes:

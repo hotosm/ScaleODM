@@ -63,3 +63,58 @@ Create the name of the service account to use
 {{- end }}
 
 
+
+{{/*
+The RustFS subchart's Service name. It mirrors the subchart's own fullname
+logic and appends the "-svc" suffix the subchart uses - deriving it as
+"<release>-rustfs" gives a name that does not resolve, and every S3 call fails
+on DNS rather than anything that points at the cause.
+*/}}
+{{- define "scaleodm.rustfsServiceName" -}}
+{{- $v := .Values.rustfs | default dict -}}
+{{- $base := "" -}}
+{{- if $v.fullnameOverride -}}
+{{- $base = $v.fullnameOverride -}}
+{{- else -}}
+{{- $name := $v.nameOverride | default "rustfs" -}}
+{{- if contains $name .Release.Name -}}
+{{- $base = .Release.Name -}}
+{{- else -}}
+{{- $base = printf "%s-%s" .Release.Name $name -}}
+{{- end -}}
+{{- end -}}
+{{- printf "%s-svc" ($base | trunc 59 | trimSuffix "-") -}}
+{{- end }}
+
+{{/* Host:port the API and workflow pods use to reach the in-cluster store. */}}
+{{- define "scaleodm.rustfsHost" -}}
+{{- .Values.s3.rustfs.endpoint | default (include "scaleodm.rustfsServiceName" .) -}}
+{{- end }}
+
+{{/*
+rustfs.extraEnv repeats secrets.runtime's names, because Helm values cannot
+reference each other. Left to drift, the store accepts credentials nothing else
+was given, and the only symptom is a runtime 403.
+*/}}
+{{- define "scaleodm.validateRustfsCredentialMapping" -}}
+{{- $secretName := .Values.secrets.runtime.name -}}
+{{- $want := dict
+      "RUSTFS_ACCESS_KEY" .Values.secrets.runtime.keys.accessKey
+      "RUSTFS_SECRET_KEY" .Values.secrets.runtime.keys.secretKey -}}
+{{- $extraEnv := dig "extraEnv" (list) (.Values.rustfs | default dict) -}}
+{{- $mapped := 0 -}}
+{{- range $name, $key := $want -}}
+{{- range $entry := $extraEnv -}}
+{{- if eq (dig "name" "" $entry) $name -}}
+{{- $mapped = add1 $mapped -}}
+{{- $ref := dig "valueFrom" "secretKeyRef" dict $entry -}}
+{{- if or (ne (dig "name" "" $ref) $secretName) (ne (dig "key" "" $ref) $key) -}}
+{{- fail (printf "rustfs.extraEnv %s reads secret %q key %q, but secrets.runtime gives the API %q key %q. Point them at the same credentials." $name (dig "name" "<none>" $ref) (dig "key" "<none>" $ref) $secretName $key) -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- end -}}
+{{- if and (gt $mapped 0) (ne $mapped 2) -}}
+{{- fail "rustfs.extraEnv maps only one of RUSTFS_ACCESS_KEY/RUSTFS_SECRET_KEY. Map both, or neither and put both in the secret named by rustfs.secret.existingSecret." -}}
+{{- end -}}
+{{- end }}

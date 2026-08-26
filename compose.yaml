@@ -80,7 +80,7 @@ services:
       retries: 3
 
   s3:
-    image: rustfs/rustfs:1.0.0-alpha.90
+    image: rustfs/rustfs:1.0.0-rc.3
     environment:
       # Keep local test credentials fixed to avoid dotenv/.env drift.
       RUSTFS_ACCESS_KEY: admin

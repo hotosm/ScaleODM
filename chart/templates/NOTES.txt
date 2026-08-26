@@ -60,7 +60,11 @@
    Ensure runtime secret '{{ .Values.secrets.runtime.name }}' exists in namespace '{{ .Release.Namespace }}'.
    {{- else if .Values.s3.rustfs.enabled }}
    RustFS subchart mode enabled (in-cluster S3).
-   Runtime secret '{{ .Values.secrets.runtime.name }}' is populated with RustFS endpoint/credentials by this chart.
+   Endpoint: http://{{ include "scaleodm.rustfsHost" . }}:{{ .Values.s3.rustfs.port }}
+   Runtime secret '{{ .Values.secrets.runtime.name }}' is populated with RustFS endpoint/credentials by this chart,
+   and the store takes those same credentials.
+   Imagery lives on PVC '{{ include "scaleodm.rustfsServiceName" . | trimSuffix "-svc" }}-data'; `helm uninstall`
+   keeps it (the subchart marks it helm.sh/resource-policy: keep), so delete it by hand to reclaim the space.
    {{- else }}
    Invalid configuration: set s3.external.enabled=true or set s3.rustfs.enabled=true.
    {{- end }}
