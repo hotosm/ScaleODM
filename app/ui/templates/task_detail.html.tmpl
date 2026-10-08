@@ -1,9 +1,14 @@
 {{ define "task_detail" }}
 {{ template "layout.start" . }}
 <section class="panel">
-  <h1>Task {{ .Task.Task.UUID }}</h1>
+  <h1>Job {{ .Task.Task.UUID }}</h1>
   <div class="meta-grid">
-    <div><strong>Project:</strong> {{ .Task.Task.ProjectID }}</div>
+    <div>
+      <strong>Project:</strong>
+      {{if ne .Task.Task.ProjectURL ""}}
+        <a href="{{ .Task.Task.ProjectURL }}">{{ .Task.Task.ProjectID }}</a>
+      {{else}}{{ .Task.Task.ProjectID }}{{end}}
+    </div>
     <div><strong>Status:</strong> <span class="status status-{{ .Task.Task.Status }}">{{ .Task.Task.StatusLabel }}</span></div>
     <div><strong>Progress:</strong> {{ .Task.Task.Progress }}%</div>
     <div><strong>Created:</strong> {{ .Task.Task.CreatedAt }}</div>

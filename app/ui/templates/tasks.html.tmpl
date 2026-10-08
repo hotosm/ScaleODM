@@ -1,7 +1,7 @@
 {{ define "tasks" }}
 {{ template "layout.start" . }}
 <section class="panel">
-  <h1>Tasks</h1>
+  <h1>Jobs</h1>
   <form class="filters" method="get" action="/ui">
     <label>
       Status
@@ -21,25 +21,32 @@
   <table id="tasks-table" data-refresh-url="/ui/api/tasks">
     <thead>
       <tr>
-        <th>Workflow UUID</th>
-        <th>Project</th>
-        <th>Status</th>
-        <th>Progress</th>
-        <th>Created</th>
-        <th>Started</th>
-        <th>Completed</th>
+        <th class="workflow">Workflow</th>
+        <th class="project">DroneTM project</th>
+        <th class="created">Created</th>
+        <th class="started">Started</th>
+        <th class="image-count">Images</th>
+        <th class="run-duration">Ran for</th>
+        <th class="result">Status</th>
       </tr>
     </thead>
     <tbody>
       {{ range .Tasks }}
-      <tr>
-        <td><a href="/ui/tasks/{{ .UUID }}">{{ .UUID }}</a></td>
-        <td>{{ .ProjectID }}</td>
-        <td><span class="status status-{{ .Status }}">{{ .StatusLabel }}</span></td>
-        <td>{{ .Progress }}%</td>
-        <td title="{{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
-        <td>{{ .StartedAt }}</td>
-        <td>{{ .CompletedAt }}</td>
+      <tr class="status-{{ .Status }}">
+        <td class="workflow"><a href="/ui/tasks/{{ .UUID }}">{{ .UUID }}</a></td>
+        <td class="project">
+          {{if ne .ProjectURL ""}}
+            <a href="{{ .ProjectURL }}">{{ .ProjectID }}</a>
+          {{else}}{{ .ProjectID }}{{end}}
+        </td>
+        <td class="created" title="{{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
+        <td class="started">{{ .StartedAt }}</td>
+        <td class="image-count">{{ .ImageCount }}</td>
+        <td class="run-duration">{{ .RunDuration }}</td>
+        <td class="result">
+          <div class="status status-{{ .Status }}">{{ .StatusLabel }}</div>
+          <div class="error-message">{{ .ErrorMessage }}</div>
+        </td>
       </tr>
       {{ else }}
       <tr>
