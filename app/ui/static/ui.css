@@ -104,6 +104,7 @@ table {
 th,
 td {
   text-align: left;
+  vertical-align: top;
   border-bottom: 1px solid #e5e7eb;
   padding: 0.5rem;
   font-size: 0.9rem;
@@ -119,6 +120,11 @@ td.project {
   max-width: 20rem;
 }
 
+td.workflow,
+td.project {
+  font-size: 0.75rem;
+}
+
 th.started,
 td.started {
   font-variant-numeric: tabular-nums;
@@ -127,6 +133,8 @@ td.started {
 
 th.created,
 td.created,
+th.progress,
+td.progress,
 th.image-count,
 td.image-count,
 td.run-duration {
@@ -285,6 +293,11 @@ pre.wrap {
   gap: 1rem;
   margin-top: 1rem;
   font-size: 0.9rem;
+}
+
+.pagination:first-child {
+  margin: 0;
+  float: right;
 }
 
 .page-link {

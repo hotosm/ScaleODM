@@ -1,6 +1,7 @@
 {{ define "tasks" }}
 {{ template "layout.start" . }}
 <section class="panel">
+  {{ template "layout.pagination" . }}
   <h1>Jobs</h1>
   <form class="filters" method="get" action="/ui">
     <label>
@@ -25,6 +26,7 @@
         <th class="project">DroneTM project</th>
         <th class="created">Created</th>
         <th class="started">Started</th>
+        <th class="progress">Progress</th>
         <th class="image-count">Images</th>
         <th class="run-duration">Ran for</th>
         <th class="result">Status</th>
@@ -39,10 +41,11 @@
             <a href="{{ .ProjectURL }}">{{ .ProjectID }}</a>
           {{else}}{{ .ProjectID }}{{end}}
         </td>
-        <td class="created" title="{{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
+        <td class="created" title="Job created at {{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
         <td class="started">{{ .StartedAt }}</td>
+        <td class="progress">{{ .Progress }}%</td>
         <td class="image-count">{{ .ImageCount }}</td>
-        <td class="run-duration">{{ .RunDuration }}</td>
+        <td class="run-duration" title="Job ended at {{ .CompletedAt }}">{{ .RunDuration }}</td>
         <td class="result">
           <div class="status status-{{ .Status }}">{{ .StatusLabel }}</div>
           <div class="error-message">{{ .ErrorMessage }}</div>
@@ -55,20 +58,7 @@
       {{ end }}
     </tbody>
   </table>
-
-  <nav class="pagination" aria-label="Task pages">
-    {{ if .HasPrev }}
-    <a class="page-link" href="/ui{{ .PrevQuery }}" rel="prev">&larr; Previous</a>
-    {{ else }}
-    <span class="page-link disabled">&larr; Previous</span>
-    {{ end }}
-    <span class="page-current">Page {{ .Page }}</span>
-    {{ if .HasNext }}
-    <a class="page-link" href="/ui{{ .NextQuery }}" rel="next">Next &rarr;</a>
-    {{ else }}
-    <span class="page-link disabled">Next &rarr;</span>
-    {{ end }}
-  </nav>
+  {{ template "layout.pagination" . }}
 </section>
 {{ template "layout.end" . }}
 {{ end }}
