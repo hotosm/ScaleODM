@@ -23,6 +23,7 @@ const (
 type taskSummary struct {
 	UUID         string `json:"uuid"`
 	ProjectID    string `json:"projectID"`
+	ProjectURL   string `json:"projectURL"`
 	Status       string `json:"status"`
 	StatusLabel  string `json:"statusLabel"`
 	StatusCode   int    `json:"statusCode"`
@@ -30,7 +31,10 @@ type taskSummary struct {
 	CreatedAt    string `json:"createdAt"`
 	StartedAt    string `json:"startedAt,omitempty"`
 	CompletedAt  string `json:"completedAt,omitempty"`
+	RunDuration  string `json:"runDuration,omitempty"`
 	CreatedAtAgo string `json:"createdAtAgo"`
+	ImageCount   int    `json:"imageCount"`
+	ErrorMessage string `json:"errorMessage"`
 }
 
 type taskOption struct {
@@ -97,6 +101,25 @@ func buildTasksQuery(status, projectID string, limit, page int) string {
 	return "?" + values.Encode()
 }
 
+func getImageCount(metadata []byte) int {
+	fields := map[string]interface{}{}
+	err := json.Unmarshal(metadata, &fields)
+	if err != nil {
+		return 0
+	}
+	value, ok := fields["image_count"]
+	if !ok {
+		return 0
+	}
+	switch n := value.(type) {
+	case float64:
+		return int(n)
+	case int:
+		return n
+	}
+	return 0
+}
+
 func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {
 	statusCode, statusLabel, progress := mapStatus(job.JobStatus)
 
@@ -108,13 +131,22 @@ func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {
 		StatusCode:   statusCode,
 		Progress:     progress,
 		CreatedAt:    formatTime(job.CreatedAt),
-		CreatedAtAgo: humanDuration(now.Sub(job.CreatedAt)),
+		CreatedAtAgo: formatAge(now.Sub(job.CreatedAt)),
+		ImageCount:   getImageCount(job.Metadata),
+	}
+	uuid, isProject := strings.CutPrefix(job.ODMProjectID, "DTM-Project-")
+	if isProject {
+		summary.ProjectURL = "https://drone.hotosm.org/projects/" + uuid
+	}
+	if job.ErrorMessage != nil {
+		summary.ErrorMessage = *job.ErrorMessage
 	}
 	if job.StartedAt != nil {
 		summary.StartedAt = formatTime(*job.StartedAt)
 	}
 	if job.CompletedAt != nil {
 		summary.CompletedAt = formatTime(*job.CompletedAt)
+		summary.RunDuration = formatDuration((*job.CompletedAt).Sub(*job.StartedAt))
 	}
 	return summary
 }
@@ -153,10 +185,18 @@ func mapStatus(status string) (code int, label string, progress int) {
 }
 
 func formatTime(t time.Time) string {
-	return t.UTC().Format(time.RFC3339)
+	return t.UTC().Format("2006-01-02 15:04Z")
 }
 
-func humanDuration(d time.Duration) string {
+func formatDuration(d time.Duration) string {
+	min := int(d.Minutes())
+	if min < 60 {
+		return fmt.Sprintf("%d min", min)
+	}
+	return fmt.Sprintf("%d h %d min", int(min/60), min%60)
+}
+
+func formatAge(d time.Duration) string {
 	if d < time.Minute {
 		return "just now"
 	}

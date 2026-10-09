@@ -1,7 +1,8 @@
 {{ define "tasks" }}
 {{ template "layout.start" . }}
 <section class="panel">
-  <h1>Tasks</h1>
+  {{ template "layout.pagination" . }}
+  <h1>Jobs</h1>
   <form class="filters" method="get" action="/ui">
     <label>
       Status
@@ -21,25 +22,34 @@
   <table id="tasks-table" data-refresh-url="/ui/api/tasks">
     <thead>
       <tr>
-        <th>Workflow UUID</th>
-        <th>Project</th>
-        <th>Status</th>
-        <th>Progress</th>
-        <th>Created</th>
-        <th>Started</th>
-        <th>Completed</th>
+        <th class="workflow">Workflow</th>
+        <th class="project">DroneTM project</th>
+        <th class="created">Created</th>
+        <th class="started">Started</th>
+        <th class="progress">Progress</th>
+        <th class="image-count">Images</th>
+        <th class="run-duration">Ran for</th>
+        <th class="result">Status</th>
       </tr>
     </thead>
     <tbody>
       {{ range .Tasks }}
-      <tr>
-        <td><a href="/ui/tasks/{{ .UUID }}">{{ .UUID }}</a></td>
-        <td>{{ .ProjectID }}</td>
-        <td><span class="status status-{{ .Status }}">{{ .StatusLabel }}</span></td>
-        <td>{{ .Progress }}%</td>
-        <td title="{{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
-        <td>{{ .StartedAt }}</td>
-        <td>{{ .CompletedAt }}</td>
+      <tr class="status-{{ .Status }}">
+        <td class="workflow"><a href="/ui/tasks/{{ .UUID }}">{{ .UUID }}</a></td>
+        <td class="project">
+          {{if ne .ProjectURL ""}}
+            <a href="{{ .ProjectURL }}">{{ .ProjectID }}</a>
+          {{else}}{{ .ProjectID }}{{end}}
+        </td>
+        <td class="created" title="Job created at {{ .CreatedAt }}">{{ .CreatedAtAgo }}</td>
+        <td class="started">{{ .StartedAt }}</td>
+        <td class="progress">{{ .Progress }}%</td>
+        <td class="image-count">{{ .ImageCount }}</td>
+        <td class="run-duration" title="Job ended at {{ .CompletedAt }}">{{ .RunDuration }}</td>
+        <td class="result">
+          <div class="status status-{{ .Status }}">{{ .StatusLabel }}</div>
+          <div class="error-message">{{ .ErrorMessage }}</div>
+        </td>
       </tr>
       {{ else }}
       <tr>
@@ -48,20 +58,7 @@
       {{ end }}
     </tbody>
   </table>
-
-  <nav class="pagination" aria-label="Task pages">
-    {{ if .HasPrev }}
-    <a class="page-link" href="/ui{{ .PrevQuery }}" rel="prev">&larr; Previous</a>
-    {{ else }}
-    <span class="page-link disabled">&larr; Previous</span>
-    {{ end }}
-    <span class="page-current">Page {{ .Page }}</span>
-    {{ if .HasNext }}
-    <a class="page-link" href="/ui{{ .NextQuery }}" rel="next">Next &rarr;</a>
-    {{ else }}
-    <span class="page-link disabled">Next &rarr;</span>
-    {{ end }}
-  </nav>
+  {{ template "layout.pagination" . }}
 </section>
 {{ template "layout.end" . }}
 {{ end }}
