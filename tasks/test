@@ -109,6 +109,16 @@ all:
 
   cd {{justfile_directory()}}
 
+  # Pin talosctl at v1.13.9; v1.14.x fails to bootstrap on GitHub runners.
+  TALOS_VERSION="${TALOS_VERSION:-v1.13.9}"
+  if ! talosctl version --client --short 2>/dev/null | grep -q "$TALOS_VERSION"; then
+    mkdir -p "$HOME/.local/bin"
+    curl -fsSL -o "$HOME/.local/bin/talosctl" \
+      "https://github.com/siderolabs/talos/releases/download/${TALOS_VERSION}/talosctl-linux-amd64"
+    chmod +x "$HOME/.local/bin/talosctl"
+  fi
+  export PATH="$HOME/.local/bin:$PATH"
+
   just test chart-ingress-guardrails
   just k8s cluster-available
   just test build-api-image
