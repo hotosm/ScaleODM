@@ -276,6 +276,34 @@ func StatObjectAtURL(ctx context.Context, client *minio.Client, s3URL string) (i
 	return info.Size, nil
 }
 
+// ReadObjectAtURL reads at most maxBytes into memory.
+func ReadObjectAtURL(ctx context.Context, client *minio.Client, s3URL string, maxBytes int64) ([]byte, error) {
+	if !strings.HasPrefix(s3URL, "s3://") {
+		return nil, fmt.Errorf("invalid S3 path: %s", s3URL)
+	}
+
+	bucket, key, found := strings.Cut(strings.TrimPrefix(s3URL, "s3://"), "/")
+	if !found || strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
+		return nil, fmt.Errorf("S3 path must name an object as s3://bucket/key: %s", s3URL)
+	}
+
+	obj, err := client.GetObject(ctx, bucket, key, minio.GetObjectOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("failed to read object %q in bucket %q: %w", key, bucket, err)
+	}
+	defer obj.Close()
+
+	// Read one extra byte to detect oversized objects.
+	data, err := io.ReadAll(io.LimitReader(obj, maxBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("failed to read object %q in bucket %q: %w", key, bucket, err)
+	}
+	if int64(len(data)) > maxBytes {
+		return nil, fmt.Errorf("object %q in bucket %q exceeds %d bytes", key, bucket, maxBytes)
+	}
+	return data, nil
+}
+
 // ListFilesInS3Path lists files in the S3 path.
 // writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
 // Returns a list of object names (without the prefix).

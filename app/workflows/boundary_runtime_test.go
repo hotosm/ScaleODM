@@ -12,7 +12,7 @@ func downloadBoundaryScript(t *testing.T) string {
 	t.Helper()
 
 	cfg := NewDefaultODMConfig("test-project", "s3://bucket/input/", "s3://bucket/output/", nil)
-	cfg.Boundary = BoundarySource{S3Path: "s3://bucket/aoi.geojson"}
+	cfg.Boundary = FileSource{S3Path: "s3://bucket/aoi.geojson"}
 
 	client := &Client{namespace: "test-namespace"}
 	wf := client.buildODMWorkflow(cfg)
@@ -56,7 +56,7 @@ func TestDownloadArgs_S3BoundaryFetchIsAtomicAndTypeChecked(t *testing.T) {
 // Download aborts on an unusable boundary, so the process flag can stay static.
 func TestProcessArgs_BoundaryFlagIsStatic(t *testing.T) {
 	cfg := NewDefaultODMConfig("test-project", "s3://bucket/input/", "s3://bucket/output/", []string{"--fast-orthophoto"})
-	cfg.Boundary = BoundarySource{S3Path: "s3://bucket/aoi.geojson"}
+	cfg.Boundary = FileSource{S3Path: "s3://bucket/aoi.geojson"}
 
 	client := &Client{namespace: "test-namespace"}
 	wf := client.buildODMWorkflow(cfg)

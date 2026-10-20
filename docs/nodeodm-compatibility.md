@@ -284,24 +284,37 @@ curl -X POST http://scaleodm:31100/task/new \
   }'
 ```
 
-#### Boundary
+#### Workspace file options
 
-ODM's `--boundary` clips the reconstruction to the mapped area. It normally
-takes a file path or an inline GeoJSON string; ScaleODM also accepts an `s3://`
-URL, and materialises whichever form it is given into the workflow's workspace
-before the process stage runs.
+`boundary` and `cameras` accept inline JSON (string or object), an `s3://` URL,
+or a plain ODM file path. Inline and S3 documents are written to the workspace
+before processing and preserved on restart when `options` is omitted.
 
-| `boundary` value | Handling |
-|---|---|
-| Inline GeoJSON | Compacted and written to `/workspace/{workflow}/boundary.geojson` by the download stage. Must hold exactly one `Polygon`, as a bare geometry, a `Feature` or a single-feature `FeatureCollection`, with at least one non-empty ring of numeric coordinate pairs, under 256 KiB. A `MultiPolygon`, a second feature or an empty ring is rejected with a 400, because ODM's own `load_boundary` refuses them once processing starts. |
-| `s3://bucket/key` | Checked at submit: `POST /task/new` and `/task/restart` stat the object and return `400` if it is missing, unreadable or empty, so a bad AOI fails immediately instead of during the workflow. |
-| Plain path | Passed to ODM unchanged, as NodeODM does. |
+S3 documents are validated on submission; missing, unreadable, empty or invalid
+files return `400`. Inline limits are 256 KiB for boundaries and 64 KiB for
+cameras to keep workflow specs small. Use S3 for larger documents.
 
-The value is recorded against the task, so `POST /task/restart` keeps the
-boundary without resending `options`.
+##### Boundary
+
+`--boundary` clips the reconstruction to one `Polygon`, supplied as a geometry,
+`Feature`, or single-feature `FeatureCollection`. It requires a non-empty ring
+of numeric coordinate pairs and is saved as `/workspace/{workflow}/boundary.geojson`.
+
+##### Cameras
+
+`--cameras` supplies camera intrinsics. The document must be a non-empty object
+keyed by ODM camera ID. Each entry requires `projection_type`, positive integer
+`width` and `height`, and both `focal_x` and `focal_y` if either is set.
+
+IDs require at least six space-separated parts, such as
+`dji fc8482 4032 3024 brown 0.6666`; the `v2 ` prefix is accepted. Shorter IDs
+return `400` because ODM silently discards them.
+
+Calibration is saved as `/workspace/{workflow}/cameras-input.json` to avoid
+ODM overwriting it. ScaleODM does not add `--use-fixed-camera-params`.
 
 If `s3Endpoint` is provided, ScaleODM applies that endpoint to workflow pods and API-side
-S3 operations (image counting, boundary preflight, log fallback, and pre-signed downloads).
+S3 operations (image counting, workspace file preflight, log fallback, and pre-signed downloads).
 When it is omitted, both fall back to the deployment's `AWS_S3_ENDPOINT`, so the API and the
 workflow always resolve against the same store. Endpoints are normalized to
 scheme+host[:port]; whether a store is treated as AWS or as S3-compatible is decided by

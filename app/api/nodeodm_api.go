@@ -58,6 +58,8 @@ const (
 	metadataCapacityTypeKey          = "capacity_type"
 	metadataBoundaryGeoJSONKey       = "boundary_geojson"
 	metadataBoundaryS3PathKey        = "boundary_s3_path"
+	metadataCamerasJSONKey           = "cameras_json"
+	metadataCamerasS3PathKey         = "cameras_s3_path"
 )
 
 const (
@@ -65,12 +67,16 @@ const (
 	taskAssetsMaxAdditionalLimit     = 1000
 )
 
-// odmFlagsFromOptions converts NodeODM options to flags and handles boundaries separately.
-func odmFlagsFromOptions(options []TaskOption) ([]string, workflows.BoundarySource, error) {
-	var (
-		odmFlags []string
-		boundary workflows.BoundarySource
-	)
+// Options that accept workspace documents.
+var workspaceFileOptions = map[string]func(string) (workflows.FileSource, string, error){
+	workflows.BoundaryOptionName: workflows.ParseBoundaryValue,
+	workflows.CamerasOptionName:  workflows.ParseCamerasValue,
+}
+
+// odmFlagsFromOptions separates ODM flags from workspace files.
+func odmFlagsFromOptions(options []TaskOption) ([]string, map[string]workflows.FileSource, error) {
+	var odmFlags []string
+	files := map[string]workflows.FileSource{}
 
 	for _, opt := range options {
 		if opt.Value == nil {
@@ -81,13 +87,13 @@ func odmFlagsFromOptions(options []TaskOption) ([]string, workflows.BoundarySour
 			continue
 		}
 
-		if opt.Name == workflows.BoundaryOptionName {
-			source, passthrough, err := workflows.ParseBoundaryValue(boundaryOptionString(opt.Value))
+		if parse, ok := workspaceFileOptions[opt.Name]; ok {
+			source, passthrough, err := parse(documentOptionString(opt.Value))
 			if err != nil {
-				return nil, workflows.BoundarySource{}, err
+				return nil, nil, err
 			}
 			if source.IsSet() {
-				boundary = source
+				files[opt.Name] = source
 				continue
 			}
 			odmFlags = append(odmFlags, fmt.Sprintf("--%s=%s", opt.Name, passthrough))
@@ -102,11 +108,11 @@ func odmFlagsFromOptions(options []TaskOption) ([]string, workflows.BoundarySour
 		}
 	}
 
-	return odmFlags, boundary, nil
+	return odmFlags, files, nil
 }
 
-// boundaryOptionString preserves GeoJSON objects when converting a boundary to text.
-func boundaryOptionString(value any) string {
+// documentOptionString preserves nested JSON objects as text.
+func documentOptionString(value any) string {
 	switch v := value.(type) {
 	case string:
 		return v
@@ -285,17 +291,78 @@ func metadataExcludePaths(metadataJSON []byte) ([]string, bool) {
 	return out, true
 }
 
-// metadataBoundary reads the boundary saved when the task was submitted.
-func metadataBoundary(metadataJSON []byte) workflows.BoundarySource {
+// metadataWorkspaceFiles restores file sources for restart.
+func metadataWorkspaceFiles(metadataJSON []byte) map[string]workflows.FileSource {
 	metaMap := parseMetadataMap(metadataJSON)
-	var boundary workflows.BoundarySource
-	if v, ok := metaMap[metadataBoundaryGeoJSONKey].(string); ok {
-		boundary.GeoJSON = v
+	files := map[string]workflows.FileSource{}
+	for option, keys := range workspaceFileMetadataKeys {
+		var source workflows.FileSource
+		if v, ok := metaMap[keys.inline].(string); ok {
+			source.Inline = v
+		}
+		if v, ok := metaMap[keys.s3Path].(string); ok {
+			source.S3Path = v
+		}
+		if source.IsSet() {
+			files[option] = source
+		}
 	}
-	if v, ok := metaMap[metadataBoundaryS3PathKey].(string); ok {
-		boundary.S3Path = v
+	return files
+}
+
+// Preserve boundary keys for existing tasks.
+var workspaceFileMetadataKeys = map[string]struct{ inline, s3Path string }{
+	workflows.BoundaryOptionName: {inline: metadataBoundaryGeoJSONKey, s3Path: metadataBoundaryS3PathKey},
+	workflows.CamerasOptionName:  {inline: metadataCamerasJSONKey, s3Path: metadataCamerasS3PathKey},
+}
+
+func sentenceCase(name string) string {
+	if name == "" {
+		return name
 	}
-	return boundary
+	return strings.ToUpper(name[:1]) + name[1:]
+}
+
+func hasS3WorkspaceFile(files map[string]workflows.FileSource) bool {
+	for _, source := range files {
+		if source.S3Path != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// preflightWorkspaceFiles rejects invalid S3 documents before workflow submission.
+// ODM can silently ignore invalid camera calibration.
+func preflightWorkspaceFiles(ctx context.Context, client *minio.Client, files map[string]workflows.FileSource) (string, error) {
+	for _, option := range []string{workflows.BoundaryOptionName, workflows.CamerasOptionName} {
+		source, ok := files[option]
+		if !ok || source.S3Path == "" {
+			continue
+		}
+		data, err := s3.ReadObjectAtURL(ctx, client, source.S3Path, workflows.MaxRemoteDocumentBytes)
+		switch {
+		case err != nil:
+			return option, fmt.Errorf("Unable to read %s from %s: %w", option, source.S3Path, err)
+		case len(data) == 0:
+			return option, fmt.Errorf("%s object is empty: %s", sentenceCase(option), source.S3Path)
+		}
+		if err := workflows.ValidateDocument(option, data); err != nil {
+			return option, fmt.Errorf("Invalid %s at %s: %w", option, source.S3Path, err)
+		}
+	}
+	return "", nil
+}
+
+// workspaceFileMetadata builds a metadata patch, clearing absent options.
+func workspaceFileMetadata(files map[string]workflows.FileSource) map[string]any {
+	patch := map[string]any{}
+	for option, keys := range workspaceFileMetadataKeys {
+		source := files[option]
+		patch[keys.inline] = source.Inline
+		patch[keys.s3Path] = source.S3Path
+	}
+	return patch
 }
 
 func metadataUseDefaultExcludes(metadataJSON []byte) bool {
@@ -693,6 +760,20 @@ func (a *API) registerNodeODMRoutes() {
 				Domain: "float > 0",
 				Help:   "DEM resolution in cm/pixel",
 			},
+			{
+				Name:   workflows.BoundaryOptionName,
+				Type:   "string",
+				Value:  "",
+				Domain: "GeoJSON Polygon, s3:// URL, or path",
+				Help:   "Clips the reconstruction to one Polygon AOI. Accepts inline GeoJSON, an s3:// URL or a path",
+			},
+			{
+				Name:   workflows.CamerasOptionName,
+				Type:   "string",
+				Value:  "",
+				Domain: "cameras.json, s3:// URL, or path",
+				Help:   "Supplies camera intrinsics instead of solving them. Accepts inline JSON, an s3:// URL or a path",
+			},
 		}
 
 		return &struct{ Body []OptionResponse }{Body: options}, nil
@@ -820,7 +901,7 @@ func (a *API) registerNodeODMRoutes() {
 		// Parse options if provided
 		var options []TaskOption
 		var odmFlags []string
-		var boundary workflows.BoundarySource
+		workspaceFiles := map[string]workflows.FileSource{}
 		if req.Options != "" {
 			if err := json.Unmarshal([]byte(req.Options), &options); err != nil {
 				metricResult = "failure"
@@ -832,7 +913,7 @@ func (a *API) registerNodeODMRoutes() {
 
 			// Convert options to ODM flags
 			var flagsErr error
-			odmFlags, boundary, flagsErr = odmFlagsFromOptions(options)
+			odmFlags, workspaceFiles, flagsErr = odmFlagsFromOptions(options)
 			if flagsErr != nil {
 				metricResult = "failure"
 				metricReason = "invalid_options"
@@ -961,21 +1042,11 @@ func (a *API) registerNodeODMRoutes() {
 			return nil, huma.NewError(400, "Unable to read imagery from readS3Path", countErr)
 		}
 
-		// Fail here rather than in the download stage, whose logs are not always archived.
-		if boundary.S3Path != "" {
-			boundarySize, boundaryErr := s3.StatObjectAtURL(ctx, taskClient, boundary.S3Path)
-			switch {
-			case boundaryErr != nil:
-				metricResult = "failure"
-				metricReason = "boundary_unreadable"
-				log.Printf("POST /task/new: boundary unreadable at %q endpoint=%q: %v", boundary.S3Path, s3Endpoint, boundaryErr)
-				return nil, huma.NewError(400, fmt.Sprintf("Unable to read boundary from %s", boundary.S3Path), boundaryErr)
-			case boundarySize == 0:
-				metricResult = "failure"
-				metricReason = "boundary_empty"
-				log.Printf("POST /task/new: boundary is empty at %q endpoint=%q", boundary.S3Path, s3Endpoint)
-				return nil, huma.NewError(400, fmt.Sprintf("Boundary object is empty: %s", boundary.S3Path))
-			}
+		if option, fileErr := preflightWorkspaceFiles(ctx, taskClient, workspaceFiles); fileErr != nil {
+			metricResult = "failure"
+			metricReason = option + "_unreadable"
+			log.Printf("POST /task/new: %s preflight failed endpoint=%q: %v", option, s3Endpoint, fileErr)
+			return nil, huma.NewError(400, fileErr.Error())
 		}
 
 		// S3 credentials are configured at the server level and injected into
@@ -996,7 +1067,8 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.ODMImage = odmImage
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
-		wfConfig.Boundary = boundary
+		wfConfig.Boundary = workspaceFiles[workflows.BoundaryOptionName]
+		wfConfig.Cameras = workspaceFiles[workflows.CamerasOptionName]
 
 		// Submit workflow to Argo
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
@@ -1032,11 +1104,8 @@ func (a *API) registerNodeODMRoutes() {
 			writePath,
 			odmFlags,
 			s3Region,
-			// Save the boundary with the job so restarts cannot lose it.
-			map[string]any{
-				metadataBoundaryGeoJSONKey: boundary.GeoJSON,
-				metadataBoundaryS3PathKey:  boundary.S3Path,
-			},
+			// Preserve file sources for restart.
+			workspaceFileMetadata(workspaceFiles),
 		)
 		if err != nil {
 			metricResult = "failure"
@@ -1284,16 +1353,18 @@ func (a *API) registerNodeODMRoutes() {
 			}
 		}
 
-		// Add the saved boundary back to the options returned to clients.
-		if boundary := metadataBoundary(job.Metadata); boundary.IsSet() {
-			value := boundary.GeoJSON
-			if value == "" {
-				value = boundary.S3Path
+		// Include stored file sources in task options.
+		storedFiles := metadataWorkspaceFiles(job.Metadata)
+		for _, option := range []string{workflows.BoundaryOptionName, workflows.CamerasOptionName} {
+			source, ok := storedFiles[option]
+			if !ok {
+				continue
 			}
-			info.Options = append(info.Options, TaskOption{
-				Name:  workflows.BoundaryOptionName,
-				Value: value,
-			})
+			value := source.Inline
+			if value == "" {
+				value = source.S3Path
+			}
+			info.Options = append(info.Options, TaskOption{Name: option, Value: value})
 		}
 
 		// Get console output if requested
@@ -1559,7 +1630,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		// Parse new options if provided
 		var odmFlags []string
-		var boundary workflows.BoundarySource
+		workspaceFiles := map[string]workflows.FileSource{}
 		if input.Body.Options != "" {
 			var options []TaskOption
 			if err := json.Unmarshal([]byte(input.Body.Options), &options); err != nil {
@@ -1567,7 +1638,7 @@ func (a *API) registerNodeODMRoutes() {
 				return nil, huma.NewError(400, "Invalid options JSON", err)
 			}
 			var flagsErr error
-			odmFlags, boundary, flagsErr = odmFlagsFromOptions(options)
+			odmFlags, workspaceFiles, flagsErr = odmFlagsFromOptions(options)
 			if flagsErr != nil {
 				log.Printf("POST /task/restart: invalid options for %q: %v", input.Body.UUID, flagsErr)
 				return nil, huma.NewError(400, flagsErr.Error())
@@ -1576,7 +1647,7 @@ func (a *API) registerNodeODMRoutes() {
 			if err := json.Unmarshal(metadata.ODMFlags, &odmFlags); err != nil {
 				return nil, huma.NewError(500, "Failed to parse stored task options", err)
 			}
-			boundary = metadataBoundary(metadata.Metadata)
+			workspaceFiles = metadataWorkspaceFiles(metadata.Metadata)
 		}
 		for _, flag := range odmFlags {
 			if err := validateShellSafe(flag, "options flag"); err != nil {
@@ -1621,22 +1692,15 @@ func (a *API) registerNodeODMRoutes() {
 			}
 		}
 
-		// Same check as task/new; the AOI may have been deleted since. Unlike the image
-		// count above, an unusable client fails rather than skipping the check.
-		if boundary.S3Path != "" {
+		// File validation requires a working S3 client.
+		if hasS3WorkspaceFile(workspaceFiles) {
 			if taskClientErr != nil {
-				log.Printf("POST /task/restart: cannot verify boundary %q, S3 client init failed endpoint=%q: %v", boundary.S3Path, s3Endpoint, taskClientErr)
-				return nil, huma.NewError(500, "Failed to initialize S3 client to verify boundary", taskClientErr)
+				log.Printf("POST /task/restart: cannot verify workspace files, S3 client init failed endpoint=%q: %v", s3Endpoint, taskClientErr)
+				return nil, huma.NewError(500, "Failed to initialize S3 client to verify task files", taskClientErr)
 			}
-
-			boundarySize, boundaryErr := s3.StatObjectAtURL(ctx, taskClient, boundary.S3Path)
-			switch {
-			case boundaryErr != nil:
-				log.Printf("POST /task/restart: boundary unreadable at %q endpoint=%q: %v", boundary.S3Path, s3Endpoint, boundaryErr)
-				return nil, huma.NewError(400, fmt.Sprintf("Unable to read boundary from %s", boundary.S3Path), boundaryErr)
-			case boundarySize == 0:
-				log.Printf("POST /task/restart: boundary is empty at %q endpoint=%q", boundary.S3Path, s3Endpoint)
-				return nil, huma.NewError(400, fmt.Sprintf("Boundary object is empty: %s", boundary.S3Path))
+			if option, fileErr := preflightWorkspaceFiles(ctx, taskClient, workspaceFiles); fileErr != nil {
+				log.Printf("POST /task/restart: %s preflight failed endpoint=%q: %v", option, s3Endpoint, fileErr)
+				return nil, huma.NewError(400, fileErr.Error())
 			}
 		}
 
@@ -1654,7 +1718,8 @@ func (a *API) registerNodeODMRoutes() {
 		wfConfig.CapacityType = capacityType
 		wfConfig.ExcludePaths = excludePatterns
 		wfConfig.S3ScanDepth = s3ScanDepth
-		wfConfig.Boundary = boundary
+		wfConfig.Boundary = workspaceFiles[workflows.BoundaryOptionName]
+		wfConfig.Cameras = workspaceFiles[workflows.CamerasOptionName]
 
 		wf, err := a.workflowClient.CreateODMWorkflow(ctx, wfConfig)
 		if err != nil {
@@ -1666,8 +1731,9 @@ func (a *API) registerNodeODMRoutes() {
 			metadataImageCountKey:            imageCount,
 			metadataImageTotalBytesKey:       imageTotalBytes,
 			metadataWorkflowMissingFirstSeen: nil,
-			metadataBoundaryGeoJSONKey:       boundary.GeoJSON,
-			metadataBoundaryS3PathKey:        boundary.S3Path,
+		}
+		for key, value := range workspaceFileMetadata(workspaceFiles) {
+			metadataPatch[key] = value
 		}
 		if s3Endpoint != "" {
 			metadataPatch[metadataS3EndpointKey] = s3Endpoint

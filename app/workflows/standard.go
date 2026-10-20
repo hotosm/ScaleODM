@@ -87,8 +87,9 @@ type ODMPipelineConfig struct {
 	// higher-level project root and pick up imagery in nested task subdirs.
 	S3ScanDepth int
 
-	// Boundary is written to the workspace before ODM starts.
-	Boundary BoundarySource
+	// Input files written before ODM starts.
+	Boundary FileSource
+	Cameras  FileSource
 
 	RuntimeGuardrails WorkflowRuntimeGuardrails
 	Workspace         WorkspaceConfig
@@ -857,7 +858,8 @@ set -o pipefail
 echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 %s%s`,
 				s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth),
-				s3.GenerateBoundaryFetchScript(BoundaryFilePath(jobID), cfg.Boundary.S3Path, cfg.Boundary.GeoJSON),
+				s3.GenerateWorkspaceFileFetchScript(BoundaryFilePath(jobID), cfg.Boundary.S3Path, cfg.Boundary.Inline, BoundaryOptionName)+
+					s3.GenerateWorkspaceFileFetchScript(CamerasFilePath(jobID), cfg.Cameras.S3Path, cfg.Cameras.Inline, CamerasOptionName),
 			)},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
@@ -866,10 +868,12 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 	}
 
 	// Run ODM with unbuffered Python so partial logs are flushed promptly.
-	processFlags := cfg.ODMFlags
+	processFlags := append([]string{}, cfg.ODMFlags...)
 	if cfg.Boundary.IsSet() {
-		processFlags = append(append([]string{}, processFlags...),
-			fmt.Sprintf("--boundary=%s", BoundaryFilePath(jobID)))
+		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", BoundaryOptionName, BoundaryFilePath(jobID)))
+	}
+	if cfg.Cameras.IsSet() {
+		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", CamerasOptionName, CamerasFilePath(jobID)))
 	}
 	odmFlagsStr := strings.Join(processFlags, " ")
 	odmContainer := wfv1.ContainerNode{

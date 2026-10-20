@@ -12,7 +12,7 @@ func TestParseBoundaryValueS3Path(t *testing.T) {
 	source, passthrough, err := ParseBoundaryValue("s3://dronetm-prod/projects/abc/aoi.geojson")
 	require.NoError(t, err)
 	assert.Equal(t, "s3://dronetm-prod/projects/abc/aoi.geojson", source.S3Path)
-	assert.Empty(t, source.GeoJSON)
+	assert.Empty(t, source.Inline)
 	assert.Empty(t, passthrough)
 	assert.True(t, source.IsSet())
 }
@@ -49,8 +49,8 @@ func TestParseBoundaryValueCompactsGeoJSON(t *testing.T) {
 	assert.Empty(t, source.S3Path)
 
 	// One-line JSON cannot escape the quoted heredoc.
-	assert.NotContains(t, source.GeoJSON, "\n")
-	assert.Contains(t, source.GeoJSON, `"FeatureCollection"`)
+	assert.NotContains(t, source.Inline, "\n")
+	assert.Contains(t, source.Inline, `"FeatureCollection"`)
 }
 
 func TestParseBoundaryValueGeoJSONCannotEscapeHeredoc(t *testing.T) {
@@ -59,7 +59,7 @@ func TestParseBoundaryValueGeoJSONCannotEscapeHeredoc(t *testing.T) {
 
 	source, _, err := ParseBoundaryValue(hostile)
 	require.NoError(t, err)
-	assert.NotContains(t, source.GeoJSON, "\n")
+	assert.NotContains(t, source.Inline, "\n")
 }
 
 func TestParseBoundaryValueAcceptsSinglePolygonForms(t *testing.T) {

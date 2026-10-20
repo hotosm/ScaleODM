@@ -418,46 +418,47 @@ echo ""
 echo "Workspace snapshot complete."`
 }
 
-// GenerateBoundaryFetchScript writes or downloads a boundary during the download stage.
-// A boundary is only fetched when the caller asked for one, so a failed fetch fails the stage.
-func GenerateBoundaryFetchScript(destPath, s3Path, geoJSON string) string {
+// GenerateWorkspaceFileFetchScript writes or downloads an ODM input file.
+func GenerateWorkspaceFileFetchScript(destPath, s3Path, inline, name string) string {
+	prefix := strings.ToUpper(name)
+
 	switch {
 	case s3Path != "":
 		return `
-echo "Fetching ODM boundary from ` + s3Path + `..."
-BOUNDARY_REMOTE=$(echo "` + s3Path + `" | sed 's|^s3://|s3:|')
-BOUNDARY_DEST="` + destPath + `"
-BOUNDARY_TMP="$BOUNDARY_DEST.part"
+echo "Fetching ODM ` + name + ` from ` + s3Path + `..."
+` + prefix + `_REMOTE=$(echo "` + s3Path + `" | sed 's|^s3://|s3:|')
+` + prefix + `_DEST="` + destPath + `"
+` + prefix + `_TMP="$` + prefix + `_DEST.part"
 
-# Retries share the workspace PVC. -rf, not -f: a prefix fetch writes a directory.
-rm -rf "$BOUNDARY_DEST" "$BOUNDARY_TMP"
+# Remove retry leftovers, including directories from prefix fetches.
+rm -rf "$` + prefix + `_DEST" "$` + prefix + `_TMP"
 
-# Scratch path is always fresh, so "no transfer" can only mean the source did not resolve.
-if ! rclone copyto --error-on-no-transfer "$BOUNDARY_REMOTE" "$BOUNDARY_TMP"; then
-  echo "ERROR: boundary not found or unreadable at ` + s3Path + `" >&2
-  rm -rf "$BOUNDARY_TMP"
+# A fresh temp path makes "no transfer" a missing-source error.
+if ! rclone copyto --error-on-no-transfer "$` + prefix + `_REMOTE" "$` + prefix + `_TMP"; then
+  echo "ERROR: ` + name + ` not found or unreadable at ` + s3Path + `" >&2
+  rm -rf "$` + prefix + `_TMP"
   exit 1
-elif [ ! -f "$BOUNDARY_TMP" ]; then
-  # copyto against a prefix writes a directory, which satisfies -s.
-  echo "ERROR: boundary path ` + s3Path + ` is a prefix, not a single object" >&2
-  rm -rf "$BOUNDARY_TMP"
+elif [ ! -f "$` + prefix + `_TMP" ]; then
+  # Prefix downloads create directories, which also pass -s.
+  echo "ERROR: ` + name + ` path ` + s3Path + ` is a prefix, not a single object" >&2
+  rm -rf "$` + prefix + `_TMP"
   exit 1
-elif [ ! -s "$BOUNDARY_TMP" ]; then
-  echo "ERROR: boundary at ` + s3Path + ` is empty" >&2
-  rm -rf "$BOUNDARY_TMP"
+elif [ ! -s "$` + prefix + `_TMP" ]; then
+  echo "ERROR: ` + name + ` at ` + s3Path + ` is empty" >&2
+  rm -rf "$` + prefix + `_TMP"
   exit 1
 else
-  mv "$BOUNDARY_TMP" "$BOUNDARY_DEST"
-  echo "Boundary written to $BOUNDARY_DEST ($(wc -c < "$BOUNDARY_DEST") bytes)"
+  mv "$` + prefix + `_TMP" "$` + prefix + `_DEST"
+  echo "` + name + ` written to $` + prefix + `_DEST ($(wc -c < "$` + prefix + `_DEST") bytes)"
 fi
 `
-	case geoJSON != "":
+	case inline != "":
 		return `
-echo "Writing inline ODM boundary..."
-cat > "` + destPath + `" <<'SCALEODM_BOUNDARY_EOF'
-` + geoJSON + `
-SCALEODM_BOUNDARY_EOF
-echo "Boundary written to ` + destPath + ` ($(wc -c < "` + destPath + `") bytes)"
+echo "Writing inline ODM ` + name + `..."
+cat > "` + destPath + `" <<'SCALEODM_` + prefix + `_EOF'
+` + inline + `
+SCALEODM_` + prefix + `_EOF
+echo "` + name + ` written to ` + destPath + ` ($(wc -c < "` + destPath + `") bytes)"
 `
 	default:
 		return ""
