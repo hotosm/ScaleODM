@@ -1,3 +1,5 @@
+zensical_version := "0.0.72"
+
 # List available commands
 [private]
 default:
@@ -97,34 +99,30 @@ generate:
   just docs generate-openapi
   just docs generate-html
 
-# Build a static site directory for GitHub Pages
-build-site output="site":
+# Build the static docs site (Zensical + ReDoc API reference)
+build-site:
   #!/usr/bin/env bash
   set -euo pipefail
 
   cd {{justfile_directory()}}
 
-  OUTPUT_DIR="{{ output }}"
-
   just docs generate
 
-  echo "🧱 Building static site in ${OUTPUT_DIR}/ ..."
-  rm -rf "$OUTPUT_DIR"
-  mkdir -p "$OUTPUT_DIR"
-
-  if [ ! -f docs/api/index.html ]; then
-    echo "❌ ReDoc HTML not found at docs/api/index.html"
-    echo "   Run 'just docs generate-html' first."
-    exit 1
+  if ! command -v uv > /dev/null; then
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+    export PATH="$HOME/.local/bin:$PATH"
   fi
 
-  # Serve ReDoc as the docs site root.
-  cp docs/api/index.html "$OUTPUT_DIR/index.html"
+  echo "🧱 Building static site in site/ ..."
+  # docs/api/index.html (ReDoc) is copied as-is to site/api/
+  uvx zensical=={{ zensical_version }} build
+  touch site/.nojekyll
 
-  # Disable Jekyll processing to serve directories/files exactly as generated.
-  touch "$OUTPUT_DIR/.nojekyll"
+  echo "✓ Static site prepared: site/"
 
-  echo "✓ Static site prepared: ${OUTPUT_DIR}/"
+# Serve the docs locally with live reload (run 'just docs generate' first for the API page)
+serve:
+  cd {{justfile_directory()}} && uvx zensical=={{ zensical_version }} serve
 
 # Publish static site to gh-pages branch
 deploy-site output="site" branch="gh-pages":
@@ -168,6 +166,6 @@ deploy-site output="site" branch="gh-pages":
   echo "✅ Published docs to branch: $PUBLISH_BRANCH"
 
 # Build and publish docs (local + CI entrypoint)
-publish output="site" branch="gh-pages":
-  just docs build-site "{{ output }}"
-  just docs deploy-site "{{ output }}" "{{ branch }}"
+publish branch="gh-pages":
+  just docs build-site
+  just docs deploy-site site "{{ branch }}"

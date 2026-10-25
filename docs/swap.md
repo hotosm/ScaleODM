@@ -17,11 +17,12 @@ and the cgroup gets no pressure, resident fills the node, and kubelet's
 `request < limit` keeps the pod Burstable, which is what earns it a swap grant.
 Guaranteed pods (`request == limit`) get none.
 
-> [!WARNING]
-> "Below node RAM" isn't guaranteed. Karpenter picks the node *after* sizing, so a
-> request just under a node's allocatable leaves no room for the margin (request
-> 113Gi on a 128Gi node gives a 136Gi limit). Node reclaim tuning below is the
-> backstop. Watch jobs whose request sits near a node-size boundary.
+!!! warning
+
+    "Below node RAM" isn't guaranteed. Karpenter picks the node *after* sizing, so a
+    request just under a node's allocatable leaves no room for the margin (request
+    113Gi on a 128Gi node gives a 136Gi limit). Node reclaim tuning below is the
+    backstop. Watch jobs whose request sits near a node-size boundary.
 
 kubelet grants swap **proportionally**, not the full `limit - request`:
 
@@ -39,7 +40,7 @@ run of the same imagery with a real `--boundary` never touched swap: the peak fe
 below `memory.max` and node RAM absorbed it.
 
 Rationale and headroom analysis:
-[`decisions/0003-swap.md`](../decisions/0003-swap.md).
+[decision 0003](./decisions/0003-swap.md).
 
 ## Two layers
 
@@ -108,8 +109,9 @@ kubectl -n odm exec <pod> -c process -- grep -H . \
 
 ## Generic / self-managed (Hetzner, kubeadm, k3s, bare metal)
 
-> [!NOTE]
-> With a huge-RAM machine, skip swap entirely.
+!!! note
+
+    With a huge-RAM machine, skip swap entirely.
 
 Switching `schedulingMode` isn't enough. Nodes must support swap and pods must be
 pinned to them, or a reduced request just OOMs. Needs cgroups v2, a swap-capable

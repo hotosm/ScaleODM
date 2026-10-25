@@ -99,4 +99,4 @@ output, and a NodeODM-compatible API on top.
 ## Decision records
 
 For the full technical reasoning and architecture decisions, see the
-[decision records](../decisions/README.md).
+[decision records](./decisions/README.md).

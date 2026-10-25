@@ -1,8 +1,8 @@
 # Memory sizing
 
 How much RAM (and swap) an ODM run needs, by image count. For how ScaleODM turns
-these into pod requests and limits see [`swap.md`](./swap.md) and
-[`decisions/0003-swap.md`](../decisions/0003-swap.md).
+these into pod requests and limits see [swap sizing](./swap.md) and
+[decision 0003](./decisions/0003-swap.md).
 
 ## The short version
 
@@ -104,10 +104,11 @@ The floor sets the size, the clamp doesn't bind. Confirmed: a 12k run got a
 **Throughput is fine too.** Undistort wrote **303 GiB over ~104 min = 40 MiB/s
 sustained**, against the gp3 baseline of 125 MiB/s. Nowhere near capped.
 
-> [!NOTE]
-> `kubelet_volume_stats_used_bytes` as a percentage resolves to 0.1%, which is
-> 1.9 GiB on a 1902 GiB volume. Every delta is a multiple of that, so apparent
-> write bursts are quantisation. Use the node-exporter throughput panel for rates.
+!!! note
+
+    `kubelet_volume_stats_used_bytes` as a percentage resolves to 0.1%, which is
+    1.9 GiB on a 1902 GiB volume. Every delta is a multiple of that, so apparent
+    write bursts are quantisation. Use the node-exporter throughput panel for rates.
 
 **IOPS might not be**, and CPU can't tell you: container CPU excludes iowait, so a
 job blocked on disk and a job running two threads look identical. 40 MiB/s at the

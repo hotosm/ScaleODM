@@ -76,13 +76,11 @@ curl -X POST http://localhost:31100/task/new \
 curl http://localhost:31100/task/{uuid}/info
 ```
 
-## Documentation index
+## Documentation
 
-- [About / project rationale](./docs/about.md)
-- [pyodm quick migration guide](./docs/nodeodm-migrate.md)
-- [NodeODM compatibility reference](./docs/nodeodm-compatibility.md)
-- [Helm chart deployment/configuration reference](./chart/README.md)
-- [Testing guide](./docs/testing.md)
+Full documentation, including the API reference, is at
+[hotosm.github.io/ScaleODM](https://hotosm.github.io/ScaleODM/).
+The Helm chart reference is in [chart/README.md](./chart/README.md).
 
 ## Logo
 

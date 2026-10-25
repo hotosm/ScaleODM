@@ -18,5 +18,5 @@ docs:
   - changed-files:
       - any-glob-to-any-file:
           - docs/**
-          - mkdocs.yml
+          - zensical.toml
           - README.md

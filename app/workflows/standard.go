@@ -329,7 +329,7 @@ func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, f
 	// (above node RAM the cgroup gets no pressure and kubelet's swap-blind
 	// eviction kills the pod), and stays above the request so the pod is
 	// Burstable (Guaranteed gets no swap). Not guaranteed below node RAM when
-	// the request lands near a node-size boundary. See decisions/0003-swap.md.
+	// the request lands near a node-size boundary. See docs/decisions/0003-swap.md.
 	memoryLimitGiB := peakRAMGiB * marginMultiplier
 	if config.SCALEODM_PROCESS_SWAP_RATIO > 0 {
 		memoryLimitGiB = requestGiB * marginMultiplier
