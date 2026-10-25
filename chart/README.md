@@ -18,6 +18,7 @@ watches **all namespaces** for Workflow CRDs. When ScaleODM creates a workflow i
 the release namespace, the Argo controller picks it up automatically.
 
 This means:
+
 - **One runtime secret** in the release namespace serves the API server and workflow pods
 - No cross-namespace secret replication needed
 - RBAC is scoped to the release namespace
@@ -163,11 +164,11 @@ Dynamic workspace sizing:
 
 Dynamic sizing is enabled by default and selects a profile based on ODM flags (mirrors the flag-aware RAM sizing logic):
 
-| Profile | Trigger | Default multiplier | Default GiB/image | Default min |
-|---|---|---|---|---|
-| `fastOrtho` | `--fast-orthophoto` | 6× | 0.075 | 20 GiB |
-| `dsmDtm` | `--dsm` or `--dtm` | 12× | 0.15 | 100 GiB |
-| `standard` | everything else | 8× | 0.10 | 30 GiB |
+| Profile     | Trigger             | Default multiplier | Default GiB/image | Default min |
+| ----------- | ------------------- | ------------------ | ----------------- | ----------- |
+| `fastOrtho` | `--fast-orthophoto` | 6×                 | 0.075             | 20 GiB      |
+| `dsmDtm`    | `--dsm` or `--dtm`  | 12×                | 0.15              | 100 GiB     |
+| `standard`  | everything else     | 8×                 | 0.10              | 30 GiB      |
 
 Sizing precedence:
 
@@ -256,7 +257,6 @@ volume rather than 256Mi, logs to stdout rather than a second PVC, and no
 ingress. Set `rustfs.storageclass.name` if the cluster has no default
 StorageClass.
 
-
 ### Deploy Argo Workflows via Subchart
 
 When `argo.enabled=true` (default), Argo Workflows is deployed as a subchart
@@ -281,6 +281,7 @@ argo:
 The `argo.controller.parallelism` setting limits the total number of workflows that can run concurrently across the entire cluster. This prevents overwhelming worker nodes with too many resource-intensive ODM processing jobs.
 
 **Recommendations:**
+
 - **Small clusters (1-2 worker nodes)**: 4-6 concurrent workflows
 - **Medium clusters (3-5 worker nodes)**: 6-15 concurrent workflows
 - **Large clusters (6+ worker nodes)**: 12-30+ concurrent workflows
@@ -288,6 +289,7 @@ The `argo.controller.parallelism` setting limits the total number of workflows t
 **Formula:** `parallelism = (number of worker nodes) * 2-3`
 
 This accounts for:
+
 - Each ODM workflow can be CPU/memory intensive
 - Multiple workflows per node allows better resource utilization
 - Prevents node exhaustion while maintaining throughput
@@ -356,65 +358,65 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 
 ## Values Reference
 
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `api.image.repository` | Image repository | `ghcr.io/hotosm/scaleodm` |
-| `api.image.tag` | Image tag | `""` (uses Chart.AppVersion) |
-| `api.replicaCount` | Number of replicas | `1` |
-| `api.service.type` | Service type | `ClusterIP` |
-| `api.service.port` | Service port | `31100` |
-| `api.probes.livenessPath` | Liveness probe path | `"/__lbheartbeat__"` |
-| `api.probes.readinessPath` | Readiness probe path | `"/__heartbeat__"` |
-| `secrets.runtime.name` | Unified runtime Secret used by API + workflow pods | `"scaleodm-secrets"` |
-| `secrets.runtime.keys.databaseUrl` | Key in runtime Secret for DB URI | `"SCALEODM_DATABASE_URL"` |
-| `database.postgres.enabled` | Deploy bundled Postgres subchart | `false` |
-| `s3.external.enabled` | Use external S3 from pre-created runtime secret | `true` |
-| `s3.rustfs.enabled` | Deploy RustFS subchart for in-cluster S3 | `false` |
-| `rustfs.secret.existingSecret` | Suppresses the subchart's generated keypair; keep equal to `secrets.runtime.name` | `"scaleodm-secrets"` |
-| `rustfs.extraEnv` | Maps the runtime secret's AWS keys onto the store's env names | two `secretKeyRef`s |
-| `rustfs.storageclass.name` | StorageClass for the store's volume (empty uses the cluster default) | `""` |
-| `rustfs.storageclass.dataStorageSize` | Size of the store's volume | `20Gi` |
-| `s3.rustfs.endpoint` | Optional override for RustFS service host used in runtime secret | `""` |
-| `s3.rustfs.port` | RustFS service port used in runtime secret | `9000` |
-| `s3.rustfs.auth.accessKey` | RustFS access key for synthesized runtime secret | `"admin"` |
-| `s3.rustfs.auth.secretKey` | RustFS secret key for synthesized runtime secret | `"somelongpassword"` |
-| `s3.rustfs.region` | Region value written to runtime secret in RustFS mode | `"us-east-1"` |
-| `secrets.runtime.keys.s3Endpoint` | Key in runtime Secret for S3 endpoint | `"AWS_S3_ENDPOINT"` |
-| `secrets.runtime.keys.accessKey` | Key in runtime Secret for S3 access key | `"AWS_ACCESS_KEY_ID"` |
-| `secrets.runtime.keys.secretKey` | Key in runtime Secret for S3 secret key | `"AWS_SECRET_ACCESS_KEY"` |
-| `secrets.runtime.keys.region` | Key in runtime Secret for AWS region | `"AWS_DEFAULT_REGION"` |
-| `config.workflow.workspace.mode` | Workspace storage mode (`auto|emptyDir|pvc`) | `"auto"` |
-| `config.workflow.workspace.size` | Workspace PVC size request | `"30Gi"` |
-| `config.workflow.workspace.storageClass` | Workspace PVC storage class (empty = unset) | `""` |
-| `config.workflow.workspace.accessMode` | Workspace PVC access mode | `"ReadWriteOnce"` |
-| `config.workflow.workspace.dynamicSize.enabled` | Enable flag-aware dynamic PVC sizing (PVC mode only) | `true` |
-| `config.workflow.workspace.dynamicSize.maxGiB` | Global maximum GiB clamp across all profiles | `1024` |
-| `config.workflow.workspace.dynamicSize.fallbackMBPerImage` | Fallback MB/image when byte totals unavailable | `20` |
-| `config.workflow.workspace.dynamicSize.fastOrtho.multiplier` | Workspace multiplier for `--fast-orthophoto` jobs | `6` |
-| `config.workflow.workspace.dynamicSize.fastOrtho.minGiB` | Minimum GiB for fastOrtho profile | `60` |
-| `config.workflow.workspace.dynamicSize.fastOrtho.gibPerImage` | Count-based GiB-per-image floor for fastOrtho jobs | `0.075` |
-| `config.workflow.workspace.dynamicSize.dsmDtm.multiplier` | Workspace multiplier for `--dsm`/`--dtm` jobs | `12` |
-| `config.workflow.workspace.dynamicSize.dsmDtm.minGiB` | Minimum GiB for DSM/DTM profile | `100` |
-| `config.workflow.workspace.dynamicSize.dsmDtm.gibPerImage` | Count-based GiB-per-image floor for DSM/DTM jobs | `0.15` |
-| `config.workflow.workspace.dynamicSize.standard.multiplier` | Workspace multiplier for all other jobs | `8` |
-| `config.workflow.workspace.dynamicSize.standard.minGiB` | Minimum GiB for standard profile | `70` |
-| `config.workflow.workspace.dynamicSize.standard.gibPerImage` | Count-based GiB-per-image floor for standard jobs | `0.10` |
-| `config.workflow.activeDeadlineSeconds` | Maximum workflow duration in seconds before Argo terminates it | `172800` |
-| `config.workflow.retryLimit` | Number of retry attempts on failure | `1` |
-| `config.workflow.retryBackoffDuration` | Initial backoff wait between retries | `"60s"` |
-| `config.workflow.retryBackoffFactor` | Exponential backoff factor | `"2"` |
-| `config.workflow.retryBackoffMaxDuration` | Total time window from workflow start in which retries are allowed | `"48h"` |
-| `config.ui.enabled` | Enable built-in `/ui` operator pages | `false` |
-| `config.ui.readOnly` | Keep UI in read-only mode | `true` |
-| `config.observability.enabled` | Enable OpenTelemetry bootstrap | `false` |
-| `config.observability.otlpEndpoint` | OTLP gRPC endpoint for traces/metrics | `""` |
-| `config.observability.metricsEnabled` | Enable OTel metrics export | `true` |
-| `config.observability.tracesEnabled` | Enable OTel traces export | `true` |
-| `config.observability.traceSampleRatio` | Trace sampling ratio (0.0-1.0) | `0.1` |
-| `argo.enabled` | Deploy Argo Workflows subchart | `true` |
-| `argo.controller.parallelism` | Max concurrent workflows (0 = unlimited) | `10` |
-| `argo.namespaceOverride` | Namespace for Argo controller (subchart mode) | `argo` |
-| `kubernetes.serviceAccount.create` | Create service account | `true` |
-| `kubernetes.rbac.create` | Create RBAC resources | `true` |
+| Parameter                                                     | Description                                                                       | Default                      |
+| ------------------------------------------------------------- | --------------------------------------------------------------------------------- | ---------------------------- | ----- | -------- |
+| `api.image.repository`                                        | Image repository                                                                  | `ghcr.io/hotosm/scaleodm`    |
+| `api.image.tag`                                               | Image tag                                                                         | `""` (uses Chart.AppVersion) |
+| `api.replicaCount`                                            | Number of replicas                                                                | `1`                          |
+| `api.service.type`                                            | Service type                                                                      | `ClusterIP`                  |
+| `api.service.port`                                            | Service port                                                                      | `31100`                      |
+| `api.probes.livenessPath`                                     | Liveness probe path                                                               | `"/__lbheartbeat__"`         |
+| `api.probes.readinessPath`                                    | Readiness probe path                                                              | `"/__heartbeat__"`           |
+| `secrets.runtime.name`                                        | Unified runtime Secret used by API + workflow pods                                | `"scaleodm-secrets"`         |
+| `secrets.runtime.keys.databaseUrl`                            | Key in runtime Secret for DB URI                                                  | `"SCALEODM_DATABASE_URL"`    |
+| `database.postgres.enabled`                                   | Deploy bundled Postgres subchart                                                  | `false`                      |
+| `s3.external.enabled`                                         | Use external S3 from pre-created runtime secret                                   | `true`                       |
+| `s3.rustfs.enabled`                                           | Deploy RustFS subchart for in-cluster S3                                          | `false`                      |
+| `rustfs.secret.existingSecret`                                | Suppresses the subchart's generated keypair; keep equal to `secrets.runtime.name` | `"scaleodm-secrets"`         |
+| `rustfs.extraEnv`                                             | Maps the runtime secret's AWS keys onto the store's env names                     | two `secretKeyRef`s          |
+| `rustfs.storageclass.name`                                    | StorageClass for the store's volume (empty uses the cluster default)              | `""`                         |
+| `rustfs.storageclass.dataStorageSize`                         | Size of the store's volume                                                        | `20Gi`                       |
+| `s3.rustfs.endpoint`                                          | Optional override for RustFS service host used in runtime secret                  | `""`                         |
+| `s3.rustfs.port`                                              | RustFS service port used in runtime secret                                        | `9000`                       |
+| `s3.rustfs.auth.accessKey`                                    | RustFS access key for synthesized runtime secret                                  | `"admin"`                    |
+| `s3.rustfs.auth.secretKey`                                    | RustFS secret key for synthesized runtime secret                                  | `"somelongpassword"`         |
+| `s3.rustfs.region`                                            | Region value written to runtime secret in RustFS mode                             | `"us-east-1"`                |
+| `secrets.runtime.keys.s3Endpoint`                             | Key in runtime Secret for S3 endpoint                                             | `"AWS_S3_ENDPOINT"`          |
+| `secrets.runtime.keys.accessKey`                              | Key in runtime Secret for S3 access key                                           | `"AWS_ACCESS_KEY_ID"`        |
+| `secrets.runtime.keys.secretKey`                              | Key in runtime Secret for S3 secret key                                           | `"AWS_SECRET_ACCESS_KEY"`    |
+| `secrets.runtime.keys.region`                                 | Key in runtime Secret for AWS region                                              | `"AWS_DEFAULT_REGION"`       |
+| `config.workflow.workspace.mode`                              | Workspace storage mode (`auto                                                     | emptyDir                     | pvc`) | `"auto"` |
+| `config.workflow.workspace.size`                              | Workspace PVC size request                                                        | `"30Gi"`                     |
+| `config.workflow.workspace.storageClass`                      | Workspace PVC storage class (empty = unset)                                       | `""`                         |
+| `config.workflow.workspace.accessMode`                        | Workspace PVC access mode                                                         | `"ReadWriteOnce"`            |
+| `config.workflow.workspace.dynamicSize.enabled`               | Enable flag-aware dynamic PVC sizing (PVC mode only)                              | `true`                       |
+| `config.workflow.workspace.dynamicSize.maxGiB`                | Global maximum GiB clamp across all profiles                                      | `1024`                       |
+| `config.workflow.workspace.dynamicSize.fallbackMBPerImage`    | Fallback MB/image when byte totals unavailable                                    | `20`                         |
+| `config.workflow.workspace.dynamicSize.fastOrtho.multiplier`  | Workspace multiplier for `--fast-orthophoto` jobs                                 | `6`                          |
+| `config.workflow.workspace.dynamicSize.fastOrtho.minGiB`      | Minimum GiB for fastOrtho profile                                                 | `60`                         |
+| `config.workflow.workspace.dynamicSize.fastOrtho.gibPerImage` | Count-based GiB-per-image floor for fastOrtho jobs                                | `0.075`                      |
+| `config.workflow.workspace.dynamicSize.dsmDtm.multiplier`     | Workspace multiplier for `--dsm`/`--dtm` jobs                                     | `12`                         |
+| `config.workflow.workspace.dynamicSize.dsmDtm.minGiB`         | Minimum GiB for DSM/DTM profile                                                   | `100`                        |
+| `config.workflow.workspace.dynamicSize.dsmDtm.gibPerImage`    | Count-based GiB-per-image floor for DSM/DTM jobs                                  | `0.15`                       |
+| `config.workflow.workspace.dynamicSize.standard.multiplier`   | Workspace multiplier for all other jobs                                           | `8`                          |
+| `config.workflow.workspace.dynamicSize.standard.minGiB`       | Minimum GiB for standard profile                                                  | `70`                         |
+| `config.workflow.workspace.dynamicSize.standard.gibPerImage`  | Count-based GiB-per-image floor for standard jobs                                 | `0.10`                       |
+| `config.workflow.activeDeadlineSeconds`                       | Maximum workflow duration in seconds before Argo terminates it                    | `172800`                     |
+| `config.workflow.retryLimit`                                  | Number of retry attempts on failure                                               | `1`                          |
+| `config.workflow.retryBackoffDuration`                        | Initial backoff wait between retries                                              | `"60s"`                      |
+| `config.workflow.retryBackoffFactor`                          | Exponential backoff factor                                                        | `"2"`                        |
+| `config.workflow.retryBackoffMaxDuration`                     | Total time window from workflow start in which retries are allowed                | `"48h"`                      |
+| `config.ui.enabled`                                           | Enable built-in `/ui` operator pages                                              | `false`                      |
+| `config.ui.readOnly`                                          | Keep UI in read-only mode                                                         | `true`                       |
+| `config.observability.enabled`                                | Enable OpenTelemetry bootstrap                                                    | `false`                      |
+| `config.observability.otlpEndpoint`                           | OTLP gRPC endpoint for traces/metrics                                             | `""`                         |
+| `config.observability.metricsEnabled`                         | Enable OTel metrics export                                                        | `true`                       |
+| `config.observability.tracesEnabled`                          | Enable OTel traces export                                                         | `true`                       |
+| `config.observability.traceSampleRatio`                       | Trace sampling ratio (0.0-1.0)                                                    | `0.1`                        |
+| `argo.enabled`                                                | Deploy Argo Workflows subchart                                                    | `true`                       |
+| `argo.controller.parallelism`                                 | Max concurrent workflows (0 = unlimited)                                          | `10`                         |
+| `argo.namespaceOverride`                                      | Namespace for Argo controller (subchart mode)                                     | `argo`                       |
+| `kubernetes.serviceAccount.create`                            | Create service account                                                            | `true`                       |
+| `kubernetes.rbac.create`                                      | Create RBAC resources                                                             | `true`                       |
 
 See [values.yaml](values.yaml) for the complete list of configurable parameters.

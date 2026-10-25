@@ -19,7 +19,7 @@
 
   if (wrapToggle && output) {
     wrapToggle.addEventListener("change", () =>
-      output.classList.toggle("wrap", wrapToggle.checked)
+      output.classList.toggle("wrap", wrapToggle.checked),
     );
   }
 
@@ -27,8 +27,7 @@
     const loadOutput = async () => {
       // Replacing textContent resets scroll to the top, so keep the reader
       // where they are and only follow new output when already at the bottom.
-      const atBottom =
-        output.scrollHeight - output.scrollTop - output.clientHeight < 20;
+      const atBottom = output.scrollHeight - output.scrollTop - output.clientHeight < 20;
       const prevScroll = output.scrollTop;
       try {
         const response = await fetch(output.dataset.outputUrl, {
@@ -84,10 +83,7 @@
 
     // Two overlapping sheets, then a tick once the URL is on the clipboard.
     const copyIcon = () =>
-      svgIcon([
-        "M9 9h10v12H9z",
-        "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1",
-      ]);
+      svgIcon(["M9 9h10v12H9z", "M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"]);
     const doneIcon = () => svgIcon(["M20 6 9 17l-5-5"]);
 
     // navigator.clipboard exists only in a secure context, and this UI is often

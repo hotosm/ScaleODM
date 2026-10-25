@@ -5,7 +5,7 @@ on:
     types: [published]
   push:
     tags:
-      - 'v*'
+      - "v*"
   workflow_call:
 
 jobs:

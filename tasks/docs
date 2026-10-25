@@ -9,7 +9,7 @@ default:
 generate-openapi:
   #!/usr/bin/env bash
   set -euo pipefail
-  
+
   cd {{justfile_directory()}}
 
   # Prefer local .env; fall back to .env.example for CI/non-local runs.
@@ -22,7 +22,7 @@ generate-openapi:
     . ./.env.example
     set +a
   fi
-  
+
   echo "📦 Starting services..."
   COMPOSE_DOCS_ARGS="-f compose.yaml -f compose.test.yaml -f compose.docs.yaml"
   cleanup() {
@@ -59,24 +59,24 @@ generate-openapi:
 
     sleep "$API_HEALTH_POLL_INTERVAL_SECONDS"
   done
-  
+
   echo "📥 Fetching OpenAPI spec..."
   curl -fsS http://localhost:31100/openapi.json.yaml -o openapi.yaml
-  
+
   echo "✓ OpenAPI spec generated: openapi.yaml"
 
 # Generate HTML documentation from OpenAPI spec
 generate-html:
   #!/usr/bin/env bash
   set -euo pipefail
-  
+
   cd {{justfile_directory()}}
-  
+
   if [ ! -f openapi.yaml ]; then
     echo "❌ openapi.yaml not found. Run 'just docs generate-openapi' first."
     exit 1
   fi
-  
+
   echo "🔎 Linting OpenAPI spec with Redocly..."
   docker run --rm \
     -v "$PWD:/spec" \
@@ -91,7 +91,7 @@ generate-html:
     -v "$PWD:/spec" \
     -w /spec \
     docker.io/redocly/cli:2.20.4 build-docs openapi.yaml --output docs/api/index.html
-  
+
   echo "✓ HTML documentation generated: docs/api/index.html"
 
 # Generate both OpenAPI spec and HTML docs

@@ -8,7 +8,7 @@
 ## Standard Processing
 
 1. Ensure Argo Workflows is installed first:
-https://argo-workflows.readthedocs.io/en/latest/installation
+   https://argo-workflows.readthedocs.io/en/latest/installation
 
 2. Modify the YAML to your needs.
 

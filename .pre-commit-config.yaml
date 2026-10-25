@@ -1,0 +1,81 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: detect-aws-credentials
+        args: [--allow-missing-credentials]
+      - id: detect-private-key
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+      - id: check-json
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-yaml
+        # Helm templates are Go templates, not valid YAML
+        exclude: ^chart/templates/
+        args: [--unsafe]
+      - id: check-added-large-files
+        args: ["--maxkb=10240"]
+
+  # Versioning: Commit messages (conventional commits)
+  - repo: https://github.com/commitizen-tools/commitizen
+    rev: v4.18.1
+    hooks:
+      - id: commitizen
+        stages: [commit-msg]
+
+  # Go: uses the local toolchain (go.mod pins the version)
+  - repo: local
+    hooks:
+      # Autoformat: Go code
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -w
+        language: system
+        types: [go]
+
+      # Lint: Go static checks
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
+        pass_filenames: false
+
+      # Deps: ensure go.mod / go.sum are tidy
+      - id: go-mod-tidy
+        name: go mod tidy
+        entry: go mod tidy -diff
+        language: system
+        files: (\.go|go\.mod|go\.sum)$
+        pass_filenames: false
+
+  # Spelling: Checks for common misspellings in text files.
+  - repo: https://github.com/codespell-project/codespell
+    rev: v2.4.3
+    hooks:
+      - id: codespell
+        types: [text]
+        exclude: ^go\.sum$
+
+  # Autoformat: YAML, JSON, Markdown, etc.
+  - repo: local
+    hooks:
+      - id: oxfmt
+        name: oxfmt
+        files: ^
+        entry: bash -c 'test "$#" -gt 0 && oxfmt --write "$@" || exit 0' --
+        language: node
+        types: [text]
+        additional_dependencies: ["oxfmt@0.35.0"]
+        # Go templates (Helm + UI) would be mangled by a formatter
+        exclude: ^(chart/templates/|app/ui/templates/|CHANGELOG\.md$)
+
+  # Lint: GH Workflows
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+        args: [-ignore, SC]

@@ -7,79 +7,79 @@ spec:
   entrypoint: main
   serviceAccountName: argo-odm
   templates:
-  - name: main
-    volumes:
-      - name: workspace
-        emptyDir: { }
-    # NOTE using containerSet means that all containers start at the same time
-    # FIXME we should add low reserved resources, but high limits to counter this
-    containerSet:
-      volumeMounts:
-        - mountPath: /workspace
-          name: workspace
-      containers:
-        - name: download
-          image: docker.io/rclone/rclone:1
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              PROJECT_ID="{{workflow.name}}"
-              echo "Project ID: $PROJECT_ID"
-              echo "Downloading S3 bucket files..."
+    - name: main
+      volumes:
+        - name: workspace
+          emptyDir: {}
+      # NOTE using containerSet means that all containers start at the same time
+      # FIXME we should add low reserved resources, but high limits to counter this
+      containerSet:
+        volumeMounts:
+          - mountPath: /workspace
+            name: workspace
+        containers:
+          - name: download
+            image: docker.io/rclone/rclone:1
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                PROJECT_ID="{{workflow.name}}"
+                echo "Project ID: $PROJECT_ID"
+                echo "Downloading S3 bucket files..."
 
-              S3_IMAGERY_BUCKET="drone-tm-public"
-              S3_IMAGERY_PATH="/dtm-data/projects/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/images/"
-              # NOTE in the workflow this will be injected in as env var
-              # S3_IMAGERY_PATH
-              rclone copy s3:${S3_IMAGERY_BUCKET}${S3_IMAGERY_PATH} \
-                /workspace/${PROJECT_ID}/images --progress \
-                --max-transfer 200M --cutoff-mode soft
+                S3_IMAGERY_BUCKET="drone-tm-public"
+                S3_IMAGERY_PATH="/dtm-data/projects/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/images/"
+                # NOTE in the workflow this will be injected in as env var
+                # S3_IMAGERY_PATH
+                rclone copy s3:${S3_IMAGERY_BUCKET}${S3_IMAGERY_PATH} \
+                  /workspace/${PROJECT_ID}/images --progress \
+                  --max-transfer 200M --cutoff-mode soft
 
-              echo "Download complete. Files in /workspace/${PROJECT_ID}/images:"
-              ls -lh /workspace/${PROJECT_ID}/images
-          env:
-            - name: RCLONE_CONFIG_S3_TYPE
-              value: s3
-            - name: RCLONE_CONFIG_S3_PROVIDER
-              value: AWS
-            - name: RCLONE_CONFIG_S3_ENV_AUTH
-              value: "false"
-            - name: RCLONE_CONFIG_S3_REGION
-              value: us-east-1
+                echo "Download complete. Files in /workspace/${PROJECT_ID}/images:"
+                ls -lh /workspace/${PROJECT_ID}/images
+            env:
+              - name: RCLONE_CONFIG_S3_TYPE
+                value: s3
+              - name: RCLONE_CONFIG_S3_PROVIDER
+                value: AWS
+              - name: RCLONE_CONFIG_S3_ENV_AUTH
+                value: "false"
+              - name: RCLONE_CONFIG_S3_REGION
+                value: us-east-1
 
-        - name: process
-          image: ghcr.io/hotosm/odm:3.6.1
-          command: ["/bin/bash", "-c"]
-          args:
-            - |
-              PROJECT_ID="{{workflow.name}}"
-              echo "Running ODM for project: $PROJECT_ID"
-              odm_args="--fast-orthophoto --project-path /workspace ${PROJECT_ID}"
-              echo "Executing: python3 run.py $odm_args"
-              python3 run.py $odm_args
-          dependencies: [download]
+          - name: process
+            image: ghcr.io/hotosm/odm:3.6.1
+            command: ["/bin/bash", "-c"]
+            args:
+              - |
+                PROJECT_ID="{{workflow.name}}"
+                echo "Running ODM for project: $PROJECT_ID"
+                odm_args="--fast-orthophoto --project-path /workspace ${PROJECT_ID}"
+                echo "Executing: python3 run.py $odm_args"
+                python3 run.py $odm_args
+            dependencies: [download]
 
-        - name: upload
-          image: docker.io/rclone/rclone:1
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              PROJECT_ID="{{workflow.name}}"
+          - name: upload
+            image: docker.io/rclone/rclone:1
+            command: ["/bin/sh", "-c"]
+            args:
+              - |
+                PROJECT_ID="{{workflow.name}}"
 
-              echo "Removing raw imagery for: $PROJECT_ID"
-              rm -rf /workspace/${PROJECT_ID}/images
+                echo "Removing raw imagery for: $PROJECT_ID"
+                rm -rf /workspace/${PROJECT_ID}/images
 
-              echo "Uploading output imagery products to S3 for: $PROJECT_ID"
-              # rclone copy /workspace/${PROJECT_ID}/* \
-              #   s3:dronetm/dtm-data/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/ \
-              #   --progress
-          dependencies: [process]
-          env:
-            - name: RCLONE_CONFIG_S3_TYPE
-              value: s3
-            - name: RCLONE_CONFIG_S3_PROVIDER
-              value: AWS
-            - name: RCLONE_CONFIG_S3_ENV_AUTH
-              value: "false"
-            - name: RCLONE_CONFIG_S3_REGION
-              value: us-east-1
+                echo "Uploading output imagery products to S3 for: $PROJECT_ID"
+                # rclone copy /workspace/${PROJECT_ID}/* \
+                #   s3:dronetm/dtm-data/a93e99f5-5aab-4316-b6f8-0acd56975df3/0c6e7cf3-e58f-4664-8a13-fa27dcdbb7ad/ \
+                #   --progress
+            dependencies: [process]
+            env:
+              - name: RCLONE_CONFIG_S3_TYPE
+                value: s3
+              - name: RCLONE_CONFIG_S3_PROVIDER
+                value: AWS
+              - name: RCLONE_CONFIG_S3_ENV_AUTH
+                value: "false"
+              - name: RCLONE_CONFIG_S3_REGION
+                value: us-east-1

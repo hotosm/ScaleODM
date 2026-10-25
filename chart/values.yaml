@@ -409,7 +409,7 @@ argo:
   #   archiveLogs: true
   #   s3:
   #     bucket: your-bucket-name
-  #     endpoint: s3.amazonaws.com            
+  #     endpoint: s3.amazonaws.com
   #     region: eu-west-1
   #     insecure: false
   #     useSDKCreds: false

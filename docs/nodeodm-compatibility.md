@@ -173,6 +173,7 @@ task.remove()
 ### Server Information
 
 #### `GET /info`
+
 Returns node information including queue count and engine version.
 
 ```json
@@ -186,30 +187,32 @@ Returns node information including queue count and engine version.
 ```
 
 #### `GET /options`
+
 Returns available ODM processing options.
 
 ### Task Management
 
 #### `POST /task/new`
+
 Creates a new processing task.
 
 **Parameters (form-encoded or JSON body):**
 
-| Parameter | Required | Description |
-|-----------|----------|-------------|
-| `zipurl` | * | S3 path to images (e.g. `s3://bucket/images/`). NodeODM-compatible. |
-| `readS3Path` | * | S3 path to images. Preferred for new integrations. |
-| `writeS3Path` | | S3 path for outputs. Defaults to `readS3Path/output/`. |
-| `name` | | Task name. Defaults to `odm-project`. |
-| `options` | | JSON array: `[{"name": "dsm", "value": true}]` |
-| `s3Endpoint` | | Custom S3 endpoint (MinIO, Garage, etc.). Must be reachable from workflow pods. |
-| `s3Region` | | S3 region. Defaults to `us-east-1`. |
-| `webhook` | | Callback URL on completion. |
-| `skipPostProcessing` | | Skip point cloud tiles. |
-| `processingMode` | | Pipeline mode. See [Processing Modes](#processing-modes). Defaults to `standard`. |
-| `s3ScanDepth` | | Max depth for the rclone scan beneath `readS3Path`. Defaults to `1` (just the given dir). Range: `1`-`10`. See [Scan depth](#scan-depth). |
-| `excludePaths` | | JSON array of rclone-style filter patterns appended to the default exclude set. |
-| `useDefaultExcludes` | | Apply the built-in ODM-output exclude list. Defaults to `true`. |
+| Parameter            | Required | Description                                                                                                                               |
+| -------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `zipurl`             | \*       | S3 path to images (e.g. `s3://bucket/images/`). NodeODM-compatible.                                                                       |
+| `readS3Path`         | \*       | S3 path to images. Preferred for new integrations.                                                                                        |
+| `writeS3Path`        |          | S3 path for outputs. Defaults to `readS3Path/output/`.                                                                                    |
+| `name`               |          | Task name. Defaults to `odm-project`.                                                                                                     |
+| `options`            |          | JSON array: `[{"name": "dsm", "value": true}]`                                                                                            |
+| `s3Endpoint`         |          | Custom S3 endpoint (MinIO, Garage, etc.). Must be reachable from workflow pods.                                                           |
+| `s3Region`           |          | S3 region. Defaults to `us-east-1`.                                                                                                       |
+| `webhook`            |          | Callback URL on completion.                                                                                                               |
+| `skipPostProcessing` |          | Skip point cloud tiles.                                                                                                                   |
+| `processingMode`     |          | Pipeline mode. See [Processing Modes](#processing-modes). Defaults to `standard`.                                                         |
+| `s3ScanDepth`        |          | Max depth for the rclone scan beneath `readS3Path`. Defaults to `1` (just the given dir). Range: `1`-`10`. See [Scan depth](#scan-depth). |
+| `excludePaths`       |          | JSON array of rclone-style filter patterns appended to the default exclude set.                                                           |
+| `useDefaultExcludes` |          | Apply the built-in ODM-output exclude list. Defaults to `true`.                                                                           |
 
 \* One of `zipurl` or `readS3Path` is required. Both must be `s3://` paths.
 
@@ -220,12 +223,12 @@ When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `w
 
 `processingMode` selects the pipeline shape. Today only `standard` is implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).
 
-| Mode | Status | Behaviour |
-|------|--------|-----------|
-| `standard` | implemented (default) | The regular ODM pipeline: download → process → upload. Imagery under `readS3Path` is gathered into a single ODM run. How wide the input scan is is configured separately via [`s3ScanDepth`](#scan-depth) - use depth `1` for one task's images dir, or a higher value to roll up several task subdirs under a project root. |
-| `merge-existing` | reserved (501) | Given a project root that already contains per-task ODM outputs, run only the merge half of split-merge to stitch the existing orthos, DEMs, and point clouds into a single set of products. The "split" half is assumed already complete, which is much cheaper than re-running per-task processing from raw imagery. |
-| `thermal` | reserved (501) | Dedicated pipeline for thermal imagery: applies a thermal-specific pre-processing stage (radiometric handling, alignment) before the ODM run. Implementation deferred. |
-| `city-scale` | reserved (501) | Large-area (>40 km²) projects requiring corrective alignment. The pipeline iteratively fans out from a central anchor task, aligning each subsequent task against prior LAZ point clouds, then runs a final alignment pass against a global DEM. Implementation deferred. |
+| Mode             | Status                | Behaviour                                                                                                                                                                                                                                                                                                                    |
+| ---------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `standard`       | implemented (default) | The regular ODM pipeline: download → process → upload. Imagery under `readS3Path` is gathered into a single ODM run. How wide the input scan is is configured separately via [`s3ScanDepth`](#scan-depth) - use depth `1` for one task's images dir, or a higher value to roll up several task subdirs under a project root. |
+| `merge-existing` | reserved (501)        | Given a project root that already contains per-task ODM outputs, run only the merge half of split-merge to stitch the existing orthos, DEMs, and point clouds into a single set of products. The "split" half is assumed already complete, which is much cheaper than re-running per-task processing from raw imagery.       |
+| `thermal`        | reserved (501)        | Dedicated pipeline for thermal imagery: applies a thermal-specific pre-processing stage (radiometric handling, alignment) before the ODM run. Implementation deferred.                                                                                                                                                       |
+| `city-scale`     | reserved (501)        | Large-area (>40 km²) projects requiring corrective alignment. The pipeline iteratively fans out from a central anchor task, aligning each subsequent task against prior LAZ point clouds, then runs a final alignment pass against a global DEM. Implementation deferred.                                                    |
 
 Reserved modes return HTTP 501 with a clear message so clients can probe support.
 
@@ -233,11 +236,11 @@ Reserved modes return HTTP 501 with a clear message so clients can probe support
 
 `s3ScanDepth` caps how deep the download stage walks beneath `readS3Path`. It maps directly to rclone's `--max-depth N`.
 
-| `s3ScanDepth` | Behaviour | When to use |
-|---------------|-----------|-------------|
-| `1` (default) | Only files in the given directory itself. | `readS3Path` already points at the imagery dir, e.g. `s3://bucket/project-id/task-id/images/`. |
-| `2`-`10` | Walks N levels of subdirectories. | `readS3Path` points at a higher-level prefix that contains nested task layouts. For DroneTM-style `projectid/taskid/images/*.jpg`, a depth of `3` against `s3://bucket/projectid/` will pick up imagery in every task subdir in one run. |
-| `0`/unset | Resolved to the default (`1`). | - |
+| `s3ScanDepth` | Behaviour                                 | When to use                                                                                                                                                                                                                              |
+| ------------- | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `1` (default) | Only files in the given directory itself. | `readS3Path` already points at the imagery dir, e.g. `s3://bucket/project-id/task-id/images/`.                                                                                                                                           |
+| `2`-`10`      | Walks N levels of subdirectories.         | `readS3Path` points at a higher-level prefix that contains nested task layouts. For DroneTM-style `projectid/taskid/images/*.jpg`, a depth of `3` against `s3://bucket/projectid/` will pick up imagery in every task subdir in one run. |
+| `0`/unset     | Resolved to the default (`1`).            | -                                                                                                                                                                                                                                        |
 
 Values outside `1`-`10` are rejected with HTTP 400.
 
@@ -324,6 +327,7 @@ path-style.
 **Response:** `{"uuid": "odm-pipeline-abc123"}`
 
 #### `GET /task/{uuid}/info`
+
 Returns task status. The `status` field is a nested object matching NodeODM spec:
 
 ```json
@@ -332,8 +336,8 @@ Returns task status. The `status` field is a nested object matching NodeODM spec
   "name": "my-project",
   "dateCreated": 1705334400,
   "processingTime": 120000,
-  "status": {"code": 20},
-  "options": [{"name": "fast-orthophoto", "value": true}],
+  "status": { "code": 20 },
+  "options": [{ "name": "fast-orthophoto", "value": true }],
   "imagesCount": 0,
   "progress": 50,
   "output": ["Processing images..."]
@@ -345,9 +349,11 @@ Failed tasks include an error message: `{"status": {"code": 30, "errorMessage": 
 **Status codes:** 10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED
 
 #### `GET /task/{uuid}/output`
+
 Console output. Query param `line` to start from a specific line.
 
 #### `GET /task/{uuid}/assets`
+
 Additive convenience endpoint for explicit output discovery.
 
 Query params:
@@ -384,37 +390,41 @@ Response shape:
 Primary assets are always returned as exists/missing using a bounded check set (`all.zip`, `orthophoto.tif`, `dsm.tif`, `dtm.tif`, and first-match point-cloud candidates).
 
 #### `GET /task/{uuid}/download/{asset}`
+
 Canonical download endpoint. Returns HTTP 302 redirect to a pre-signed S3 URL (1 hour expiry). The new `/assets` endpoint returns URLs pointing here (not direct pre-signed URLs), so existing redirect semantics remain unchanged.
 
 #### `POST /task/cancel`
+
 Body: `{"uuid": "..."}` → `{"success": true}`
 
 #### `POST /task/remove`
+
 Body: `{"uuid": "..."}` → `{"success": true}`
 
 #### `POST /task/restart`
+
 Body: `{"uuid": "...", "options": "[...]"}` → `{"success": true}`
 
 ## Key Differences from NodeODM
 
-| | NodeODM | ScaleODM |
-|---|---------|----------|
-| **Image input** | Upload via multipart form | S3 path via `zipurl` or `readS3Path` |
-| **Chunked upload** | `/task/new/init` + `/upload` + `/commit` | Not implemented (not needed) |
-| **Downloads** | Direct binary response | 302 redirect to pre-signed S3 URL |
-| **UUIDs** | Random UUID | Argo workflow name (`odm-pipeline-xxxxx`) |
-| **Scaling** | Single machine | Kubernetes + Argo Workflows |
-| **Image formats** | Upload any file | S3 dir with jpg/tif (or zip/tar archives) |
+|                    | NodeODM                                  | ScaleODM                                  |
+| ------------------ | ---------------------------------------- | ----------------------------------------- |
+| **Image input**    | Upload via multipart form                | S3 path via `zipurl` or `readS3Path`      |
+| **Chunked upload** | `/task/new/init` + `/upload` + `/commit` | Not implemented (not needed)              |
+| **Downloads**      | Direct binary response                   | 302 redirect to pre-signed S3 URL         |
+| **UUIDs**          | Random UUID                              | Argo workflow name (`odm-pipeline-xxxxx`) |
+| **Scaling**        | Single machine                           | Kubernetes + Argo Workflows               |
+| **Image formats**  | Upload any file                          | S3 dir with jpg/tif (or zip/tar archives) |
 
 ### Status Mapping
 
-| Argo Phase | NodeODM Code | Status |
-|-----------|--------------|--------|
-| Pending   | 10          | QUEUED |
-| Running   | 20          | RUNNING |
-| Succeeded | 40          | COMPLETED |
-| Failed    | 30          | FAILED |
-| Error     | 30          | FAILED |
+| Argo Phase | NodeODM Code | Status    |
+| ---------- | ------------ | --------- |
+| Pending    | 10           | QUEUED    |
+| Running    | 20           | RUNNING   |
+| Succeeded  | 40           | COMPLETED |
+| Failed     | 30           | FAILED    |
+| Error      | 30           | FAILED    |
 
 ## Deployment Reference
 
@@ -423,7 +433,7 @@ Body: `{"uuid": "...", "options": "[...]"}` → `{"success": true}`
 ```yaml
 # values-production.yaml
 argo:
-  enabled: false  # Use your existing Argo Workflows installation
+  enabled: false # Use your existing Argo Workflows installation
 
 database:
   external:
@@ -444,7 +454,7 @@ secrets:
       region: "AWS_DEFAULT_REGION"
 
 api:
-  replicaCount: 2  # HA - also creates a PodDisruptionBudget
+  replicaCount: 2 # HA - also creates a PodDisruptionBudget
 
 config:
   odmImage: "ghcr.io/hotosm/odm:3.6.1"

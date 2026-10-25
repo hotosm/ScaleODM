@@ -4,7 +4,11 @@
 
 body {
   margin: 0;
-  font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-family:
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    sans-serif;
   background: #f5f7fa;
   color: #1f2937;
 }

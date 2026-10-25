@@ -96,7 +96,7 @@ kubectl -n odm exec <pod> -c process -- cat /sys/fs/cgroup/memory.swap.max
 
 On a new dataset, watch the densify/fuse and mvs-texturing peaks:
 `memory.swap.current` should climb, `memory.events` should show no OOM, node
-`memory.available` should stay above 100Mi. Worst case is a *contained* cgroup OOM,
+`memory.available` should stay above 100Mi. Worst case is a _contained_ cgroup OOM,
 not a node-level eviction.
 
 ```bash
@@ -142,14 +142,14 @@ kubelet, and ideally a fast, encrypted, dedicated swap disk.
 
 ## Options
 
-| Env / Helm value | Default | Purpose |
-|---|---|---|
-| `SCALEODM_PROCESS_SWAP_RATIO` / `processSizing.swapRatio` | `0` (prod `1.0`) | `request = peak/(1+ratio)`; `0` disables. Only set > 0 with a swap-node selector |
-| `SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB` / `processSizing.memoryRequestMinGiB` | `4` | floor for the RAM request |
-| `SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT` | `20` | limit margin. Swap off: above the peak. Swap on: above the request |
-| `SCALEODM_PROCESS_CPU_PER_GIB` / `processSizing.cpuPerGiB` | `0.125` | CPU request per GiB of RAM request (0.125 = r-family) |
-| `SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER` / `processSizing.cpuLimitMultiplier` | `1.5` (prod `0`) | CPU limit = request x this; `0` omits it so ODM bursts to every core |
-| `SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD` / `config.workflow.onDemandImageThreshold` | `5000` | auto-upgrade spot to on-demand at/above this count; `0` disables |
-| `SCALEODM_WORKFLOW_SCHEDULING_MODE` / `config.workflow.schedulingMode` | `karpenter` | `karpenter` or `generic` |
-| `SCALEODM_WORKFLOW_NODE_SELECTOR` / `config.workflow.nodeSelector` | `node-type=cpu` | base node selector |
-| `SCALEODM_WORKFLOW_TOLERATIONS` / `config.workflow.tolerations` | `""` | extra tolerations |
+| Env / Helm value                                                                        | Default          | Purpose                                                                          |
+| --------------------------------------------------------------------------------------- | ---------------- | -------------------------------------------------------------------------------- |
+| `SCALEODM_PROCESS_SWAP_RATIO` / `processSizing.swapRatio`                               | `0` (prod `1.0`) | `request = peak/(1+ratio)`; `0` disables. Only set > 0 with a swap-node selector |
+| `SCALEODM_PROCESS_MEMORY_REQUEST_MIN_GIB` / `processSizing.memoryRequestMinGiB`         | `4`              | floor for the RAM request                                                        |
+| `SCALEODM_PROCESS_MEMORY_LIMIT_MARGIN_PERCENT`                                          | `20`             | limit margin. Swap off: above the peak. Swap on: above the request               |
+| `SCALEODM_PROCESS_CPU_PER_GIB` / `processSizing.cpuPerGiB`                              | `0.125`          | CPU request per GiB of RAM request (0.125 = r-family)                            |
+| `SCALEODM_PROCESS_CPU_LIMIT_MULTIPLIER` / `processSizing.cpuLimitMultiplier`            | `1.5` (prod `0`) | CPU limit = request x this; `0` omits it so ODM bursts to every core             |
+| `SCALEODM_WORKFLOW_ONDEMAND_IMAGE_THRESHOLD` / `config.workflow.onDemandImageThreshold` | `5000`           | auto-upgrade spot to on-demand at/above this count; `0` disables                 |
+| `SCALEODM_WORKFLOW_SCHEDULING_MODE` / `config.workflow.schedulingMode`                  | `karpenter`      | `karpenter` or `generic`                                                         |
+| `SCALEODM_WORKFLOW_NODE_SELECTOR` / `config.workflow.nodeSelector`                      | `node-type=cpu`  | base node selector                                                               |
+| `SCALEODM_WORKFLOW_TOLERATIONS` / `config.workflow.tolerations`                         | `""`             | extra tolerations                                                                |

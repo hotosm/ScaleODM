@@ -6,8 +6,8 @@ description: Kubernetes-native auto-scaling and load balancing for OpenDroneMap.
 version: "1.3.0"
 appVersion: "1.3.0"
 maintainers:
-- email: sam.woodcock@hotosm.org
-  name: Sam Woodcock
+  - email: sam.woodcock@hotosm.org
+    name: Sam Woodcock
 home: https://github.com/hotosm/ScaleODM/tree/main/chart
 icon: https://docs.hotosm.org/assets/images/favicon.png
 dependencies:

@@ -5,7 +5,7 @@ on:
     types: [published]
 
 permissions:
-  contents: write  # To add binaries to release
+  contents: write # To add binaries to release
 
 jobs:
   version-check:

@@ -12,7 +12,7 @@ While both are robust and widely adopted, they were not designed for Kubernetes-
 environments. Running NodeODM and ClusterODM inside Kubernetes introduced several
 challenges:
 
-- ClusterODM scales *VMs*, not *containers*, and doesn't leverage Kubernetes Jobs,
+- ClusterODM scales _VMs_, not _containers_, and doesn't leverage Kubernetes Jobs,
   Deployments, or Autoscalers.
 - NodeODM's queueing system is file-based and not distributed.
 - Data ingestion depends on uploading imagery via HTTP or providing a `zip_url`,
@@ -21,6 +21,7 @@ challenges:
   fit Kubernetes' ephemeral job model.
 
 We need a system that can:
+
 - Orchestrate ODM workloads as ephemeral, stateless jobs.
 - Scale horizontally using native Kubernetes primitives.
 - Integrate cleanly with S3 for both input and output data.
@@ -38,6 +39,7 @@ We chose to replace NodeODM + ClusterODM orchestration with **Kubernetes-native 
 Workflows**.
 
 Each ODM processing task is defined as a workflow that runs:
+
 1. A download step to sync imagery from S3.
 2. A processing step using the standard ODM container.
 3. An upload step to push final artifacts back to S3.
@@ -47,6 +49,7 @@ recovery mechanisms. It also simplifies the system by removing the need for cust
 queueing, stateful NodeODM instances, or VM-level scaling.
 
 Argo Workflows natively supports:
+
 - Long-running, resumable, and observable pipelines.
 - Native retry, TTL cleanup, and artifact management.
 - Declarative YAML specifications compatible with CI/CD tooling.

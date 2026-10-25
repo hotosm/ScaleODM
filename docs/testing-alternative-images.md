@@ -48,12 +48,12 @@ kubectl logs -l workflows.argoproj.io/workflow=<uuid> --tail=200
 
 ## Flags worth setting
 
-| Flag | Why |
-| --- | --- |
-| `sfm-algorithm=triangulation` | Places cameras from GPS instead of adding them one at a time. Needs OpenSfM 1.0, so ODX only. |
-| `boundary=<AOI GeoJSON>` | Clips output to one Polygon AOI and can greatly reduce render cost. Pass inline GeoJSON or an `s3://` URL; see [Boundary](./nodeodm-compatibility.md#boundary). |
-| `rolling-shutter` | Corrects the skew from the sensor reading out row by row while the aircraft moves. An electronic shutter at 12 m/s and a 4 cm GSD is ~6 px of skew. ODM holds a readout time per camera model (`opendm/rollingshutter.py`), but an unlisted camera silently gets a 30 ms guess, so check the log line and set `rolling-shutter-readout` if the camera is missing. |
-| `split=400` + `split-overlap=150` | Caps submodel size on stock ODM, where reconstruction cost grows superlinearly. |
+| Flag                              | Why                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sfm-algorithm=triangulation`     | Places cameras from GPS instead of adding them one at a time. Needs OpenSfM 1.0, so ODX only.                                                                                                                                                                                                                                                                     |
+| `boundary=<AOI GeoJSON>`          | Clips output to one Polygon AOI and can greatly reduce render cost. Pass inline GeoJSON or an `s3://` URL; see [Boundary](./nodeodm-compatibility.md#boundary).                                                                                                                                                                                                   |
+| `rolling-shutter`                 | Corrects the skew from the sensor reading out row by row while the aircraft moves. An electronic shutter at 12 m/s and a 4 cm GSD is ~6 px of skew. ODM holds a readout time per camera model (`opendm/rollingshutter.py`), but an unlisted camera silently gets a 30 ms guess, so check the log line and set `rolling-shutter-readout` if the camera is missing. |
+| `split=400` + `split-overlap=150` | Caps submodel size on stock ODM, where reconstruction cost grows superlinearly.                                                                                                                                                                                                                                                                                   |
 
 `sfm-algorithm=triangulation` on an image without OpenSfM 1.0 fails at the
 sparse stage, so change one variable at a time and keep a stock-image run of the
@@ -65,11 +65,11 @@ These buy speed by removing global consistency. Stacked on a 12k-image scene the
 produced a reconstruction spanning 20 x 13 km over a 3 x 3 km site; dropping them
 brought it back to 3 x 3 km.
 
-| Flag | Why not |
-| --- | --- |
-| `matcher-neighbors=<n>` | Any value > 0 forces `matching_graph_rounds: 0` in ODM/ODX, removing the long-range candidate pairs that make a large block globally rigid. Leave it unset to get 20 rounds (ODX) / 50 (ODM). |
-| `use-hybrid-bundle-adjustment` | Sets `local_bundle_radius: 1` (immediate neighbours only). Unset gives `0`, which uses the global solver. |
-| `auto-boundary` | Buffers the convex hull of the camera shots by `avg_gsd * 100`, where the GSD is in cm but the buffer is applied in metres - a 4.3 cm GSD becomes a 433 m buffer. It rarely trims anything useful. |
+| Flag                           | Why not                                                                                                                                                                                            |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `matcher-neighbors=<n>`        | Any value > 0 forces `matching_graph_rounds: 0` in ODM/ODX, removing the long-range candidate pairs that make a large block globally rigid. Leave it unset to get 20 rounds (ODX) / 50 (ODM).      |
+| `use-hybrid-bundle-adjustment` | Sets `local_bundle_radius: 1` (immediate neighbours only). Unset gives `0`, which uses the global solver.                                                                                          |
+| `auto-boundary`                | Buffers the convex hull of the camera shots by `avg_gsd * 100`, where the GSD is in cm but the buffer is applied in metres - a 4.3 cm GSD becomes a 433 m buffer. It rarely trims anything useful. |
 
 Independently of any flag, ODX/OpenSfM swaps global bundle adjustment for a
 stochastic 500-camera-per-round solver above **4,000 shots**, and that path holds

@@ -46,5 +46,3 @@ spec:
                   number: {{ $svcPort }}
     {{- end }}
 {{- end }}
-
-

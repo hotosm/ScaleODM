@@ -11,19 +11,19 @@ these into pod requests and limits see [swap sizing](./swap.md) and
   With ~2x swap a 62Gi machine handles ~5000 images.
 - Past ~5000 images the peak lands in OpenMVS `DensifyPointCloud` and grows faster
   than linearly. It scales with **view count**, not depth-map resolution.
-- Always pass a real `--boundary`. Render cost tracks reconstruction *extent*, so
+- Always pass a real `--boundary`. Render cost tracks reconstruction _extent_, so
   bad geometry is a sizing problem too.
 
 | Images | RAM + swap |
-|-------:|-----------:|
-| 40     | 4 GB       |
-| 250    | 16 GB      |
-| 500    | 32 GB      |
-| 1500   | 64 GB      |
-| 2500   | 128 GB     |
-| 3500   | 192 GB     |
-| 5000   | 256 GB     |
-| 12000  | 800 GB     |
+| -----: | ---------: |
+|     40 |       4 GB |
+|    250 |      16 GB |
+|    500 |      32 GB |
+|   1500 |      64 GB |
+|   2500 |     128 GB |
+|   3500 |     192 GB |
+|   5000 |     256 GB |
+|  12000 |     800 GB |
 
 Don't go much past 12000 in one scene. Above that use `--split` /
 `--split-overlap` and let ODM build and merge submodels. Still one pod, no fan out.
@@ -33,12 +33,12 @@ Don't go much past 12000 in one scene. Above that use `--split` /
 `memoryMaxGiB 1200`, `swapRatio 1.0`, `memoryLimitMarginPercent 20`,
 `cpuPerGiB 0.125`, `ephemeralGiBPerGiBRAM 0.3`:
 
-| | peak est | request | `memory.max` | CPU | ephemeral | node |
-|---|---|---|---|---|---|---|
-| 12k | 800 | 400 GiB | 480 GiB | 50 | 240 GiB | `r6id.16xlarge` |
+|     | peak est | request | `memory.max` | CPU | ephemeral | node            |
+| --- | -------- | ------- | ------------ | --- | --------- | --------------- |
+| 12k | 800      | 400 GiB | 480 GiB      | 50  | 240 GiB   | `r6id.16xlarge` |
 
 - Sizing counts **S3 objects**, ODM counts **usable images**. One 12k run sized off
-  >= 12000 while ODM loaded 11782.
+  > = 12000 while ODM loaded 11782.
 
 ## Observed
 
@@ -54,15 +54,15 @@ Don't go much past 12000 in one scene. Above that use `--split` /
 columns**, the difference is `--boundary` plus dropping `--matcher-neighbors` and
 `--use-hybrid-bundle-adjustment`:
 
-| | Unbounded, 384 GiB node | `--boundary`, 768 GiB node |
-|---|---|---|
-| `memory.max` | 360 GiB | 720 GiB |
-| Working-set peak | 932 GiB (`medium`, killed) / 709 GiB (`low`) | 649 GiB |
-| `DensifyPointCloud` `VmPeak` | **709 GiB** | **89.8 GiB** |
-| Swap used | 344 GiB, 27 min pinned | **0 B** |
-| `odm_dem` + `odm_orthophoto` | pinned `memory.max` **1h52m**, 419 GiB swap | no pressure |
-| Ortho / DEM raster | 77 / 46.8 Gpixels, 92% cropped | 8.24 / 4.18 Gpixels, 0% cropped |
-| Wall clock | 17h57m | 11h47m |
+|                              | Unbounded, 384 GiB node                      | `--boundary`, 768 GiB node      |
+| ---------------------------- | -------------------------------------------- | ------------------------------- |
+| `memory.max`                 | 360 GiB                                      | 720 GiB                         |
+| Working-set peak             | 932 GiB (`medium`, killed) / 709 GiB (`low`) | 649 GiB                         |
+| `DensifyPointCloud` `VmPeak` | **709 GiB**                                  | **89.8 GiB**                    |
+| Swap used                    | 344 GiB, 27 min pinned                       | **0 B**                         |
+| `odm_dem` + `odm_orthophoto` | pinned `memory.max` **1h52m**, 419 GiB swap  | no pressure                     |
+| Ortho / DEM raster           | 77 / 46.8 Gpixels, 92% cropped               | 8.24 / 4.18 Gpixels, 0% cropped |
+| Wall clock                   | 17h57m                                       | 11h47m                          |
 
 - Quartering depth-map pixels moved the peak only ~25%, so `pc-quality` is the
   wrong flag to optimise. Size the node instead.
@@ -76,11 +76,11 @@ columns**, the difference is `--boundary` plus dropping `--matcher-neighbors` an
 
 **46% of the run sits under 3 of 96 cores.** Inside the `opensfm` stage:
 
-| Window | Duration | Median cores | What |
-|---|---|---:|---|
-| 02:32 - 04:06 | 94 min | **91.4** | features + matching pass 1, genuinely parallel |
-| 04:08 - 07:48 | 3h40m | ~10 | reconstruct, rolling-shutter correct, re-match, reconstruct |
-| 07:48 - 09:56 | 130 min | **2.1** | undistort |
+| Window        | Duration | Median cores | What                                                        |
+| ------------- | -------- | -----------: | ----------------------------------------------------------- |
+| 02:32 - 04:06 | 94 min   |     **91.4** | features + matching pass 1, genuinely parallel              |
+| 04:08 - 07:48 | 3h40m    |          ~10 | reconstruct, rolling-shutter correct, re-match, reconstruct |
+| 07:48 - 09:56 | 130 min  |      **2.1** | undistort                                                   |
 
 Matching saturates the node. Reconstruction and bundle adjustment are inherently
 serial. **No resource change fixes that.**
@@ -93,11 +93,11 @@ clamps, so at ~12k the count floor gives ~1800 GiB against ~1400 GiB from bytes.
 The floor sets the size, the clamp doesn't bind. Confirmed: a 12k run got a
 **1902 GiB** PVC.
 
-| Observation | % of PVC | Absolute | Per image |
-|---|---:|---:|---:|
-| `opensfm` plateau (JPEGs + features) | 8.2% | 151 GiB | |
-| Peak, `pc-quality low` + boundary | 29.4% | 559 GiB | 0.047 GiB |
-| Peak, `pc-quality medium`, unbounded | 63.6% | ~1200 GiB | 0.100 GiB |
+| Observation                          | % of PVC |  Absolute | Per image |
+| ------------------------------------ | -------: | --------: | --------: |
+| `opensfm` plateau (JPEGs + features) |     8.2% |   151 GiB |           |
+| Peak, `pc-quality low` + boundary    |    29.4% |   559 GiB | 0.047 GiB |
+| Peak, `pc-quality medium`, unbounded |    63.6% | ~1200 GiB | 0.100 GiB |
 
 `gibPerImage 0.15` is ~1.5x a measured `pc-quality medium` run. **Size is fine.**
 

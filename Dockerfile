@@ -34,7 +34,7 @@ RUN apt-get update --quiet \
     && update-ca-certificates
 
 
-# Deploy the application binary into sratch image
+# Deploy the application binary into scratch image
 FROM scratch AS release
 WORKDIR /code
 COPY --from=build /code/scaleodm /code/scaleodm

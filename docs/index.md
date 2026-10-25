@@ -13,36 +13,36 @@ NodeODM-compatible API and S3-native task I/O.
 
 1. Create namespace and required runtime secret:
 
-    ```bash
-    kubectl create namespace scaleodm
+   ```bash
+   kubectl create namespace scaleodm
 
-    kubectl create secret generic scaleodm-secrets \
-      --namespace scaleodm \
-      --from-literal=SCALEODM_DATABASE_URL="postgresql://user:pass@your-db:5432/scaleodm?sslmode=require" \
-      --from-literal=AWS_S3_ENDPOINT="https://s3.amazonaws.com" \
-      --from-literal=AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY" \
-      --from-literal=AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY" \
-      --from-literal=AWS_DEFAULT_REGION="us-east-1"
-    ```
+   kubectl create secret generic scaleodm-secrets \
+     --namespace scaleodm \
+     --from-literal=SCALEODM_DATABASE_URL="postgresql://user:pass@your-db:5432/scaleodm?sslmode=require" \
+     --from-literal=AWS_S3_ENDPOINT="https://s3.amazonaws.com" \
+     --from-literal=AWS_ACCESS_KEY_ID="YOUR_ACCESS_KEY" \
+     --from-literal=AWS_SECRET_ACCESS_KEY="YOUR_SECRET_KEY" \
+     --from-literal=AWS_DEFAULT_REGION="us-east-1"
+   ```
 
 2. Install the chart:
 
-    ```bash
-    helm upgrade --install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
-      --namespace scaleodm \
-      --create-namespace \
-      --version <chart-version> \
-      --set database.external.enabled=true \
-      --set s3.external.enabled=true \
-      --set secrets.runtime.name="scaleodm-secrets" \
-      --set argo.enabled=true
-    ```
+   ```bash
+   helm upgrade --install scaleodm oci://ghcr.io/hotosm/charts/scaleodm \
+     --namespace scaleodm \
+     --create-namespace \
+     --version <chart-version> \
+     --set database.external.enabled=true \
+     --set s3.external.enabled=true \
+     --set secrets.runtime.name="scaleodm-secrets" \
+     --set argo.enabled=true
+   ```
 
 3. Verify API connectivity (adjust host/port for your service exposure):
 
-    ```bash
-    curl http://localhost:31100/info
-    ```
+   ```bash
+   curl http://localhost:31100/info
+   ```
 
 See the [Helm chart reference](https://github.com/hotosm/ScaleODM/blob/main/chart/README.md)
 for all configuration options.
