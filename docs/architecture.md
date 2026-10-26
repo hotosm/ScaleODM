@@ -38,19 +38,20 @@ Karpenter on AWS) decide when and where pods run.
 
 ## Code layout
 
-| Path                 | Purpose                                                                    |
-| -------------------- | -------------------------------------------------------------------------- |
-| `main.go`            | Startup: config, database, Argo client, reconciler, HTTP server.           |
-| `app/api/`           | NodeODM-compatible HTTP API (`/task/*`, `/info`, health checks).           |
-| `app/workflows/`     | Builds Argo Workflow specs and sizes resources by image count.             |
-| `app/reconciler/`    | Background loop that syncs Argo status to the database and calls webhooks. |
-| `app/meta/`          | Job metadata store (reads and writes to Postgres).                         |
-| `app/db/`            | Database connection and `schema.sql`.                                      |
-| `app/s3/`            | S3 helpers: listing images, output files, scripts used in pods.            |
-| `app/config/`        | Environment variable config and defaults.                                  |
-| `app/ui/`            | Small web UI at `/ui` for browsing jobs (read-only by default).            |
-| `app/observability/` | OpenTelemetry traces and metrics.                                          |
-| `chart/`             | Helm chart for ScaleODM, with optional Argo and Postgres.                  |
+| Path                     | Purpose                                                                    |
+| ------------------------ | -------------------------------------------------------------------------- |
+| `main.go`                | Startup: config, database, Argo client, reconciler, HTTP server.           |
+| `app/api/`               | NodeODM-compatible HTTP API (`/task/*`, `/info`, health checks).           |
+| `app/workflows/`         | Builds Argo Workflow specs and sizes resources by image count.             |
+| `app/workflows/scripts/` | Shell scripts run by each workflow step.                                   |
+| `app/reconciler/`        | Background loop that syncs Argo status to the database and calls webhooks. |
+| `app/meta/`              | Job metadata store (reads and writes to Postgres).                         |
+| `app/db/`                | Database connection and `schema.sql`.                                      |
+| `app/s3/`                | S3 helpers: listing images, output files, download filters.                |
+| `app/config/`            | Environment variable config and defaults.                                  |
+| `app/ui/`                | Small web UI at `/ui` for browsing jobs (read-only by default).            |
+| `app/observability/`     | OpenTelemetry traces and metrics.                                          |
+| `chart/`                 | Helm chart for ScaleODM, with optional Argo and Postgres.                  |
 
 ## Further reading
 
