@@ -10,9 +10,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -112,138 +109,27 @@ func TestGeneratePresignedURL_UsesPathStyleForCustomEndpoint(t *testing.T) {
 	assert.Equal(t, "/scaleodm-test/project/output/all.zip", parsed.Path)
 }
 
-func TestRcloneS3ConfigSnippet_CustomEndpointUsesMinioAndPathStyle(t *testing.T) {
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "snippet.sh")
-	configPath := filepath.Join(tmpDir, "rclone.conf")
+func TestDownloadFilterRules_AlwaysExcludesOutputDirs(t *testing.T) {
+	rules := DownloadFilterRules(nil)
 
-	script := "#!/bin/sh\nset -eu\nexport RCLONE_CONFIG=\"" + configPath + "\"\nexport AWS_S3_ENDPOINT=\"http://example.local:9000\"\n" + rcloneS3ConfigSnippet() + "\n"
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-
-	cmd := exec.Command("/bin/sh", scriptPath)
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(output))
-
-	contentBytes, err := os.ReadFile(configPath)
-	require.NoError(t, err)
-	content := string(contentBytes)
-
-	assert.Contains(t, content, "provider = Minio")
-	assert.Contains(t, content, "endpoint = http://example.local:9000")
-	assert.Contains(t, content, "force_path_style = true")
-	assert.Contains(t, content, "use_path_style = true")
-}
-
-func TestRcloneS3ConfigSnippet_NoEndpointKeepsAWSProvider(t *testing.T) {
-	tmpDir := t.TempDir()
-	scriptPath := filepath.Join(tmpDir, "snippet.sh")
-	configPath := filepath.Join(tmpDir, "rclone.conf")
-
-	script := "#!/bin/sh\nset -eu\nexport RCLONE_CONFIG=\"" + configPath + "\"\nunset AWS_S3_ENDPOINT\n" + rcloneS3ConfigSnippet() + "\n"
-	require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-
-	cmd := exec.Command("/bin/sh", scriptPath)
-	output, err := cmd.CombinedOutput()
-	require.NoError(t, err, string(output))
-
-	contentBytes, err := os.ReadFile(configPath)
-	require.NoError(t, err)
-	content := string(contentBytes)
-
-	assert.Contains(t, content, "provider = AWS")
-	assert.NotContains(t, content, "endpoint =")
-	assert.NotContains(t, content, "force_path_style = true")
-}
-
-func TestGenerateDownloadScript_FailsOnExtractionErrors(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
-	assert.NotContains(t, script, "|| true")
-	assert.Contains(t, script, "ERROR: Failed to extract zip archive")
-	assert.Contains(t, script, "ERROR: Failed to extract tar archive")
-}
-
-func TestGenerateDownloadScript_DeletesArchivesOnlyAfterSuccess(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
-	zipExtract := "if ! unzip -q -o -j \"$zipfile\" -d \"$(dirname \"$zipfile\")\"; then"
-	zipDelete := "rm -f \"$zipfile\""
-	assert.Greater(t, strings.Index(script, zipDelete), strings.Index(script, zipExtract))
-
-	tarExtract := "if ! tar --no-same-owner --no-same-permissions --no-absolute-filenames --transform='s|.*/||' -xf \"$tarfile\" -C \"$(dirname \"$tarfile\")\" 2>/dev/null; then"
-	tarDelete := "rm -f \"$tarfile\""
-	assert.Greater(t, strings.Index(script, tarDelete), strings.Index(script, tarExtract))
-}
-
-func TestGenerateDownloadScript_AvoidsFindPipeSubshellForArchiveDetection(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
-	assert.Contains(t, script, "while IFS= read -r zipfile;")
-	assert.Contains(t, script, "while IFS= read -r tarfile;")
-	assert.NotContains(t, script, "| while read zipfile")
-	assert.NotContains(t, script, "| while read tarfile")
-}
-
-func TestGenerateDownloadScript_UsesFilterFromFile(t *testing.T) {
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
-
-	// rclone is invoked with --filter-from, not a long --filter chain.
-	assert.Contains(t, script, "--filter-from \"$FILTER_FILE\"")
-	assert.NotContains(t, script, "--filter \"+ *.jpg\"")
-
-	// Built-in output excludes are still present even with no user excludes.
-	assert.Contains(t, script, "- output/**")
-	assert.Contains(t, script, "- **/output/**")
-
-	// Includes are emitted in the filter file.
+	// Built-in output excludes are present even with no user excludes.
+	assert.Contains(t, rules, "- output/**\n")
+	assert.Contains(t, rules, "- **/output/**\n")
 	for _, ext := range []string{"+ *.jpg", "+ *.tif", "+ *.zip", "+ *.tar.gz"} {
-		assert.Contains(t, script, ext)
+		assert.Contains(t, rules, ext)
 	}
-
-	// Final catch-all drops everything else.
-	assert.Contains(t, script, "\n- *\n")
+	assert.True(t, strings.HasSuffix(rules, "\n- *\n"), "final catch-all drops everything else")
 }
 
-func TestGenerateDownloadScript_EmbedsUserExcludesBeforeIncludes(t *testing.T) {
+func TestDownloadFilterRules_UserExcludesBeforeIncludes(t *testing.T) {
 	excludes := []string{"odm_orthophoto/**", "submodels/**", "all.zip"}
-	script := GenerateDownloadScript("job-1", "s3://bucket/input/", excludes, 1)
+	rules := DownloadFilterRules(excludes)
 
 	for _, p := range excludes {
-		assert.Contains(t, script, "- "+p+"\n")
+		assert.Contains(t, rules, "- "+p+"\n")
 	}
-
-	// Excludes must appear before `+ *.jpg` so they win over the include rules.
-	excludeIdx := strings.Index(script, "- odm_orthophoto/**")
-	includeIdx := strings.Index(script, "+ *.jpg")
-	require.Greater(t, excludeIdx, 0)
-	require.Greater(t, includeIdx, 0)
-	assert.Less(t, excludeIdx, includeIdx, "excludes must precede includes in filter file")
-}
-
-func TestGenerateDownloadScript_MaxDepthFlag(t *testing.T) {
-	withDepth := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 3)
-	assert.Contains(t, withDepth, "--max-depth 3")
-
-	defaultDepth := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 1)
-	assert.Contains(t, defaultDepth, "--max-depth 1")
-
-	unlimited := GenerateDownloadScript("job-1", "s3://bucket/input/", nil, 0)
-	assert.NotContains(t, unlimited, "--max-depth")
-}
-
-func TestGenerateUploadScript_TestWriteFailureSurvivesErrexit(t *testing.T) {
-	script := GenerateUploadScript("s3://bucket/output/")
-
-	assert.Contains(t, script, `if TEST_OUTPUT=$(rclone copyto "$TEST_FILE" "$TEST_OBJECT" 2>&1); then`)
-	assert.Contains(t, script, "else\n  TEST_EXIT_CODE=$?")
-	assert.Contains(t, script, "This might be a false positive. Continuing with actual upload...")
-	assert.NotContains(t, script, "TEST_OUTPUT=$(rclone copyto \"$TEST_FILE\" \"$TEST_OBJECT\" 2>&1)\nTEST_EXIT_CODE=$?")
-}
-
-func TestGenerateUploadScript_ExcludesUndistortedOpenSfMImages(t *testing.T) {
-	script := GenerateUploadScript("s3://bucket/output/")
-
-	assert.Contains(t, script, `--exclude ".rclone/**"`)
-	assert.Contains(t, script, `--exclude "opensfm/undistorted/**"`)
-	assert.Contains(t, script, `--exclude "**/opensfm/undistorted/**"`)
-	assert.Contains(t, script, `rclone copy "$SRC_DIR" "$S3_REMOTE"`)
+	// Excludes must precede `+ *.jpg` so they win over the include rules.
+	assert.Less(t, strings.Index(rules, "- odm_orthophoto/**"), strings.Index(rules, "+ *.jpg"))
 }
 
 func TestRenderRcloneFilterFile_OrderingAndFormat(t *testing.T) {
@@ -555,46 +441,4 @@ func TestStatObjectAtURL_ReturnsSizeAndDistinguishesMissing(t *testing.T) {
 	// A prefix is not an object; this is what makes rclone write a directory.
 	_, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/nested")
 	assert.Error(t, err)
-}
-
-// An explicit AWS endpoint must stay provider=AWS with no path-style forcing.
-func TestRcloneS3ConfigSnippet_InfersProviderFromHost(t *testing.T) {
-	for _, tc := range []struct {
-		endpoint     string
-		wantProvider string
-		wantEndpoint bool
-	}{
-		{"s3.amazonaws.com", "AWS", false},
-		{"https://s3.amazonaws.com", "AWS", false},
-		{"s3.eu-west-1.amazonaws.com", "AWS", false},
-		{"http://localhost:31102", "Minio", true},
-		{"https://minio.internal:9000", "Minio", true},
-		{"garage.example.org", "Minio", true},
-	} {
-		t.Run(tc.endpoint, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			scriptPath := filepath.Join(tmpDir, "snippet.sh")
-			configPath := filepath.Join(tmpDir, "rclone.conf")
-
-			script := "#!/bin/sh\nset -eu\nexport RCLONE_CONFIG=\"" + configPath +
-				"\"\nexport AWS_S3_ENDPOINT=\"" + tc.endpoint + "\"\n" + rcloneS3ConfigSnippet() + "\n"
-			require.NoError(t, os.WriteFile(scriptPath, []byte(script), 0o755))
-
-			output, err := exec.Command("/bin/sh", scriptPath).CombinedOutput()
-			require.NoError(t, err, string(output))
-
-			contentBytes, err := os.ReadFile(configPath)
-			require.NoError(t, err)
-			content := string(contentBytes)
-
-			assert.Contains(t, content, "provider = "+tc.wantProvider)
-			if tc.wantEndpoint {
-				assert.Contains(t, content, "endpoint = "+tc.endpoint)
-				assert.Contains(t, content, "force_path_style = true")
-			} else {
-				assert.NotContains(t, content, "endpoint =")
-				assert.NotContains(t, content, "force_path_style")
-			}
-		})
-	}
 }

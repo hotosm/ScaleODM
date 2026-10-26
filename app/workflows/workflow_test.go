@@ -112,7 +112,7 @@ func TestBuildODMWorkflow_StageContainersDoNotWriteLogFiles(t *testing.T) {
 				}
 			}
 			require.NotNil(t, container)
-			require.Len(t, container.Args, 1)
+			require.NotEmpty(t, container.Args)
 			script := container.Args[0]
 
 			assert.NotContains(t, script, "tee -a", "no tee chain; Argo archives stdout")
@@ -146,7 +146,7 @@ func TestBuildODMWorkflow_ProcessContainerUsesUnbufferedPython(t *testing.T) {
 		}
 	}
 	require.NotNil(t, process)
-	require.Len(t, process.Args, 1)
+	require.NotEmpty(t, process.Args)
 
 	// python3 -u keeps stdout line-buffered so partial logs survive
 	// SIGKILL/OOM and reach Argo's log archive.
@@ -1035,7 +1035,7 @@ func TestBuildODMWorkflow_ProcessContainerHasWritableHome(t *testing.T) {
 	}
 
 	// Some tools expect $HOME to exist rather than creating it.
-	require.Len(t, process.Args, 1)
+	require.NotEmpty(t, process.Args)
 	assert.Contains(t, process.Args[0], `mkdir -p "$HOME"`)
 	assert.Contains(t, process.Args[0], `"$MPLCONFIGDIR"`)
 }

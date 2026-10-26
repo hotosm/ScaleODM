@@ -25,7 +25,7 @@ func (f FileSource) IsSet() bool {
 
 // WorkspaceFilePath keeps inputs outside the pruned images directory.
 func WorkspaceFilePath(jobID, fileName string) string {
-	return fmt.Sprintf("/workspace/%s/%s", jobID, fileName)
+	return fmt.Sprintf("%s/%s/%s", workspaceDir, jobID, fileName)
 }
 
 // documentRules defines inline limits and validators.

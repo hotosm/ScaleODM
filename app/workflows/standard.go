@@ -850,24 +850,16 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	// Download input files. Argo captures stdout when log archival is enabled.
 	downloadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:    "download",
-			Image:   cfg.RcloneImage,
-			Command: []string{"/bin/sh", "-c"},
-			Args: []string{fmt.Sprintf(`set -e
-set -o pipefail
-echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
-%s%s`,
-				s3.GenerateDownloadScript(jobID, cfg.ReadS3Path, cfg.ExcludePaths, cfg.S3ScanDepth),
-				s3.GenerateWorkspaceFileFetchScript(BoundaryFilePath(jobID), cfg.Boundary.S3Path, cfg.Boundary.Inline, BoundaryOptionName)+
-					s3.GenerateWorkspaceFileFetchScript(CamerasFilePath(jobID), cfg.Cameras.S3Path, cfg.Cameras.Inline, CamerasOptionName),
-			)},
+			Name:            "download",
+			Image:           cfg.RcloneImage,
+			Command:         []string{"/bin/sh", "-c"},
+			Args:            []string{downloadScript(cfg, jobID)},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.DownloadResources),
 			SecurityContext: workflowContainerSecurityContext(),
 		},
 	}
 
-	// Run ODM with unbuffered Python so partial logs are flushed promptly.
 	processFlags := append([]string{}, cfg.ODMFlags...)
 	if cfg.Boundary.IsSet() {
 		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", BoundaryOptionName, BoundaryFilePath(jobID)))
@@ -875,7 +867,6 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 	if cfg.Cameras.IsSet() {
 		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", CamerasOptionName, CamerasFilePath(jobID)))
 	}
-	odmFlagsStr := strings.Join(processFlags, " ")
 	odmContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
 			Name:            "process",
@@ -890,22 +881,8 @@ echo "=== download attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==
 					MountPath: odmModelCachePath,
 				},
 			},
-			Args: []string{
-				fmt.Sprintf(`
-set -e
-set -o pipefail
-JOB_ID="{{workflow.name}}"
-echo "=== process attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
-mkdir -p "$HOME" "$XDG_CACHE_HOME" "$XDG_CONFIG_HOME" "$XDG_DATA_HOME" "$MPLCONFIGDIR"
-echo "Running ODM processing..."
-echo "Processing job: $JOB_ID"
-echo "ODM Project ID: %s"
-odm_args="%s --project-path /workspace $JOB_ID"
-echo "Executing: python3 -u run.py $odm_args"
-python3 -u run.py $odm_args
-echo "ODM processing complete"
-				`, cfg.ODMProjectID, odmFlagsStr),
-			},
+			// bash -c SCRIPT $0 ARGS...: ODM flags arrive as "$@".
+			Args: append([]string{processScript(cfg, jobID), "process"}, processFlags...),
 		},
 		Dependencies: []string{"download"},
 	}
@@ -913,13 +890,10 @@ echo "ODM processing complete"
 	// Upload results to writeS3Path.
 	uploadContainer := wfv1.ContainerNode{
 		Container: apiv1.Container{
-			Name:    "upload",
-			Image:   cfg.RcloneImage,
-			Command: []string{"/bin/sh", "-c"},
-			Args: []string{fmt.Sprintf(`set -e
-set -o pipefail
-echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
-%s`, s3.GenerateUploadScript(cfg.WriteS3Path))},
+			Name:            "upload",
+			Image:           cfg.RcloneImage,
+			Command:         []string{"/bin/sh", "-c"},
+			Args:            []string{uploadScript(cfg, jobID)},
 			Env:             awsEnv,
 			Resources:       containerRequirements(cfg.UploadResources),
 			SecurityContext: workflowContainerSecurityContext(),
@@ -961,14 +935,14 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 			Name:            "cleanup",
 			Image:           cfg.RcloneImage,
 			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{s3.GenerateWorkspaceSnapshotScript()},
+			Args:            []string{snapshotScript()},
 			Resources:       containerRequirements(cfg.CleanupResources),
 			SecurityContext: workflowContainerSecurityContext(),
 			Env:             cleanupEnv,
 			VolumeMounts: []apiv1.VolumeMount{
 				{
 					Name:      "workspace",
-					MountPath: "/workspace",
+					MountPath: workspaceDir,
 				},
 			},
 		},
@@ -995,7 +969,7 @@ echo "=== upload attempt {{retries}} @ $(date -u +%%Y-%%m-%%dT%%H:%%M:%%SZ) ==="
 			VolumeMounts: []apiv1.VolumeMount{
 				{
 					Name:      "workspace",
-					MountPath: "/workspace",
+					MountPath: workspaceDir,
 				},
 				{
 					Name:      "tmp",
