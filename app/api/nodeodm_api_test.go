@@ -884,10 +884,10 @@ func TestDetectWorkflowInfraFailure(t *testing.T) {
 			name: "detect failed pull in workflow message",
 			workflow: &wfv1.Workflow{
 				Status: wfv1.WorkflowStatus{
-					Message: "failed to pull image ghcr.io/hotosm/odm:3.6.1",
+					Message: "failed to pull image docker.io/opendronemap/odm:3.6.2",
 				},
 			},
-			expected: "failed to pull image ghcr.io/hotosm/odm:3.6.1",
+			expected: "failed to pull image docker.io/opendronemap/odm:3.6.2",
 		},
 		{
 			name: "no infra failure",
@@ -956,7 +956,7 @@ func TestResolveODMImage(t *testing.T) {
 }
 
 func TestODMImageRepo(t *testing.T) {
-	assert.Equal(t, "ghcr.io/hotosm/odm", odmImageRepo("ghcr.io/hotosm/odm:3.6.1"))
+	assert.Equal(t, "ghcr.io/hotosm/odm", odmImageRepo("docker.io/opendronemap/odm:3.6.2"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx:gpu"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("docker.io/webodm/odx"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx@sha256:abc"))

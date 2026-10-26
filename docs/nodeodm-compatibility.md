@@ -182,7 +182,7 @@ Returns node information including queue count and engine version.
   "taskQueueCount": 5,
   "maxImages": null,
   "engine": "odm",
-  "engineVersion": "ghcr.io/hotosm/odm:3.6.1"
+  "engineVersion": "docker.io/opendronemap/odm:3.6.2"
 }
 ```
 
@@ -457,7 +457,7 @@ api:
   replicaCount: 2 # HA - also creates a PodDisruptionBudget
 
 config:
-  odmImage: "ghcr.io/hotosm/odm:3.6.1"
+  odmImage: "docker.io/opendronemap/odm:3.6.2"
 ```
 
 ```bash

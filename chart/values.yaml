@@ -188,7 +188,7 @@ workspaceStorageClass:
 # Configuration (non-sensitive)
 config:
   # ODM image to use in workflows
-  odmImage: "ghcr.io/hotosm/odm:3.6.1"
+  odmImage: "docker.io/opendronemap/odm:3.6.2"
   # Repos allowed for the per-task odmImage override, any tag. Empty allows any.
   allowedOdmImages: "ghcr.io/hotosm/odm,docker.io/opendronemap/odm,docker.io/webodm/odx"
 

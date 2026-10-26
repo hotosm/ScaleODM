@@ -5,7 +5,7 @@ without redeploying, allowlist the image and pass `odmImage` per task.
 
 ```yaml
 config:
-  odmImage: "ghcr.io/hotosm/odm:3.6.1"
+  odmImage: "docker.io/opendronemap/odm:3.6.2"
   allowedOdmImages: "ghcr.io/hotosm/odm,docker.io/opendronemap/odm,docker.io/webodm/odx"
 ```
 
