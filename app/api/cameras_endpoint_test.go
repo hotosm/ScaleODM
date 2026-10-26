@@ -196,7 +196,7 @@ func TestTaskRestart_ReplaysStoredCameras(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.NotNil(t, submitted)
 	assert.Equal(t, validCamerasJSON, submitted.Cameras.Inline)
 }
@@ -235,7 +235,7 @@ func TestTaskRestart_NewOptionsOverrideStoredCameras(t *testing.T) {
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
 
-	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	require.Equal(t, http.StatusNoContent, w.Code, w.Body.String())
 	require.NotNil(t, submitted)
 	assert.False(t, submitted.Cameras.IsSet(), "dropping the option must clear the stored calibration")
 
