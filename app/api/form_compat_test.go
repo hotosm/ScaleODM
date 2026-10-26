@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -73,6 +74,8 @@ func TestTaskCancel_AcceptsPyODMFormRequest(t *testing.T) {
 	handler.ServeHTTP(w, req)
 
 	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
-	assert.JSONEq(t, `{"success":true}`, w.Body.String())
+	var response Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.True(t, response.Success)
 	assert.Equal(t, []string{"wf-form-cancel"}, wfClient.deletedNames)
 }

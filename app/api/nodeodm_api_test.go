@@ -1188,7 +1188,9 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 	handler.ServeHTTP(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.JSONEq(t, `{"success":true}`, w.Body.String())
+	var response Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.True(t, response.Success)
 	require.Len(t, wfClient.deletedNames, 1)
 	assert.Equal(t, "old-wf", wfClient.deletedNames[0])
 
