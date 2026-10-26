@@ -586,6 +586,15 @@ type Response struct {
 	Error   string `json:"error,omitempty" doc:"Error message if failed"`
 }
 
+// SuccessResponse returns 200 + JSON; a bodyless Huma response is a 204, which pyodm rejects.
+type SuccessResponse struct {
+	Body Response
+}
+
+func successResponse() *SuccessResponse {
+	return &SuccessResponse{Body: Response{Success: true}}
+}
+
 type ErrorResponse struct {
 	Body struct {
 		Error string `json:"error" doc:"Error description"`
@@ -1546,7 +1555,7 @@ func (a *API) registerNodeODMRoutes() {
 		Body  struct {
 			UUID string `json:"uuid" doc:"UUID of the task"`
 		}
-	}) (*Response, error) {
+	}) (*SuccessResponse, error) {
 		log.Printf("POST /task/cancel: uuid=%q token_provided=%t", input.Body.UUID, input.Token != "")
 
 		err := a.workflowClient.DeleteWorkflow(ctx, input.Body.UUID)
@@ -1566,7 +1575,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		log.Printf("POST /task/cancel: task %q canceled", input.Body.UUID)
 
-		return &Response{Success: true}, nil
+		return successResponse(), nil
 	})
 
 	// POST /task/remove - Remove a task
@@ -1581,7 +1590,7 @@ func (a *API) registerNodeODMRoutes() {
 		Body  struct {
 			UUID string `json:"uuid" doc:"UUID of the task"`
 		}
-	}) (*Response, error) {
+	}) (*SuccessResponse, error) {
 		log.Printf("POST /task/remove: uuid=%q token_provided=%t", input.Body.UUID, input.Token != "")
 
 		// Delete from Argo
@@ -1599,7 +1608,7 @@ func (a *API) registerNodeODMRoutes() {
 
 		log.Printf("POST /task/remove: task %q removed (workflow+metadata)", input.Body.UUID)
 
-		return &Response{Success: true}, nil
+		return successResponse(), nil
 	})
 
 	// POST /task/restart - Restart a task
@@ -1615,7 +1624,7 @@ func (a *API) registerNodeODMRoutes() {
 			UUID    string `json:"uuid" doc:"UUID of the task"`
 			Options string `json:"options,omitempty" doc:"New options (optional)"`
 		}
-	}) (*Response, error) {
+	}) (*SuccessResponse, error) {
 		log.Printf("POST /task/restart: uuid=%q token_provided=%t options_set=%t", input.Body.UUID, input.Token != "", input.Body.Options != "")
 
 		// Get existing task metadata
@@ -1766,7 +1775,7 @@ func (a *API) registerNodeODMRoutes() {
 		}
 
 		log.Printf("POST /task/restart: task %q restarted as workflow %q imageCount=%d imageTotalBytes=%d endpoint=%q", oldWorkflowName, wf.Name, imageCount, imageTotalBytes, s3Endpoint)
-		return &Response{Success: true}, nil
+		return successResponse(), nil
 	})
 
 	// GET /task/{uuid}/download/{asset} - Download task asset (redirects to pre-signed URL)

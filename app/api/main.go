@@ -124,7 +124,7 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 	// because POST /task/new is registered via Huma, which doesn't expose the
 	// underlying http.Handler for per-route wrapping. The middleware short-circuits
 	// immediately for all other routes, so the overhead is a single conditional.
-	return apiObj, withTaskNewErrorLogging(router)
+	return apiObj, withTaskNewErrorLogging(withFormCompat(router))
 }
 
 func has4xxResponse(responses map[string]*huma.Response) bool {
