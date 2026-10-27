@@ -405,6 +405,8 @@ Body: `{"uuid": "..."}` → `{"success": true}`
 
 Body: `{"uuid": "...", "options": "[...]"}` → `{"success": true}`
 
+Omitting `options` reuses the stored flags, files and `odmImage`.
+
 ## Key Differences from NodeODM
 
 |                    | NodeODM                                  | ScaleODM                                  |
@@ -425,6 +427,12 @@ Body: `{"uuid": "...", "options": "[...]"}` → `{"success": true}`
 | Succeeded  | 40           | COMPLETED |
 | Failed     | 30           | FAILED    |
 | Error      | 30           | FAILED    |
+
+A Running workflow whose pod hits an infrastructure error (image pull
+failure, missing secret) is reported as 30 with that error while it lasts.
+It is not saved, so the status returns to the live phase if Argo recovers.
+Clients that treat 30 as final, such as pyodm's `wait_for_completion()`,
+stop at that point.
 
 ## Deployment Reference
 

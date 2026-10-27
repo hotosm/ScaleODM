@@ -109,5 +109,6 @@ not match survey-grade kit whatever flags it is processed with.
 
 Tasks submitted this way are invisible to Drone TM: its reconcile looks up
 `odm_task_uuid` in its own database, so read results from the workflow logs and
-the `writeS3Path` prefix. `POST /task/restart` does not carry `odmImage` over,
-so restart by submitting a new task.
+the `writeS3Path` prefix. `POST /task/restart` reuses the task's `odmImage`,
+re-checked against `allowedOdmImages`, so a restart fails with a 400 if the
+image has since been removed from the allowlist.

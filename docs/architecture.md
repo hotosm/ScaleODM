@@ -26,10 +26,12 @@ flowchart LR
    - **download**: rclone copies the images from S3 into a workspace volume.
    - **process**: the ODM container runs on the images.
    - **upload**: rclone copies the outputs to `writeS3Path`.
-3. **Track.** Job status is updated when a client calls
-   `GET /task/{uuid}/info`, and by the reconciler, which checks Argo every
-   30 seconds. Clients therefore see the right status even after Argo has
-   cleaned up a finished workflow.
+3. **Track.** The reconciler is the only writer of job status. Every 30
+   seconds it saves Argo's phase for each unfinished job, and fails jobs whose
+   workflow has gone missing. `GET /task/{uuid}/info` and the UI only read:
+   they show the live Argo phase until the job finishes, then the saved
+   status. Pod errors such as an image pull failure show as failed while they
+   last, but are not saved, because Argo can still recover.
 4. **Notify.** When a job finishes or fails, the reconciler calls the
    client's webhook, if one was given.
 
