@@ -38,6 +38,7 @@ services:
       AWS_ACCESS_KEY_ID: admin
       AWS_SECRET_ACCESS_KEY: somelongpassword
       SCALEODM_ARGO_ARCHIVE_LOG_BUCKET: argo-logs
+      SCALEODM_UI_ENABLED: true
     volumes:
       # Mount local files
       - ./go.mod:/code/go.mod:ro
