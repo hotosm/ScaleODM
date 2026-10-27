@@ -257,25 +257,6 @@ func ObjectExistsInS3Path(ctx context.Context, client *minio.Client, writeS3Path
 	return false, fmt.Errorf("failed to stat object %q: %w", objectKey, err)
 }
 
-// StatObjectAtURL stats a whole s3://bucket/key URL and returns its size, without the
-// trailing-slash normalisation ObjectExistsInS3Path applies to keys.
-func StatObjectAtURL(ctx context.Context, client *minio.Client, s3URL string) (int64, error) {
-	if !strings.HasPrefix(s3URL, "s3://") {
-		return 0, fmt.Errorf("invalid S3 path: %s", s3URL)
-	}
-
-	bucket, key, found := strings.Cut(strings.TrimPrefix(s3URL, "s3://"), "/")
-	if !found || strings.TrimSpace(bucket) == "" || strings.TrimSpace(key) == "" {
-		return 0, fmt.Errorf("S3 path must name an object as s3://bucket/key: %s", s3URL)
-	}
-
-	info, err := client.StatObject(ctx, bucket, key, minio.StatObjectOptions{})
-	if err != nil {
-		return 0, fmt.Errorf("failed to stat object %q in bucket %q: %w", key, bucket, err)
-	}
-	return info.Size, nil
-}
-
 // ReadObjectAtURL reads at most maxBytes into memory.
 func ReadObjectAtURL(ctx context.Context, client *minio.Client, s3URL string, maxBytes int64) ([]byte, error) {
 	if !strings.HasPrefix(s3URL, "s3://") {
@@ -302,13 +283,6 @@ func ReadObjectAtURL(ctx context.Context, client *minio.Client, s3URL string, ma
 		return nil, fmt.Errorf("object %q in bucket %q exceeds %d bytes", key, bucket, maxBytes)
 	}
 	return data, nil
-}
-
-// ListFilesInS3Path lists files in the S3 path.
-// writeS3Path is the S3 path where files are stored (e.g., s3://bucket/path/)
-// Returns a list of object names (without the prefix).
-func ListFilesInS3Path(ctx context.Context, client *minio.Client, writeS3Path string) ([]string, error) {
-	return ListFilesInS3PathWithLimit(ctx, client, writeS3Path, 0)
 }
 
 // ListFilesInS3PathWithLimit lists files in the S3 path with an optional cap.
@@ -485,14 +459,9 @@ func ProbeS3Path(ctx context.Context, client *minio.Client, s3Path string) error
 	return nil
 }
 
-// CountImageStatsInS3Path counts supported image files and sums their object sizes under an S3 path recursively.
-func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Path string) (int, int64, error) {
-	return CountImageStatsInS3PathWithExcludes(ctx, client, readS3Path, nil)
-}
-
-// CountImageStatsInS3PathWithExcludes is like CountImageStatsInS3Path but
-// applies a best-effort filter that mirrors the rclone --filter-from set used
-// by the download stage. It is intentionally approximate: rclone is the
+// CountImageStatsInS3Path counts supported image files and sums their sizes
+// under an S3 path recursively. It applies a best-effort filter that mirrors
+// the rclone --filter-from set used by the download stage. It is intentionally approximate: rclone is the
 // authoritative filter at workflow runtime, and a small mismatch here only
 // affects pre-flight resource sizing, never final output correctness.
 //
@@ -503,7 +472,7 @@ func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Pa
 //
 // Patterns this function doesn't recognise are ignored at the API layer; rclone
 // will still apply them in-pod.
-func CountImageStatsInS3PathWithExcludes(ctx context.Context, client *minio.Client, readS3Path string, excludePatterns []string) (int, int64, error) {
+func CountImageStatsInS3Path(ctx context.Context, client *minio.Client, readS3Path string, excludePatterns []string) (int, int64, error) {
 	bucket, prefix, err := parseS3Path(readS3Path)
 	if err != nil {
 		return 0, 0, err
@@ -518,23 +487,10 @@ func CountImageStatsInS3PathWithExcludes(ctx context.Context, client *minio.Clie
 	allExcludes = append(allExcludes, alwaysExcludePatterns...)
 	allExcludes = append(allExcludes, excludePatterns...)
 	matcher := compileExcludeMatcher(allExcludes)
-	return accumulateImageStatsFromObjectsWithExcludes(objectCh, prefix, matcher)
+	return accumulateImageStats(objectCh, prefix, matcher)
 }
 
-// CountImageFilesInS3Path counts image files under an S3 path recursively.
-func CountImageFilesInS3Path(ctx context.Context, client *minio.Client, readS3Path string) (int, error) {
-	count, _, err := CountImageStatsInS3Path(ctx, client, readS3Path)
-	if err != nil {
-		return 0, err
-	}
-	return count, nil
-}
-
-func accumulateImageStatsFromObjects(objectCh <-chan minio.ObjectInfo) (int, int64, error) {
-	return accumulateImageStatsFromObjectsWithExcludes(objectCh, "", excludeMatcher{})
-}
-
-func accumulateImageStatsFromObjectsWithExcludes(objectCh <-chan minio.ObjectInfo, prefix string, matcher excludeMatcher) (int, int64, error) {
+func accumulateImageStats(objectCh <-chan minio.ObjectInfo, prefix string, matcher excludeMatcher) (int, int64, error) {
 	count := 0
 	totalBytes := int64(0)
 	for object := range objectCh {
@@ -561,7 +517,7 @@ func accumulateImageStatsFromObjectsWithExcludes(objectCh <-chan minio.ObjectInf
 
 // excludeMatcher is a small, exact-match-only pattern matcher used for
 // pre-flight image counting. It is not a full rclone filter implementation;
-// see CountImageStatsInS3PathWithExcludes for the supported subset.
+// see CountImageStatsInS3Path for the supported subset.
 type excludeMatcher struct {
 	dirs       map[string]struct{}
 	basenames  map[string]struct{}

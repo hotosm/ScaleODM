@@ -22,7 +22,7 @@ type JobMetadata struct {
 	WriteS3Path  string          `json:"write_s3_path"`
 	ODMFlags     json.RawMessage `json:"odm_flags"`
 	S3Region     string          `json:"s3_region"`
-	JobStatus    string          `json:"job_status"`
+	JobStatus    JobStatus       `json:"job_status"`
 	CreatedAt    time.Time       `json:"created_at"`
 	StartedAt    *time.Time      `json:"started_at,omitempty"`
 	CompletedAt  *time.Time      `json:"completed_at,omitempty"`
@@ -163,10 +163,7 @@ func (s *Store) GetJob(ctx context.Context, workflowName string) (*JobMetadata, 
 	return job, nil
 }
 
-// UpdateJobStatus updates the job status from workflow phase
-// status should be one of: 'queued', 'claimed', 'running', 'failed', 'completed', 'canceled'
-// Note: 'claimed' is an internal state for job queue management (maps to QUEUED/10 in API)
-func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string, errorMsg *string) error {
+func (s *Store) UpdateJobStatus(ctx context.Context, workflowName string, status JobStatus, errorMsg *string) error {
 	return s.updateJobStatus(ctx, workflowName, status, errorMsg, nil)
 }
 
@@ -177,11 +174,11 @@ func (s *Store) UpdateJobStatus(ctx context.Context, workflowName, status string
 //
 // Pass failureDetails == nil to leave the column unchanged (rather than
 // clobbering it with NULL on subsequent status updates).
-func (s *Store) UpdateJobStatusWithFailureDetails(ctx context.Context, workflowName, status string, errorMsg *string, failureDetails json.RawMessage) error {
+func (s *Store) UpdateJobStatusWithFailureDetails(ctx context.Context, workflowName string, status JobStatus, errorMsg *string, failureDetails json.RawMessage) error {
 	return s.updateJobStatus(ctx, workflowName, status, errorMsg, failureDetails)
 }
 
-func (s *Store) updateJobStatus(ctx context.Context, workflowName, status string, errorMsg *string, failureDetails json.RawMessage) error {
+func (s *Store) updateJobStatus(ctx context.Context, workflowName string, status JobStatus, errorMsg *string, failureDetails json.RawMessage) error {
 	started := time.Now()
 	reason := "none"
 	if errorMsg != nil && strings.TrimSpace(*errorMsg) != "" {
@@ -222,87 +219,108 @@ func (s *Store) updateJobStatus(ctx context.Context, workflowName, status string
 		failureValue = nil
 	}
 
-	result, err := s.db.Pool.Exec(ctx, query, workflowName, status, errValue, failureValue)
+	result, err := s.db.Pool.Exec(ctx, query, workflowName, string(status), errValue, failureValue)
 	if err != nil {
-		observability.RecordJobStatusUpdate("failure", status, "db_exec_failed", time.Since(started))
+		observability.RecordJobStatusUpdate("failure", string(status), "db_exec_failed", time.Since(started))
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
-		observability.RecordJobStatusUpdate("failure", status, "job_not_found", time.Since(started))
+		observability.RecordJobStatusUpdate("failure", string(status), "job_not_found", time.Since(started))
 		return fmt.Errorf("job not found: %s", workflowName)
 	}
-	observability.RecordJobStatusUpdate("success", status, reason, time.Since(started))
+	observability.RecordJobStatusUpdate("success", string(status), reason, time.Since(started))
 	return nil
 }
 
 // MetadataWebhookKey is the metadata key for the caller's webhook URL.
 const MetadataWebhookKey = "webhook"
 
-// NodeODMStatusCode maps a DB job status to the NodeODM status code
-// (10 queued, 20 running, 30 failed, 40 completed, 50 canceled).
-func NodeODMStatusCode(jobStatus string) int {
-	switch strings.ToLower(strings.TrimSpace(jobStatus)) {
-	case "completed":
-		return 40
-	case "failed":
-		return 30
-	case "canceled":
+// MetadataWorkflowMissingFirstSeenKey records when a job's Argo workflow was
+// first found missing, so the reconciler can apply a grace window.
+const MetadataWorkflowMissingFirstSeenKey = "workflow_missing_first_seen_at"
+
+const (
+	StatusCodeQueued    = 10
+	StatusCodeRunning   = 20
+	StatusCodeFailed    = 30
+	StatusCodeCompleted = 40
+	StatusCodeCanceled  = 50
+)
+
+// JobStatus is a job's lifecycle state. The job_status CHECK constraint
+// limits the column to these values.
+type JobStatus string
+
+const (
+	JobQueued JobStatus = "queued"
+	// JobClaimed is an internal queue state, reported to clients as queued.
+	JobClaimed   JobStatus = "claimed"
+	JobRunning   JobStatus = "running"
+	JobCompleted JobStatus = "completed"
+	JobFailed    JobStatus = "failed"
+	JobCanceled  JobStatus = "canceled"
+)
+
+// jobStatusOrder ranks statuses so reconciliation never moves a job backwards.
+var jobStatusOrder = map[JobStatus]int{
+	JobQueued:    0,
+	JobClaimed:   1,
+	JobRunning:   2,
+	JobCompleted: 3,
+	JobFailed:    3,
+	JobCanceled:  3,
+}
+
+func (s JobStatus) NodeODMCode() int {
+	switch s {
+	case JobCompleted:
+		return StatusCodeCompleted
+	case JobFailed:
+		return StatusCodeFailed
+	case JobCanceled:
+		return StatusCodeCanceled
+	case JobRunning:
+		return StatusCodeRunning
+	default:
+		return StatusCodeQueued
+	}
+}
+
+// Progress is a coarse 0-100 estimate for NodeODM clients.
+func (s JobStatus) Progress() int {
+	switch s {
+	case JobRunning:
 		return 50
-	case "running":
-		return 20
-	default: // queued, claimed
-		return 10
-	}
-}
-
-// IsTerminalJobStatus reports whether a job status is terminal (won't change).
-func IsTerminalJobStatus(jobStatus string) bool {
-	switch strings.ToLower(strings.TrimSpace(jobStatus)) {
-	case "completed", "failed", "canceled":
-		return true
+	case JobCompleted:
+		return 100
 	default:
-		return false
+		return 0
 	}
 }
 
-// MapArgoPhaseToJobStatus converts Argo workflow phase to database job status
-// Returns NodeODM-aligned status labels: 'queued', 'running', 'completed', 'failed', 'canceled'
-func MapArgoPhaseToJobStatus(phase string) string {
+func (s JobStatus) IsTerminal() bool {
+	return s == JobCompleted || s == JobFailed || s == JobCanceled
+}
+
+// CanAdvanceTo reports whether dst is strictly later than s.
+func (s JobStatus) CanAdvanceTo(dst JobStatus) bool {
+	src, srcOK := jobStatusOrder[s]
+	next, dstOK := jobStatusOrder[dst]
+	return srcOK && dstOK && next > src
+}
+
+func MapArgoPhaseToJobStatus(phase string) JobStatus {
 	switch phase {
-	case "Pending":
-		return "queued"
 	case "Running":
-		return "running"
+		return JobRunning
 	case "Succeeded":
-		return "completed"
+		return JobCompleted
 	case "Failed", "Error":
-		return "failed"
-	default:
-		return "queued"
+		return JobFailed
+	default: // Pending or unknown
+		return JobQueued
 	}
-}
-
-// IsForwardJobStatusTransition returns true when moving from src to dst is a
-// valid forward progression. Reconciliation callers use this to avoid
-// regressing a persisted job status from a later state to an earlier one.
-func IsForwardJobStatusTransition(src, dst string) bool {
-	order := map[string]int{
-		"queued":    0,
-		"claimed":   1,
-		"running":   2,
-		"completed": 3,
-		"failed":    3,
-		"canceled":  3,
-	}
-	src = strings.ToLower(strings.TrimSpace(src))
-	dst = strings.ToLower(strings.TrimSpace(dst))
-	s, sOk := order[src]
-	d, dOk := order[dst]
-	if !sOk || !dOk {
-		return false
-	}
-	return d > s
 }
 
 // UpdateJobMetadata stores additional workflow metadata
@@ -552,22 +570,17 @@ func (s *Store) ListJobs(ctx context.Context, status, projectID string, limit, o
 	return jobs, nil
 }
 
-// ListActiveJobs returns jobs that are not yet in a terminal state and were
-// created on or after since. Used by the background reconciler to keep the DB
-// scan bounded: filtering at the SQL level means the query cost stays
-// proportional to genuinely active jobs rather than growing with all-time
-// history.
-func (s *Store) ListActiveJobs(ctx context.Context, since time.Time) ([]*JobMetadata, error) {
+// ListActiveJobs returns every job not yet in a terminal state.
+func (s *Store) ListActiveJobs(ctx context.Context) ([]*JobMetadata, error) {
 	query := `
 		SELECT id, workflow_name, odm_project_id, read_s3_path, write_s3_path,
 		       odm_flags, s3_region, job_status, created_at, started_at, completed_at,
 		       error_message, metadata
 		FROM scaleodm_job_metadata
 		WHERE job_status NOT IN ('completed', 'failed', 'canceled')
-		  AND created_at >= $1
 		ORDER BY created_at DESC
 	`
-	rows, err := s.db.Pool.Query(ctx, query, since)
+	rows, err := s.db.Pool.Query(ctx, query)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list active jobs: %w", err)
 	}

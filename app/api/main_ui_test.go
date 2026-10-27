@@ -7,11 +7,12 @@ import (
 
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/testutil"
 	"github.com/stretchr/testify/assert"
 )
 
 func TestUIRoutesEnabledByDefault(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -36,7 +37,7 @@ func TestUIRoutesEnabledByDefault(t *testing.T) {
 }
 
 func TestUIRoutesEnabledAlongsideExistingRoutes(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)

@@ -29,7 +29,7 @@ import (
 )
 
 func TestInfoEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -56,7 +56,7 @@ func TestInfoEndpoint(t *testing.T) {
 }
 
 func TestOptionsEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -87,7 +87,7 @@ func TestOptionsEndpoint(t *testing.T) {
 }
 
 func TestTaskNewEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -123,7 +123,7 @@ func TestTaskNewEndpoint(t *testing.T) {
 }
 
 func TestTaskNew_AcceptsStandardProcessingMode(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -159,7 +159,7 @@ func TestTaskNew_AcceptsStandardProcessingMode(t *testing.T) {
 }
 
 func TestTaskNew_RejectsInvalidS3ScanDepth(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -187,7 +187,7 @@ func TestTaskNew_RejectsInvalidS3ScanDepth(t *testing.T) {
 }
 
 func TestTaskNew_RejectsReservedProcessingMode(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -214,7 +214,7 @@ func TestTaskNew_RejectsReservedProcessingMode(t *testing.T) {
 }
 
 func TestTaskNew_RejectsUnknownProcessingMode(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -237,7 +237,7 @@ func TestTaskNew_RejectsUnknownProcessingMode(t *testing.T) {
 }
 
 func TestTaskNew_RejectsMalformedExcludePathsJSON(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -260,7 +260,7 @@ func TestTaskNew_RejectsMalformedExcludePathsJSON(t *testing.T) {
 }
 
 func TestTaskNew_RejectsUnsafeExcludePattern(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -283,7 +283,7 @@ func TestTaskNew_RejectsUnsafeExcludePattern(t *testing.T) {
 }
 
 func TestTaskListEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -314,7 +314,7 @@ func TestTaskListEndpoint(t *testing.T) {
 }
 
 func TestTaskInfoEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -362,13 +362,13 @@ func TestTaskInfoEndpoint(t *testing.T) {
 		require.NoError(t, err)
 	}
 	assert.Equal(t, workflowName, response.UUID)
-	// Missing workflow is now conservatively reconciled during grace period.
-	assert.Equal(t, StatusCodeQueued, response.Status.Code)
+	// A missing workflow is left to the reconciler's grace window.
+	assert.Equal(t, meta.StatusCodeQueued, response.Status.Code)
 	assert.Empty(t, response.Status.ErrorMessage)
 }
 
 func TestTaskInfoDoesNotRegressPersistedStatusFromLiveUnknownPhase(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -406,11 +406,74 @@ func TestTaskInfoDoesNotRegressPersistedStatusFromLiveUnknownPhase(t *testing.T)
 	job, err := metadataStore.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Equal(t, "running", job.JobStatus)
+	assert.Equal(t, meta.JobRunning, job.JobStatus)
+}
+
+func getTaskInfo(t *testing.T, handler http.Handler, uuid string) TaskInfo {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/task/"+uuid+"/info", nil)
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+	var info TaskInfo
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &info))
+	return info
+}
+
+func TestTaskInfo_ReportsInfraFailureWithoutPersisting(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	metadataStore := meta.NewStore(db)
+	_, err := metadataStore.CreateJob(ctx, "wf-infra", "project", "s3://bucket/images/", "s3://bucket/output/", nil, "us-east-1", nil)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.UpdateJobStatus(ctx, "wf-infra", "running", nil))
+
+	wfClient := &recordingWorkflowClient{
+		getFn: func(ctx context.Context, name string) (*wfv1.Workflow, error) {
+			return &wfv1.Workflow{Status: wfv1.WorkflowStatus{
+				Phase: wfv1.WorkflowRunning,
+				Nodes: map[string]wfv1.NodeStatus{"n1": {Message: "Error: ImagePullBackOff"}},
+			}}, nil
+		},
+	}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	info := getTaskInfo(t, handler, "wf-infra")
+	assert.Equal(t, meta.StatusCodeFailed, info.Status.Code)
+	assert.Equal(t, "Error: ImagePullBackOff", info.Status.ErrorMessage)
+
+	job, err := metadataStore.GetJob(ctx, "wf-infra")
+	require.NoError(t, err)
+	assert.Equal(t, meta.JobRunning, job.JobStatus, "persisting is the reconciler's job")
+}
+
+func TestTaskInfo_TerminalStoredStatusWinsOverLivePhase(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	metadataStore := meta.NewStore(db)
+	_, err := metadataStore.CreateJob(ctx, "wf-done", "project", "s3://bucket/images/", "s3://bucket/output/", nil, "us-east-1", nil)
+	require.NoError(t, err)
+	failure := "Error: ImagePullBackOff"
+	require.NoError(t, metadataStore.UpdateJobStatus(ctx, "wf-done", "failed", &failure))
+
+	wfClient := &recordingWorkflowClient{
+		getFn: func(ctx context.Context, name string) (*wfv1.Workflow, error) {
+			return &wfv1.Workflow{Status: wfv1.WorkflowStatus{Phase: wfv1.WorkflowRunning}}, nil
+		},
+	}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	info := getTaskInfo(t, handler, "wf-done")
+	assert.Equal(t, meta.StatusCodeFailed, info.Status.Code)
+	assert.Equal(t, failure, info.Status.ErrorMessage)
 }
 
 func TestTaskCancelEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -437,7 +500,7 @@ func TestTaskCancelEndpoint(t *testing.T) {
 }
 
 func TestTaskRemoveEndpoint(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -498,7 +561,7 @@ func decodeTaskAssetsResponse(t *testing.T, body []byte) TaskAssets {
 }
 
 func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -572,7 +635,7 @@ func TestTaskAssetsEndpoint_PrimaryAndAdditionalBehavior(t *testing.T) {
 }
 
 func TestTaskAssetsEndpoint_ErrorScenarios(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -604,7 +667,7 @@ func TestTaskAssetsEndpoint_ErrorScenarios(t *testing.T) {
 }
 
 func TestTaskAssetsEndpoint_AdditionalLimitClampFloor(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -643,7 +706,7 @@ func TestTaskAssetsEndpoint_AdditionalLimitClampFloor(t *testing.T) {
 }
 
 func TestDownloadEndpoint_StillRedirectsForExistingAsset(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -680,7 +743,7 @@ func TestDownloadEndpoint_StillRedirectsForExistingAsset(t *testing.T) {
 }
 
 func TestDownloadEndpoint_AliasResolvesNestedOrthophoto(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -719,7 +782,7 @@ func TestDownloadEndpoint_AliasResolvesNestedOrthophoto(t *testing.T) {
 }
 
 func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -773,7 +836,7 @@ func TestDownloadEndpoint_AllZipStreamsWhenMissing(t *testing.T) {
 }
 
 func TestDownloadEndpoint_AllZipMissingWithoutOutputsReturns404(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -839,7 +902,7 @@ func TestTaskS3Client_UsesMetadataEndpointForPresign(t *testing.T) {
 	metadataJSON, err := json.Marshal(metadata)
 	require.NoError(t, err)
 
-	client, err := taskS3Client(metadataJSON)
+	client, err := parseTaskMetadata(metadataJSON).s3Client()
 	require.NoError(t, err)
 
 	presigned, err := s3.GeneratePresignedURL(
@@ -854,52 +917,6 @@ func TestTaskS3Client_UsesMetadataEndpointForPresign(t *testing.T) {
 
 	assert.Contains(t, err.Error(), "localhost:3900")
 	assert.Contains(t, err.Error(), "/scaleodm-test/?location=")
-}
-
-func TestDetectWorkflowInfraFailure(t *testing.T) {
-	tests := []struct {
-		name     string
-		workflow *wfv1.Workflow
-		expected string
-	}{
-		{
-			name: "detect image pull backoff in node message",
-			workflow: &wfv1.Workflow{
-				Status: wfv1.WorkflowStatus{
-					Nodes: map[string]wfv1.NodeStatus{
-						"n1": {
-							Message: "Error: ImagePullBackOff",
-						},
-					},
-				},
-			},
-			expected: "Error: ImagePullBackOff",
-		},
-		{
-			name: "detect failed pull in workflow message",
-			workflow: &wfv1.Workflow{
-				Status: wfv1.WorkflowStatus{
-					Message: "failed to pull image docker.io/opendronemap/odm:3.6.2",
-				},
-			},
-			expected: "failed to pull image docker.io/opendronemap/odm:3.6.2",
-		},
-		{
-			name: "no infra failure",
-			workflow: &wfv1.Workflow{
-				Status: wfv1.WorkflowStatus{
-					Message: "workflow running",
-				},
-			},
-			expected: "",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.expected, detectWorkflowInfraFailure(tt.workflow))
-		})
-	}
 }
 
 func TestParseAllowedEndpointAllowlist(t *testing.T) {
@@ -962,14 +979,14 @@ func TestMetadataImageCount(t *testing.T) {
 	metadata := map[string]interface{}{"image_count": 42}
 	metadataJSON, err := json.Marshal(metadata)
 	require.NoError(t, err)
-	assert.Equal(t, 42, metadataImageCount(metadataJSON))
+	assert.Equal(t, 42, parseTaskMetadata(metadataJSON).ImageCount)
 }
 
 func TestMetadataImageTotalBytes(t *testing.T) {
 	metadata := map[string]interface{}{"image_total_bytes": int64(123456789)}
 	metadataJSON, err := json.Marshal(metadata)
 	require.NoError(t, err)
-	assert.Equal(t, int64(123456789), metadataImageTotalBytes(metadataJSON))
+	assert.Equal(t, int64(123456789), parseTaskMetadata(metadataJSON).ImageTotalBytes)
 }
 
 type recordingWorkflowClient struct {
@@ -1021,18 +1038,6 @@ func (c *recordingWorkflowClient) GetWorkflowLogsWithArchiveFallback(ctx context
 	return errors.New("not implemented")
 }
 
-func (c *recordingWorkflowClient) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.Workflow, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c *recordingWorkflowClient) GetWorkflowStatus(ctx context.Context, workflowName string) (wfv1.WorkflowPhase, string, error) {
-	return "", "", errors.New("not implemented")
-}
-
-func (c *recordingWorkflowClient) IsWorkflowComplete(ctx context.Context, workflowName string) (bool, error) {
-	return false, errors.New("not implemented")
-}
-
 func ensureTestImageInBucket(ctx context.Context, t *testing.T, bucket, key string) {
 	t.Helper()
 
@@ -1064,7 +1069,7 @@ func ensureTestObjectInBucket(ctx context.Context, t *testing.T, bucket, key, co
 }
 
 func TestTaskNew_MetadataCreateFailureCompensatesWorkflow(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1105,7 +1110,7 @@ func TestTaskNew_MetadataCreateFailureCompensatesWorkflow(t *testing.T) {
 }
 
 func TestTaskRestart_CreateFailureDoesNotDeleteOldWorkflowFirst(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1133,7 +1138,7 @@ func TestTaskRestart_CreateFailureDoesNotDeleteOldWorkflowFirst(t *testing.T) {
 }
 
 func TestTaskRestart_MetadataSwapFailureDeletesNewWorkflow(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1164,7 +1169,7 @@ func TestTaskRestart_MetadataSwapFailureDeletesNewWorkflow(t *testing.T) {
 }
 
 func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1203,6 +1208,97 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 	require.NotNil(t, newJob)
 }
 
+func TestTaskNew_StoresOnlyODMImageOverrides(t *testing.T) {
+	original := config.SCALEODM_ALLOWED_ODM_IMAGES
+	defer func() { config.SCALEODM_ALLOWED_ODM_IMAGES = original }()
+	config.SCALEODM_ALLOWED_ODM_IMAGES = "docker.io/webodm/odx"
+
+	ctx := context.Background()
+	bucket := "test-bucket-odm-image"
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
+	ensureTestImageInBucket(ctx, t, bucket, "images/input.jpg")
+
+	for requested, wantStored := range map[string]string{"": "", "webodm/odx:gpu": "webodm/odx:gpu"} {
+		t.Run("requested="+requested, func(t *testing.T) {
+			db, cleanup := testutil.TestDB(t)
+			defer cleanup()
+
+			wfClient := &recordingWorkflowClient{
+				createFn: func(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error) {
+					return &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "wf-odm-image"}}, nil
+				},
+			}
+			metadataStore := meta.NewStore(db)
+			_, handler := NewAPI(metadataStore, wfClient)
+
+			body, err := json.Marshal(TaskNewRequest{
+				ReadS3Path: "s3://" + bucket + "/images/",
+				S3Endpoint: "http://" + testutil.TestS3Endpoint(),
+				OdmImage:   requested,
+			})
+			require.NoError(t, err)
+			w := postTaskNew(t, handler, body)
+			require.Equal(t, http.StatusOK, w.Code, w.Body.String())
+
+			job, err := metadataStore.GetJob(ctx, "wf-odm-image")
+			require.NoError(t, err)
+			require.NotNil(t, job)
+			assert.Equal(t, wantStored, parseTaskMetadata(job.Metadata).ODMImage)
+		})
+	}
+}
+
+func TestTaskRestart_ReusesStoredODMImage(t *testing.T) {
+	original := config.SCALEODM_ALLOWED_ODM_IMAGES
+	defer func() { config.SCALEODM_ALLOWED_ODM_IMAGES = original }()
+
+	tests := []struct {
+		name       string
+		metadata   map[string]any
+		allowlist  string
+		wantStatus int
+		wantImage  string
+	}{
+		{"legacy job uses default", nil, "", http.StatusOK, config.SCALEODM_ODM_IMAGE},
+		{"stored override reused", map[string]any{metadataODMImageKey: "webodm/odx:gpu"}, "docker.io/webodm/odx", http.StatusOK, "webodm/odx:gpu"},
+		{"override no longer allowed", map[string]any{metadataODMImageKey: "webodm/odx:gpu"}, "", http.StatusBadRequest, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db, cleanup := testutil.TestDB(t)
+			defer cleanup()
+			ctx := context.Background()
+			config.SCALEODM_ALLOWED_ODM_IMAGES = tt.allowlist
+
+			metadataStore := meta.NewStore(db)
+			_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", tt.metadata)
+			require.NoError(t, err)
+
+			var submitted *workflows.ODMPipelineConfig
+			wfClient := &recordingWorkflowClient{
+				createFn: func(ctx context.Context, cfg *workflows.ODMPipelineConfig) (*wfv1.Workflow, error) {
+					submitted = cfg
+					return &wfv1.Workflow{ObjectMeta: metav1.ObjectMeta{Name: "new-wf"}}, nil
+				},
+			}
+			_, handler := NewAPI(metadataStore, wfClient)
+
+			req := httptest.NewRequest(http.MethodPost, "/task/restart", bytes.NewReader([]byte(`{"uuid":"old-wf"}`)))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			handler.ServeHTTP(w, req)
+
+			require.Equal(t, tt.wantStatus, w.Code, w.Body.String())
+			if tt.wantImage == "" {
+				assert.Nil(t, submitted)
+				return
+			}
+			require.NotNil(t, submitted)
+			assert.Equal(t, tt.wantImage, submitted.ODMImage)
+		})
+	}
+}
+
 // boundaryTaskNewRequest builds a task/new body carrying an s3:// boundary.
 func boundaryTaskNewRequest(t *testing.T, bucket, boundaryPath string) []byte {
 	t.Helper()
@@ -1224,7 +1320,7 @@ func boundaryTaskNewRequest(t *testing.T, bucket, boundaryPath string) []byte {
 
 // A missing AOI is rejected at submit, not in the download stage.
 func TestTaskNew_RejectsUnreadableBoundary(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1248,7 +1344,7 @@ func TestTaskNew_RejectsUnreadableBoundary(t *testing.T) {
 }
 
 func TestTaskNew_RejectsEmptyBoundary(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1273,7 +1369,7 @@ func TestTaskNew_RejectsEmptyBoundary(t *testing.T) {
 }
 
 func TestTaskNew_AcceptsPresentBoundary(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1307,7 +1403,7 @@ func TestTaskNew_AcceptsPresentBoundary(t *testing.T) {
 
 // The AOI can be deleted between the original submission and the restart.
 func TestTaskRestart_RejectsBoundaryDeletedSinceSubmit(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1340,7 +1436,7 @@ func TestTaskRestart_RejectsBoundaryDeletedSinceSubmit(t *testing.T) {
 
 // Omitting s3Endpoint must not leave the API and the workflow on different stores.
 func TestTaskNew_OmittedEndpointFallsBackToDeploymentDefault(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -1381,7 +1477,7 @@ func TestTaskNew_OmittedEndpointFallsBackToDeploymentDefault(t *testing.T) {
 
 // Same guarantee for the boundary preflight.
 func TestTaskNew_OmittedEndpointStillValidatesBoundary(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 

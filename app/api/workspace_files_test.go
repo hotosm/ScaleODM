@@ -72,13 +72,13 @@ func TestWorkspaceFileMetadataRoundTrip(t *testing.T) {
 		workflows.CamerasOptionName:  {Inline: `{"cam":{"projection_type":"brown"}}`},
 	}
 
-	restored := metadataWorkspaceFiles(mustJSON(t, workspaceFileMetadata(files)))
+	restored := parseTaskMetadata(mustJSON(t, workspaceFileMetadata(files))).workspaceFiles()
 
 	assert.Equal(t, files, restored)
 }
 
 func TestMetadataWorkspaceFilesReadsLegacyBoundaryKeys(t *testing.T) {
-	restored := metadataWorkspaceFiles([]byte(`{"boundary_s3_path":"s3://bucket/aoi.geojson"}`))
+	restored := parseTaskMetadata([]byte(`{"boundary_s3_path":"s3://bucket/aoi.geojson"}`)).workspaceFiles()
 
 	assert.Equal(t, "s3://bucket/aoi.geojson", restored[workflows.BoundaryOptionName].S3Path)
 	assert.NotContains(t, restored, workflows.CamerasOptionName)
@@ -89,7 +89,7 @@ func TestWorkspaceFileMetadataClearsAbsentOptions(t *testing.T) {
 
 	assert.Equal(t, "", patch[metadataBoundaryS3PathKey])
 	assert.Equal(t, "", patch[metadataCamerasJSONKey])
-	assert.Empty(t, metadataWorkspaceFiles(mustJSON(t, patch)))
+	assert.Empty(t, parseTaskMetadata(mustJSON(t, patch)).workspaceFiles())
 }
 
 func mustJSON(t *testing.T, v any) []byte {

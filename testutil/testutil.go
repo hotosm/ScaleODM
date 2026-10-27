@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/hotosm/scaleodm/app/db"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
@@ -19,6 +22,34 @@ func TestDBURL() string {
 		dbURL = "postgres://odm:odm@localhost:31101/scaleodm?sslmode=disable"
 	}
 	return dbURL
+}
+
+// TestDB connects to the test database with the schema applied. The returned
+// cleanup truncates job metadata and closes the connection.
+func TestDB(t testing.TB) (*db.DB, func()) {
+	t.Helper()
+
+	database, err := db.NewDB(TestDBURL())
+	if err != nil {
+		t.Fatalf("Failed to connect to test database: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := database.InitSchema(ctx); err != nil {
+		database.Close()
+		t.Fatalf("Failed to initialize schema: %v", err)
+	}
+
+	cleanup := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
+		database.Close()
+	}
+
+	return database, cleanup
 }
 
 // WaitForDB waits for the database to be available

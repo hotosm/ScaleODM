@@ -9,12 +9,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/hotosm/scaleodm/app/db"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/workflows"
 	"github.com/hotosm/scaleodm/testutil"
@@ -57,38 +55,6 @@ func (c *testWorkflowClient) GetWorkflowLogsWithArchiveFallback(ctx context.Cont
 	return err
 }
 
-func (c *testWorkflowClient) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.Workflow, error) {
-	return nil, errors.New("not implemented")
-}
-
-func (c *testWorkflowClient) GetWorkflowStatus(ctx context.Context, workflowName string) (wfv1.WorkflowPhase, string, error) {
-	return wfv1.WorkflowRunning, "", nil
-}
-
-func (c *testWorkflowClient) IsWorkflowComplete(ctx context.Context, workflowName string) (bool, error) {
-	return false, nil
-}
-
-func testDB(t *testing.T) (*db.DB, func()) {
-	t.Helper()
-
-	database, err := db.NewDB(testutil.TestDBURL())
-	require.NoError(t, err)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	require.NoError(t, database.InitSchema(ctx))
-
-	cleanup := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		database.Close()
-	}
-
-	return database, cleanup
-}
-
 func setupServer(t *testing.T) (*meta.Store, http.Handler) {
 	t.Helper()
 	return setupServerWithWorkflowClient(t, &testWorkflowClient{logs: "line0\nline1\nline2\nline3"})
@@ -96,7 +62,7 @@ func setupServer(t *testing.T) (*meta.Store, http.Handler) {
 
 func setupServerWithWorkflowClient(t *testing.T, workflow workflows.WorkflowClient) (*meta.Store, http.Handler) {
 	t.Helper()
-	database, cleanup := testDB(t)
+	database, cleanup := testutil.TestDB(t)
 	t.Cleanup(cleanup)
 
 	store := meta.NewStore(database)
@@ -110,7 +76,7 @@ func setupServerWithWorkflowClient(t *testing.T, workflow workflows.WorkflowClie
 
 func setupServerWithoutWorkflowClient(t *testing.T) (*meta.Store, http.Handler) {
 	t.Helper()
-	database, cleanup := testDB(t)
+	database, cleanup := testutil.TestDB(t)
 	t.Cleanup(cleanup)
 
 	store := meta.NewStore(database)
@@ -194,10 +160,11 @@ func TestTasksJSONStatusFilterIsAppliedAfterReconcile(t *testing.T) {
 	assert.Empty(t, payload.Tasks)
 	assert.Equal(t, 0, payload.Count)
 
+	// The UI shows live status but leaves persisting it to the reconciler.
 	job, err := store.GetJob(ctx, "wf-ui-reconcile-filter")
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Equal(t, "running", job.JobStatus)
+	assert.Equal(t, meta.JobQueued, job.JobStatus)
 }
 
 func TestTaskDetailEndpoints(t *testing.T) {

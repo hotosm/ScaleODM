@@ -5,31 +5,33 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/hotosm/scaleodm/app/meta"
 )
 
-func TestWorkflowToStatusCode(t *testing.T) {
+func TestPhaseStatusCode(t *testing.T) {
 	tests := []struct {
 		name     string
 		phase    wfv1.WorkflowPhase
 		expected int
 	}{
-		{"Pending", wfv1.WorkflowPending, StatusCodeQueued},
-		{"Running", wfv1.WorkflowRunning, StatusCodeRunning},
-		{"Succeeded", wfv1.WorkflowSucceeded, StatusCodeCompleted},
-		{"Failed", wfv1.WorkflowFailed, StatusCodeFailed},
-		{"Error", wfv1.WorkflowError, StatusCodeFailed},
-		{"Unknown", wfv1.WorkflowPhase("Unknown"), StatusCodeQueued},
+		{"Pending", wfv1.WorkflowPending, meta.StatusCodeQueued},
+		{"Running", wfv1.WorkflowRunning, meta.StatusCodeRunning},
+		{"Succeeded", wfv1.WorkflowSucceeded, meta.StatusCodeCompleted},
+		{"Failed", wfv1.WorkflowFailed, meta.StatusCodeFailed},
+		{"Error", wfv1.WorkflowError, meta.StatusCodeFailed},
+		{"Unknown", wfv1.WorkflowPhase("Unknown"), meta.StatusCodeQueued},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := workflowToStatusCode(tt.phase)
+			result := meta.MapArgoPhaseToJobStatus(string(tt.phase)).NodeODMCode()
 			assert.Equal(t, tt.expected, result)
 		})
 	}
 }
 
-func TestWorkflowToProgress(t *testing.T) {
+func TestPhaseProgress(t *testing.T) {
 	tests := []struct {
 		name     string
 		phase    wfv1.WorkflowPhase
@@ -45,7 +47,7 @@ func TestWorkflowToProgress(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := workflowToProgress(tt.phase)
+			result := meta.MapArgoPhaseToJobStatus(string(tt.phase)).Progress()
 			assert.Equal(t, tt.expected, result)
 		})
 	}

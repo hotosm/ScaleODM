@@ -1,6 +1,7 @@
 package workflows
 
 import (
+	"cmp"
 	"context"
 	"fmt"
 	"log"
@@ -842,202 +843,41 @@ func shouldUseWorkspacePVC(workspace WorkspaceConfig) bool {
 
 // buildODMWorkflow constructs the workflow specification
 func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
-	awsEnv := s3SecretEnvVars(cfg)
-
-	// Generate unique job ID for this workflow instance
 	jobID := "{{workflow.name}}"
-
-	// Download input files. Argo captures stdout when log archival is enabled.
-	downloadContainer := wfv1.ContainerNode{
-		Container: apiv1.Container{
-			Name:            "download",
-			Image:           cfg.RcloneImage,
-			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{downloadScript(cfg, jobID)},
-			Env:             awsEnv,
-			Resources:       containerRequirements(cfg.DownloadResources),
-			SecurityContext: workflowContainerSecurityContext(),
-		},
-	}
-
-	processFlags := append([]string{}, cfg.ODMFlags...)
-	if cfg.Boundary.IsSet() {
-		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", BoundaryOptionName, BoundaryFilePath(jobID)))
-	}
-	if cfg.Cameras.IsSet() {
-		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", CamerasOptionName, CamerasFilePath(jobID)))
-	}
-	odmContainer := wfv1.ContainerNode{
-		Container: apiv1.Container{
-			Name:            "process",
-			Image:           cfg.ODMImage,
-			Command:         []string{"/bin/bash", "-c"},
-			Resources:       containerRequirements(cfg.ProcessResources),
-			SecurityContext: workflowContainerSecurityContext(),
-			Env:             odmProcessEnvVars(),
-			VolumeMounts: []apiv1.VolumeMount{
-				{
-					Name:      "odm-model-cache",
-					MountPath: odmModelCachePath,
-				},
-			},
-			// bash -c SCRIPT $0 ARGS...: ODM flags arrive as "$@".
-			Args: append([]string{processScript(cfg, jobID), "process"}, processFlags...),
-		},
-		Dependencies: []string{"download"},
-	}
-
-	// Upload results to writeS3Path.
-	uploadContainer := wfv1.ContainerNode{
-		Container: apiv1.Container{
-			Name:            "upload",
-			Image:           cfg.RcloneImage,
-			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{uploadScript(cfg, jobID)},
-			Env:             awsEnv,
-			Resources:       containerRequirements(cfg.UploadResources),
-			SecurityContext: workflowContainerSecurityContext(),
-		},
-		Dependencies: []string{"process"},
-	}
-
-	// onExit prints a small workspace snapshot before the PVC is removed.
-	cleanupEnv := []apiv1.EnvVar{
-		{
-			Name:  "WORKFLOW_STATUS",
-			Value: "{{workflow.status}}",
-		},
-		{
-			Name:  "WORKFLOW_FAILURES",
-			Value: "{{workflow.failures}}",
-		},
-		{
-			Name:  "WORKFLOW_DURATION",
-			Value: "{{workflow.duration}}",
-		},
-		{
-			Name:  "WORKFLOW_NAME",
-			Value: "{{workflow.name}}",
-		},
-		{
-			Name:  "WORKFLOW_UID",
-			Value: "{{workflow.uid}}",
-		},
-		{
-			Name:  "WORKFLOW_CREATION_TIMESTAMP",
-			Value: "{{workflow.creationTimestamp}}",
-		},
-	}
-
-	cleanupTemplate := wfv1.Template{
-		Name: "cleanup",
-		Container: &apiv1.Container{
-			Name:            "cleanup",
-			Image:           cfg.RcloneImage,
-			Command:         []string{"/bin/sh", "-c"},
-			Args:            []string{snapshotScript()},
-			Resources:       containerRequirements(cfg.CleanupResources),
-			SecurityContext: workflowContainerSecurityContext(),
-			Env:             cleanupEnv,
-			VolumeMounts: []apiv1.VolumeMount{
-				{
-					Name:      "workspace",
-					MountPath: workspaceDir,
-				},
-			},
-		},
-	}
-
-	activeDeadline := cfg.RuntimeGuardrails.ActiveDeadlineSeconds
-	if activeDeadline <= 0 {
-		activeDeadline = 172800
-	}
-
-	ttlSuccess := cfg.RuntimeGuardrails.TTLSuccessSeconds
-	if ttlSuccess <= 0 {
-		ttlSuccess = 86400
-	}
-	ttlFailure := cfg.RuntimeGuardrails.TTLFailureSeconds
-	if ttlFailure <= 0 {
-		ttlFailure = 604800
-	}
+	useWorkspacePVC := shouldUseWorkspacePVC(cfg.Workspace)
 
 	mainTemplate := wfv1.Template{
 		Name:          "main",
 		RetryStrategy: toRetryStrategy(cfg.RuntimeGuardrails.Retry),
 		ContainerSet: &wfv1.ContainerSetTemplate{
 			VolumeMounts: []apiv1.VolumeMount{
-				{
-					Name:      "workspace",
-					MountPath: workspaceDir,
-				},
-				{
-					Name:      "tmp",
-					MountPath: "/tmp",
-				},
+				{Name: "workspace", MountPath: workspaceDir},
+				{Name: "tmp", MountPath: "/tmp"},
 			},
-			Containers: []wfv1.ContainerNode{
-				downloadContainer,
-				odmContainer,
-				uploadContainer,
-			},
+			Containers: stageContainers(cfg, jobID),
 		},
+		Volumes: scratchVolumes(),
 	}
-
-	workspaceSize := strings.TrimSpace(cfg.Workspace.Size)
-	if workspaceSize == "" {
-		workspaceSize = "30Gi"
-	}
-
-	workspaceStorageClass := strings.TrimSpace(cfg.Workspace.StorageClass)
-	workspaceAccessMode := parseWorkspaceAccessMode(cfg.Workspace.AccessMode)
-	useWorkspacePVC := shouldUseWorkspacePVC(cfg.Workspace)
-
-	tmpVolumeSizeLimit := resource.MustParse("20Gi")
-	tmpVolume := apiv1.Volume{
-		Name: "tmp",
-		VolumeSource: apiv1.VolumeSource{
-			EmptyDir: &apiv1.EmptyDirVolumeSource{
-				SizeLimit: &tmpVolumeSizeLimit,
-			},
-		},
-	}
-	modelCacheSizeLimit := resource.MustParse("2Gi")
-	modelCacheVolume := apiv1.Volume{
-		Name: "odm-model-cache",
-		VolumeSource: apiv1.VolumeSource{
-			EmptyDir: &apiv1.EmptyDirVolumeSource{
-				SizeLimit: &modelCacheSizeLimit,
-			},
-		},
-	}
-
-	mainTemplate.Volumes = []apiv1.Volume{tmpVolume, modelCacheVolume}
-	// Cleanup container only reads the workspace - no /tmp scratch needed
-	// since it doesn't run rclone or any tool that writes outside the mount.
-	cleanupTemplate.Volumes = nil
-
+	cleanup := cleanupTemplate(cfg)
 	if !useWorkspacePVC {
 		emptyDirWorkspace := apiv1.Volume{
-			Name: "workspace",
-			VolumeSource: apiv1.VolumeSource{
-				EmptyDir: &apiv1.EmptyDirVolumeSource{},
-			},
+			Name:         "workspace",
+			VolumeSource: apiv1.VolumeSource{EmptyDir: &apiv1.EmptyDirVolumeSource{}},
 		}
 		mainTemplate.Volumes = append(mainTemplate.Volumes, emptyDirWorkspace)
-		cleanupTemplate.Volumes = append(cleanupTemplate.Volumes, emptyDirWorkspace)
+		cleanup.Volumes = append(cleanup.Volumes, emptyDirWorkspace)
 	}
 
+	activeDeadline := positiveOr(cfg.RuntimeGuardrails.ActiveDeadlineSeconds, 172800)
+	ttlSuccess := positiveOr(cfg.RuntimeGuardrails.TTLSuccessSeconds, 86400)
+	ttlFailure := positiveOr(cfg.RuntimeGuardrails.TTLFailureSeconds, 604800)
 	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
 
 	// Advertise limit - request as a rough guide (not the real LimitedSwap grant,
 	// which is proportional); see docs/swap.md.
-	annotations := map[string]string{}
+	var annotations map[string]string
 	if headroom := burstHeadroomGiB(cfg.ProcessResources); headroom > 0 {
-		annotations["scaleodm.hotosm.org/burst-headroom-gib"] = fmt.Sprintf("%d", headroom)
-	}
-	if len(annotations) == 0 {
-		annotations = nil
+		annotations = map[string]string{"scaleodm.hotosm.org/burst-headroom-gib": fmt.Sprintf("%d", headroom)}
 	}
 
 	wf := &wfv1.Workflow{
@@ -1057,7 +897,7 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 				SecondsAfterFailure: &ttlFailure,
 			},
 			PodGC:        toPodGC(cfg.RuntimeGuardrails.PodGCStrategy, cfg.RuntimeGuardrails.PodGCDeleteDelaySecond),
-			Templates:    []wfv1.Template{mainTemplate, cleanupTemplate},
+			Templates:    []wfv1.Template{mainTemplate, cleanup},
 			NodeSelector: nodeSelector,
 			Tolerations:  tolerations,
 		},
@@ -1072,27 +912,125 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	}
 
 	if useWorkspacePVC {
-		workspaceClaim := apiv1.PersistentVolumeClaim{
-			ObjectMeta: metav1.ObjectMeta{
-				Name: "workspace",
-			},
-			Spec: apiv1.PersistentVolumeClaimSpec{
-				AccessModes: []apiv1.PersistentVolumeAccessMode{workspaceAccessMode},
-				Resources: apiv1.VolumeResourceRequirements{
-					Requests: apiv1.ResourceList{
-						apiv1.ResourceStorage: resource.MustParse(workspaceSize),
-					},
-				},
-			},
-		}
-		if workspaceStorageClass != "" {
-			workspaceClaim.Spec.StorageClassName = &workspaceStorageClass
-		}
-		wf.Spec.VolumeClaimTemplates = []apiv1.PersistentVolumeClaim{workspaceClaim}
-
+		wf.Spec.VolumeClaimTemplates = []apiv1.PersistentVolumeClaim{workspaceClaim(cfg.Workspace)}
 		// Delete the scratch PVC after successful or failed workflows.
 		wf.Spec.VolumeClaimGC = &wfv1.VolumeClaimGC{Strategy: wfv1.VolumeClaimGCOnCompletion}
 	}
-
 	return wf
+}
+
+func positiveOr[T int32 | int64](value, fallback T) T {
+	if value <= 0 {
+		return fallback
+	}
+	return value
+}
+
+// stageContainers runs download, process and upload in order on one pod.
+// Argo captures each container's stdout when log archival is enabled.
+func stageContainers(cfg *ODMPipelineConfig, jobID string) []wfv1.ContainerNode {
+	awsEnv := s3SecretEnvVars(cfg)
+
+	processFlags := append([]string{}, cfg.ODMFlags...)
+	if cfg.Boundary.IsSet() {
+		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", BoundaryOptionName, BoundaryFilePath(jobID)))
+	}
+	if cfg.Cameras.IsSet() {
+		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", CamerasOptionName, CamerasFilePath(jobID)))
+	}
+
+	return []wfv1.ContainerNode{
+		{
+			Container: apiv1.Container{
+				Name:            "download",
+				Image:           cfg.RcloneImage,
+				Command:         []string{"/bin/sh", "-c"},
+				Args:            []string{downloadScript(cfg, jobID)},
+				Env:             awsEnv,
+				Resources:       containerRequirements(cfg.DownloadResources),
+				SecurityContext: workflowContainerSecurityContext(),
+			},
+		},
+		{
+			Container: apiv1.Container{
+				Name:            "process",
+				Image:           cfg.ODMImage,
+				Command:         []string{"/bin/bash", "-c"},
+				Resources:       containerRequirements(cfg.ProcessResources),
+				SecurityContext: workflowContainerSecurityContext(),
+				Env:             odmProcessEnvVars(),
+				VolumeMounts:    []apiv1.VolumeMount{{Name: "odm-model-cache", MountPath: odmModelCachePath}},
+				// bash -c SCRIPT $0 ARGS...: ODM flags arrive as "$@".
+				Args: append([]string{processScript(cfg, jobID), "process"}, processFlags...),
+			},
+			Dependencies: []string{"download"},
+		},
+		{
+			Container: apiv1.Container{
+				Name:            "upload",
+				Image:           cfg.RcloneImage,
+				Command:         []string{"/bin/sh", "-c"},
+				Args:            []string{uploadScript(cfg, jobID)},
+				Env:             awsEnv,
+				Resources:       containerRequirements(cfg.UploadResources),
+				SecurityContext: workflowContainerSecurityContext(),
+			},
+			Dependencies: []string{"process"},
+		},
+	}
+}
+
+// cleanupTemplate runs onExit to print a workspace snapshot before the PVC is removed.
+// It only reads the workspace, so it needs no /tmp scratch volume.
+func cleanupTemplate(cfg *ODMPipelineConfig) wfv1.Template {
+	env := []apiv1.EnvVar{
+		{Name: "WORKFLOW_STATUS", Value: "{{workflow.status}}"},
+		{Name: "WORKFLOW_FAILURES", Value: "{{workflow.failures}}"},
+		{Name: "WORKFLOW_DURATION", Value: "{{workflow.duration}}"},
+		{Name: "WORKFLOW_NAME", Value: "{{workflow.name}}"},
+		{Name: "WORKFLOW_UID", Value: "{{workflow.uid}}"},
+		{Name: "WORKFLOW_CREATION_TIMESTAMP", Value: "{{workflow.creationTimestamp}}"},
+	}
+
+	return wfv1.Template{
+		Name: "cleanup",
+		Container: &apiv1.Container{
+			Name:            "cleanup",
+			Image:           cfg.RcloneImage,
+			Command:         []string{"/bin/sh", "-c"},
+			Args:            []string{snapshotScript()},
+			Resources:       containerRequirements(cfg.CleanupResources),
+			SecurityContext: workflowContainerSecurityContext(),
+			Env:             env,
+			VolumeMounts:    []apiv1.VolumeMount{{Name: "workspace", MountPath: workspaceDir}},
+		},
+	}
+}
+
+func scratchVolumes() []apiv1.Volume {
+	emptyDir := func(name, sizeLimit string) apiv1.Volume {
+		limit := resource.MustParse(sizeLimit)
+		return apiv1.Volume{
+			Name:         name,
+			VolumeSource: apiv1.VolumeSource{EmptyDir: &apiv1.EmptyDirVolumeSource{SizeLimit: &limit}},
+		}
+	}
+	return []apiv1.Volume{emptyDir("tmp", "20Gi"), emptyDir("odm-model-cache", "2Gi")}
+}
+
+func workspaceClaim(workspace WorkspaceConfig) apiv1.PersistentVolumeClaim {
+	size := cmp.Or(strings.TrimSpace(workspace.Size), "30Gi")
+	claim := apiv1.PersistentVolumeClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "workspace"},
+		Spec: apiv1.PersistentVolumeClaimSpec{
+			AccessModes: []apiv1.PersistentVolumeAccessMode{parseWorkspaceAccessMode(workspace.AccessMode)},
+			Resources: apiv1.VolumeResourceRequirements{
+				Requests: apiv1.ResourceList{apiv1.ResourceStorage: resource.MustParse(size)},
+			},
+		},
+	}
+	if storageClass := strings.TrimSpace(workspace.StorageClass); storageClass != "" {
+		claim.Spec.StorageClassName = &storageClass
+	}
+	return claim
 }

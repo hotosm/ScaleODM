@@ -53,7 +53,7 @@ func postTaskNew(t *testing.T, handler http.Handler, body []byte) *httptest.Resp
 }
 
 func TestTaskNew_AcceptsInlineCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -80,7 +80,7 @@ func TestTaskNew_AcceptsInlineCameras(t *testing.T) {
 }
 
 func TestTaskNew_AcceptsPresentS3Cameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -107,7 +107,7 @@ func TestTaskNew_AcceptsPresentS3Cameras(t *testing.T) {
 }
 
 func TestTaskNew_RejectsUnreadableCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -126,7 +126,7 @@ func TestTaskNew_RejectsUnreadableCameras(t *testing.T) {
 }
 
 func TestTaskNew_RejectsInvalidS3CamerasContent(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -146,7 +146,7 @@ func TestTaskNew_RejectsInvalidS3CamerasContent(t *testing.T) {
 }
 
 func TestTaskNew_RejectsInvalidInlineCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -165,7 +165,7 @@ func TestTaskNew_RejectsInvalidInlineCameras(t *testing.T) {
 }
 
 func TestTaskRestart_ReplaysStoredCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -203,7 +203,7 @@ func TestTaskRestart_ReplaysStoredCameras(t *testing.T) {
 
 // New options replace stored options; omitting cameras clears calibration.
 func TestTaskRestart_NewOptionsOverrideStoredCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 
@@ -242,11 +242,11 @@ func TestTaskRestart_NewOptionsOverrideStoredCameras(t *testing.T) {
 	job, err := metadataStore.GetJob(ctx, "new-wf")
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Empty(t, metadataWorkspaceFiles(job.Metadata))
+	assert.Empty(t, parseTaskMetadata(job.Metadata).workspaceFiles())
 }
 
 func TestTaskInfo_ReportsStoredCameras(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 	ctx := context.Background()
 

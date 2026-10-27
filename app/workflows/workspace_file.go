@@ -7,8 +7,8 @@ import (
 	"strings"
 )
 
-// shellSafeSourcePattern applies the API path rules to S3 object references.
-var shellSafeSourcePattern = regexp.MustCompile(`^[a-zA-Z0-9\-_./=:@]+$`)
+// ShellSafePattern matches values safe to embed in workflow shell scripts.
+var ShellSafePattern = regexp.MustCompile(`^[a-zA-Z0-9\-_./=:@]+$`)
 
 // FileSource identifies an ODM input document.
 type FileSource struct {
@@ -96,7 +96,7 @@ func validateSourceS3Path(value, name string) error {
 		return fmt.Errorf("%s s3 path must not contain '..'", name)
 	}
 	// The path is embedded in the rclone shell script.
-	if !shellSafeSourcePattern.MatchString(value) {
+	if !ShellSafePattern.MatchString(value) {
 		return fmt.Errorf("%s s3 path contains invalid characters", name)
 	}
 	return nil

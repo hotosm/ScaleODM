@@ -10,7 +10,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/hotosm/scaleodm/app/db"
 	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/workflows"
 	"github.com/hotosm/scaleodm/testutil"
@@ -18,39 +17,13 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func testDB(t *testing.T) (*db.DB, func()) {
-	t.Helper()
-
-	database, err := db.NewDB(testutil.TestDBURL())
-	if err != nil {
-		t.Fatalf("Failed to connect to test database: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := database.InitSchema(ctx); err != nil {
-		database.Close()
-		t.Fatalf("Failed to initialize schema: %v", err)
-	}
-
-	cleanup := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_, _ = database.Pool.Exec(ctx, "TRUNCATE TABLE scaleodm_job_metadata CASCADE")
-		database.Close()
-	}
-
-	return database, cleanup
-}
-
 // E2E tests require:
 // - Database running (via docker compose)
 // - Kubernetes cluster with Argo Workflows installed
 // - S3 endpoint available (MinIO via docker compose)
 
 func TestE2E_HealthCheck(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -61,7 +34,7 @@ func TestE2E_HealthCheck(t *testing.T) {
 }
 
 func TestE2E_CreateAndListJobs(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := meta.NewStore(db)
@@ -111,7 +84,7 @@ func TestE2E_WorkflowClient_WithK8s(t *testing.T) {
 }
 
 func TestE2E_JobLifecycle(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := meta.NewStore(db)
@@ -134,7 +107,7 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should be created successfully")
 	// New jobs default to 'queued' in the metadata store.
-	assert.Equal(t, "queued", job.JobStatus)
+	assert.Equal(t, meta.JobQueued, job.JobStatus)
 
 	// Retry the read to absorb any replication/timing lag before the update.
 	var retrievedJob *meta.JobMetadata
@@ -157,7 +130,7 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist after status update")
-	assert.Equal(t, "running", job.JobStatus)
+	assert.Equal(t, meta.JobRunning, job.JobStatus)
 	assert.NotNil(t, job.StartedAt)
 
 	err = store.UpdateJobStatus(ctx, workflowName, "completed", nil)
@@ -166,7 +139,7 @@ func TestE2E_JobLifecycle(t *testing.T) {
 	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job, "Job should exist after status update")
-	assert.Equal(t, "completed", job.JobStatus)
+	assert.Equal(t, meta.JobCompleted, job.JobStatus)
 	assert.NotNil(t, job.CompletedAt)
 
 	err = store.DeleteJob(ctx, workflowName)

@@ -12,13 +12,13 @@ import (
 	"github.com/hotosm/scaleodm/app/meta"
 )
 
-const (
-	statusCodeQueued    = 10
-	statusCodeRunning   = 20
-	statusCodeFailed    = 30
-	statusCodeCompleted = 40
-	statusCodeCanceled  = 50
-)
+var statusLabels = map[int]string{
+	meta.StatusCodeQueued:    "QUEUED",
+	meta.StatusCodeRunning:   "RUNNING",
+	meta.StatusCodeFailed:    "FAILED",
+	meta.StatusCodeCompleted: "COMPLETED",
+	meta.StatusCodeCanceled:  "CANCELED",
+}
 
 type taskSummary struct {
 	UUID         string `json:"uuid"`
@@ -121,15 +121,15 @@ func getImageCount(metadata []byte) int {
 }
 
 func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {
-	statusCode, statusLabel, progress := mapStatus(job.JobStatus)
+	statusCode := job.JobStatus.NodeODMCode()
 
 	summary := taskSummary{
 		UUID:         job.WorkflowName,
 		ProjectID:    job.ODMProjectID,
-		Status:       strings.ToLower(strings.TrimSpace(job.JobStatus)),
-		StatusLabel:  statusLabel,
+		Status:       string(job.JobStatus),
+		StatusLabel:  statusLabels[statusCode],
 		StatusCode:   statusCode,
-		Progress:     progress,
+		Progress:     job.JobStatus.Progress(),
 		CreatedAt:    formatTime(job.CreatedAt),
 		CreatedAtAgo: formatAge(now.Sub(job.CreatedAt)),
 		ImageCount:   getImageCount(job.Metadata),
@@ -165,23 +165,6 @@ func toTaskDetail(job *meta.JobMetadata, now time.Time) taskDetail {
 		detail.Error = *job.ErrorMessage
 	}
 	return detail
-}
-
-func mapStatus(status string) (code int, label string, progress int) {
-	switch strings.ToLower(strings.TrimSpace(status)) {
-	case "queued", "claimed":
-		return statusCodeQueued, "QUEUED", 0
-	case "running":
-		return statusCodeRunning, "RUNNING", 50
-	case "completed":
-		return statusCodeCompleted, "COMPLETED", 100
-	case "failed":
-		return statusCodeFailed, "FAILED", 0
-	case "canceled":
-		return statusCodeCanceled, "CANCELED", 0
-	default:
-		return statusCodeQueued, "QUEUED", 0
-	}
 }
 
 func formatTime(t time.Time) string {
@@ -270,8 +253,8 @@ func taskDownloadURL(uuid, alias string) string {
 // completedAssets returns the download links for a finished task, or nil (JSON
 // null) while it is still processing. The API validates each link at download
 // time, so an output the run didn't produce simply 404s - no S3 probing here.
-func completedAssets(uuid, status, writeS3Path string) []taskAsset {
-	if strings.TrimSpace(writeS3Path) == "" || strings.ToLower(strings.TrimSpace(status)) != "completed" {
+func completedAssets(uuid string, status meta.JobStatus, writeS3Path string) []taskAsset {
+	if strings.TrimSpace(writeS3Path) == "" || status != meta.JobCompleted {
 		return nil
 	}
 	assets := make([]taskAsset, 0, len(primaryAssetDefs))

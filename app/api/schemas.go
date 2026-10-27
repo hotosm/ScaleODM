@@ -19,9 +19,3 @@ type ReadinessResponse struct {
 		Checks    map[string]string `json:"checks,omitempty"`
 	}
 }
-
-type MessageResponse struct {
-	Body struct {
-		Message string `json:"message"`
-	}
-}

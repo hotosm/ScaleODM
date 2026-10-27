@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/testutil"
 )
 
 func TestFormCompat_RewritesFormBodyToJSON(t *testing.T) {
@@ -60,7 +61,7 @@ func TestFormCompat_LeavesOtherRequestsUntouched(t *testing.T) {
 }
 
 func TestTaskCancel_AcceptsPyODMFormRequest(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	wfClient := &recordingWorkflowClient{

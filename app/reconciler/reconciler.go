@@ -3,23 +3,28 @@
 //
 // # Problem this solves
 //
-// ScaleODM's DB status is only updated on-demand when GET /task/{uuid}/info is
-// polled. Argo has its own TTL-based garbage collection for completed workflows
-// (SCALEODM_WORKFLOW_TTL_SUCCESS_SECONDS, default 24 h, and
-// SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS, default 7 days). If the TTL expires
-// before the caller polls, Argo deletes the workflow record while the DB row
-// still says "running". The existing missing-workflow grace-period logic then
-// marks the job as "failed" - even though ODM actually succeeded and the
-// orthophoto is already in S3.
+// The reconciler is the single background writer of job status, and GET
+// /task/{uuid}/info only reads. Argo has its own TTL-based garbage collection
+// for completed workflows (SCALEODM_WORKFLOW_TTL_SUCCESS_SECONDS, default
+// 24 h, and SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS, default 7 days). Without a
+// sync before that TTL, the workflow record disappears while the DB row still
+// says "running", and the job is later failed as missing even though ODM
+// succeeded and the orthophoto is already in S3.
 //
 // # How it works
 //
 // Every N seconds (default 30, see SCALEODM_RECONCILER_INTERVAL_SECONDS) the
 // reconciler:
-//  1. Queries the DB for non-terminal jobs created within the last 7 days.
+//  1. Queries the DB for all non-terminal jobs.
 //  2. For each, fetches the live Argo workflow phase from the Kubernetes API.
 //  3. If the live phase is a forward transition from the DB status, writes the
 //     updated status immediately so subsequent polls get the correct answer.
+//     Pod infra failures (image pull, missing secret) are not saved, since Argo
+//     can still recover. GET /task/{uuid}/info reports them live instead.
+//  4. If the workflow is missing for longer than
+//     SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS, marks the job failed.
+//
+// Terminal transitions notify the job's webhook, if it has one.
 //
 // # Interval choice (30 s)
 //
@@ -30,15 +35,6 @@
 // per active (non-terminal) job. When the system is idle the DB query returns
 // zero rows and no Argo calls are made at all - the goroutine simply sleeps
 // until the next tick.
-//
-// # 7-day lookback window
-//
-// Non-terminal jobs older than 7 days are excluded. 7 days matches
-// SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS (the longer of the two default Argo
-// TTLs), so any job that old is guaranteed to have its workflow GC'd already.
-// Filtering at the database level (rather than fetching all rows and discarding
-// in Go) keeps the query cost proportional to the number of genuinely active
-// jobs rather than to the all-time history of the table.
 package reconciler
 
 import (
@@ -54,35 +50,53 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
-// activeLookback is how far back we scan for non-terminal jobs. It matches
-// SCALEODM_WORKFLOW_TTL_FAILURE_SECONDS (7 days) so any older job is guaranteed
-// to have its Argo workflow already GC'd and needs no reconciliation.
-const activeLookback = 7 * 24 * time.Hour
+const missingWorkflowMessage = "Workflow missing in Argo beyond grace window; marking task as failed"
 
-func isNotFound(err error) bool {
-	return k8serrors.IsNotFound(err)
+type reconciler struct {
+	store    *meta.Store
+	wfClient workflows.WorkflowClient
+	// missingGrace is how long a workflow may be missing before its job fails.
+	missingGrace time.Duration
+}
+
+type syncOutcome int
+
+const (
+	outcomeSkipped syncOutcome = iota
+	outcomeSynced
+	outcomeError
+)
+
+type jobMetadata struct {
+	Webhook          string `json:"webhook"`
+	MissingFirstSeen string `json:"workflow_missing_first_seen_at"`
 }
 
 // Start spawns a background goroutine that calls syncActiveJobs on the given
 // interval. It is a no-op when wfClient is nil (e.g. SCALEODM_DOCS_ONLY=true).
 // The goroutine exits when ctx is cancelled.
-func Start(ctx context.Context, store *meta.Store, wfClient workflows.WorkflowClient, intervalSeconds int) {
+func Start(ctx context.Context, store *meta.Store, wfClient workflows.WorkflowClient, intervalSeconds, missingGraceSeconds int) {
 	if wfClient == nil {
 		return
 	}
 	if intervalSeconds <= 0 {
 		intervalSeconds = 30
 	}
-	go run(ctx, store, wfClient, time.Duration(intervalSeconds)*time.Second)
+	if missingGraceSeconds <= 0 {
+		missingGraceSeconds = 300
+	}
+	r := &reconciler{store: store, wfClient: wfClient, missingGrace: time.Duration(missingGraceSeconds) * time.Second}
+	go r.run(ctx, time.Duration(intervalSeconds)*time.Second)
 }
 
-func run(ctx context.Context, store *meta.Store, wfClient workflows.WorkflowClient, interval time.Duration) {
+func (r *reconciler) run(ctx context.Context, interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	log.Printf("reconciler: started (interval=%s, lookback=%s)", interval, activeLookback)
+	log.Printf("reconciler: started (interval=%s, missing_grace=%s)", interval, r.missingGrace)
 
 	for {
 		select {
@@ -90,114 +104,117 @@ func run(ctx context.Context, store *meta.Store, wfClient workflows.WorkflowClie
 			log.Printf("reconciler: stopped")
 			return
 		case <-ticker.C:
-			syncActiveJobs(ctx, store, wfClient)
+			r.syncActiveJobs(ctx)
 		}
 	}
 }
 
-func syncActiveJobs(ctx context.Context, store *meta.Store, wfClient workflows.WorkflowClient) {
-	// Only fetch jobs that are non-terminal and within the lookback window.
-	// Filtering at the DB level keeps the scan O(active jobs) not O(all history).
-	since := time.Now().Add(-activeLookback)
-	jobs, err := store.ListActiveJobs(ctx, since)
+func (r *reconciler) syncActiveJobs(ctx context.Context) {
+	jobs, err := r.store.ListActiveJobs(ctx)
 	if err != nil {
 		log.Printf("reconciler: failed to list active jobs: %v", err)
 		return
 	}
 
-	if len(jobs) == 0 {
-		return
-	}
-
-	synced, skipped, errors := 0, 0, 0
+	counts := map[syncOutcome]int{}
 	for _, job := range jobs {
-		wf, wfErr := wfClient.GetWorkflow(ctx, job.WorkflowName)
-		if wfErr != nil {
-			if isNotFound(wfErr) {
-				// Workflow deleted by Argo GC; the missing-workflow grace-period
-				// logic inside GET /task/{uuid}/info handles this case.
-				skipped++
-				continue
-			}
-			log.Printf("reconciler: failed to get workflow %q: %v", job.WorkflowName, wfErr)
-			errors++
-			continue
-		}
+		counts[r.syncJob(ctx, job)]++
+	}
+	if counts[outcomeSynced] > 0 || counts[outcomeError] > 0 {
+		log.Printf("reconciler: cycle done synced=%d skipped=%d errors=%d total_checked=%d",
+			counts[outcomeSynced], counts[outcomeSkipped], counts[outcomeError], len(jobs))
+	}
+}
 
-		liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
-		if liveStatus == job.JobStatus {
-			skipped++
-			continue
-		}
+func (r *reconciler) syncJob(ctx context.Context, job *meta.JobMetadata) syncOutcome {
+	var metadata jobMetadata
+	_ = json.Unmarshal(job.Metadata, &metadata) // absent or invalid metadata reads as empty
 
-		// Only advance forward through the state machine; never regress.
-		if !meta.IsForwardJobStatusTransition(job.JobStatus, liveStatus) {
-			skipped++
-			continue
-		}
+	wf, err := r.wfClient.GetWorkflow(ctx, job.WorkflowName)
+	if k8serrors.IsNotFound(err) {
+		return r.failMissingWorkflow(ctx, job, metadata)
+	}
+	if err != nil {
+		log.Printf("reconciler: failed to get workflow %q: %v", job.WorkflowName, err)
+		return outcomeError
+	}
 
-		var errMsg *string
-		var failureDetails json.RawMessage
-		if wf.Status.Phase == wfv1.WorkflowFailed || wf.Status.Phase == wfv1.WorkflowError {
-			if wf.Status.Message != "" {
-				msg := wf.Status.Message
-				errMsg = &msg
-			}
-			// Persist per-failed-node detail so diagnosis survives Argo CR
-			// TTL and log archive expiry. error_message is just the top-level
-			// summary; failure_details captures which pod, which exit code.
-			if details, marshalErr := buildFailureDetails(wf); marshalErr != nil {
-				log.Printf("reconciler: failed to marshal failure details for %q: %v", job.WorkflowName, marshalErr)
-			} else {
-				failureDetails = details
-			}
-		}
-		var updateErr error
-		if failureDetails != nil {
-			updateErr = store.UpdateJobStatusWithFailureDetails(ctx, job.WorkflowName, liveStatus, errMsg, failureDetails)
-		} else {
-			updateErr = store.UpdateJobStatus(ctx, job.WorkflowName, liveStatus, errMsg)
-		}
-		if updateErr != nil {
-			log.Printf("reconciler: failed to update job %q %s->%s: %v", job.WorkflowName, job.JobStatus, liveStatus, updateErr)
-			errors++
-		} else {
-			log.Printf("reconciler: synced job %q %s->%s", job.WorkflowName, job.JobStatus, liveStatus)
-			synced++
-			// Notify the caller's webhook, terminal transitions only.
-			if meta.IsTerminalJobStatus(liveStatus) {
-				if hookURL := webhookURLFromMetadata(job.Metadata); hookURL != "" {
-					notifyWebhook(hookURL, job.WorkflowName, meta.NodeODMStatusCode(liveStatus))
-				}
-			}
+	if metadata.MissingFirstSeen != "" {
+		if err := r.store.MergeJobMetadata(ctx, job.WorkflowName, map[string]interface{}{meta.MetadataWorkflowMissingFirstSeenKey: nil}); err != nil {
+			log.Printf("reconciler: failed clearing missing-workflow marker for %q: %v", job.WorkflowName, err)
 		}
 	}
 
-	if synced > 0 || errors > 0 {
-		log.Printf("reconciler: cycle done synced=%d skipped=%d errors=%d total_checked=%d", synced, skipped, errors, len(jobs))
+	liveStatus := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
+	var errMsg *string
+	var failureDetails json.RawMessage
+	if wf.Status.Phase == wfv1.WorkflowFailed || wf.Status.Phase == wfv1.WorkflowError {
+		if wf.Status.Message != "" {
+			msg := wf.Status.Message
+			errMsg = &msg
+		}
+		// Persist per-failed-node detail so diagnosis survives Argo CR
+		// TTL and log archive expiry. error_message is just the top-level
+		// summary; failure_details captures which pod, which exit code.
+		if details, marshalErr := buildFailureDetails(wf); marshalErr != nil {
+			log.Printf("reconciler: failed to marshal failure details for %q: %v", job.WorkflowName, marshalErr)
+		} else {
+			failureDetails = details
+		}
 	}
+
+	// Only advance forward through the state machine; never regress.
+	if !job.JobStatus.CanAdvanceTo(liveStatus) {
+		return outcomeSkipped
+	}
+	return r.updateStatus(ctx, job, metadata, liveStatus, errMsg, failureDetails)
+}
+
+// failMissingWorkflow fails a job only after the grace window, which covers
+// gaps where a workflow is legitimately absent, such as mid-restart.
+func (r *reconciler) failMissingWorkflow(ctx context.Context, job *meta.JobMetadata, metadata jobMetadata) syncOutcome {
+	now := time.Now().UTC()
+	firstSeen, err := time.Parse(time.RFC3339, metadata.MissingFirstSeen)
+	if err != nil {
+		patch := map[string]interface{}{meta.MetadataWorkflowMissingFirstSeenKey: now.Format(time.RFC3339)}
+		if err := r.store.MergeJobMetadata(ctx, job.WorkflowName, patch); err != nil {
+			log.Printf("reconciler: failed to record missing workflow for %q: %v", job.WorkflowName, err)
+			return outcomeError
+		}
+		return outcomeSkipped
+	}
+	if now.Sub(firstSeen) < r.missingGrace {
+		return outcomeSkipped
+	}
+
+	observability.RecordWorkflowReconciliation("missing_workflow_to_failed", "missing_workflow_grace_expired")
+	log.Printf("reconciliation transition uuid=%s source=metadata transition=missing_workflow_to_failed reason=missing_workflow_grace_expired", job.WorkflowName)
+	msg := missingWorkflowMessage
+	outcome := r.updateStatus(ctx, job, metadata, meta.JobFailed, &msg, nil)
+	if outcome == outcomeSynced {
+		_ = r.store.MergeJobMetadata(ctx, job.WorkflowName, map[string]interface{}{meta.MetadataWorkflowMissingFirstSeenKey: nil})
+	}
+	return outcome
+}
+
+// updateStatus persists a transition and notifies the caller's webhook on
+// terminal ones. nil failureDetails leaves the stored column unchanged.
+func (r *reconciler) updateStatus(ctx context.Context, job *meta.JobMetadata, metadata jobMetadata, status meta.JobStatus, errMsg *string, failureDetails json.RawMessage) syncOutcome {
+	if err := r.store.UpdateJobStatusWithFailureDetails(ctx, job.WorkflowName, status, errMsg, failureDetails); err != nil {
+		log.Printf("reconciler: failed to update job %q %s->%s: %v", job.WorkflowName, job.JobStatus, status, err)
+		return outcomeError
+	}
+	log.Printf("reconciler: synced job %q %s->%s", job.WorkflowName, job.JobStatus, status)
+	if status.IsTerminal() && metadata.Webhook != "" {
+		notifyWebhook(metadata.Webhook, job.WorkflowName, status.NodeODMCode())
+	}
+	return outcomeSynced
 }
 
 const (
 	webhookTimeout    = 5 * time.Second
 	webhookMaxRetries = 3
 )
-
-// webhookURLFromMetadata extracts the caller's webhook URL from job metadata,
-// or "" when none was set.
-func webhookURLFromMetadata(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
-	}
-	var m map[string]interface{}
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return ""
-	}
-	if v, ok := m[meta.MetadataWebhookKey].(string); ok {
-		return v
-	}
-	return ""
-}
 
 // notifyWebhook POSTs {uuid, statusCode} to the caller's webhook, best-effort.
 // Fire-and-forget in a goroutine so a slow or unreachable receiver never stalls

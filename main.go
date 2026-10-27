@@ -54,25 +54,7 @@ func main() {
 	config.ValidateEnv()
 	log.Printf("Environment validation complete (took %v)", time.Since(startTime))
 
-	obsShutdown := func(context.Context) error { return nil }
-	obsConfig := observability.Config{
-		Enabled:          config.SCALEODM_OBSERVABILITY_ENABLED,
-		ServiceName:      config.SCALEODM_OBSERVABILITY_SERVICE_NAME,
-		ServiceVersion:   config.SCALEODM_OBSERVABILITY_SERVICE_VERSION,
-		OTLPEndpoint:     config.SCALEODM_OBSERVABILITY_OTLP_ENDPOINT,
-		OTLPInsecure:     config.SCALEODM_OBSERVABILITY_OTLP_INSECURE,
-		MetricsEnabled:   config.SCALEODM_OBSERVABILITY_METRICS_ENABLED,
-		TracesEnabled:    config.SCALEODM_OBSERVABILITY_TRACES_ENABLED,
-		TraceSampleRatio: config.SCALEODM_OBSERVABILITY_TRACE_SAMPLE_RATIO,
-	}
-	if shutdownFn, err := observability.Init(ctx, obsConfig); err != nil {
-		log.Printf("observability init failed, continuing without telemetry: %v", err)
-	} else {
-		obsShutdown = shutdownFn
-		if config.SCALEODM_OBSERVABILITY_ENABLED {
-			log.Printf("observability enabled service=%s version=%s traces=%t metrics=%t endpoint=%q", obsConfig.ServiceName, obsConfig.ServiceVersion, obsConfig.TracesEnabled, obsConfig.MetricsEnabled, obsConfig.OTLPEndpoint)
-		}
-	}
+	obsShutdown := initObservability(ctx)
 
 	// Database connection
 	log.Println("Connecting to database...")
@@ -111,7 +93,7 @@ func main() {
 	}
 
 	// Start background reconciler. Does not run when wfClient is nil (docs-only mode).
-	reconciler.Start(ctx, metadataStore, wfClient, config.SCALEODM_RECONCILER_INTERVAL_SECONDS)
+	reconciler.Start(ctx, metadataStore, wfClient, config.SCALEODM_RECONCILER_INTERVAL_SECONDS, config.SCALEODM_WORKFLOW_MISSING_GRACE_SECONDS)
 
 	// === HUMA CLI ===
 	// Channel to communicate the *http.Server back from the OnStart hook so
@@ -119,35 +101,8 @@ func main() {
 	serverCh := make(chan *http.Server, 1)
 
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {
-		apiObj, handler := api.NewAPI(metadataStore, wfClient)
-		_ = apiObj
-		handler = observability.WrapHTTPHandler(handler)
-
-		readHeaderTimeout := time.Duration(config.SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS) * time.Second
-		if readHeaderTimeout <= 0 {
-			readHeaderTimeout = 10 * time.Second
-		}
-		readTimeout := time.Duration(config.SCALEODM_SERVER_READ_TIMEOUT_SECONDS) * time.Second
-		if readTimeout <= 0 {
-			readTimeout = 30 * time.Second
-		}
-		writeTimeout := time.Duration(config.SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS) * time.Second
-		if writeTimeout <= 0 {
-			writeTimeout = 300 * time.Second
-		}
-		idleTimeout := time.Duration(config.SCALEODM_SERVER_IDLE_TIMEOUT_SECONDS) * time.Second
-		if idleTimeout <= 0 {
-			idleTimeout = 120 * time.Second
-		}
-
-		srv := &http.Server{
-			Addr:              fmt.Sprintf(":%d", options.Port),
-			Handler:           handler,
-			ReadHeaderTimeout: readHeaderTimeout,
-			ReadTimeout:       readTimeout,
-			WriteTimeout:      writeTimeout,
-			IdleTimeout:       idleTimeout,
-		}
+		_, handler := api.NewAPI(metadataStore, wfClient)
+		srv := newHTTPServer(options.Port, observability.WrapHTTPHandler(handler))
 
 		hooks.OnStart(func() {
 			log.Printf("API server starting on :%d", options.Port)
@@ -197,4 +152,45 @@ func main() {
 	}
 
 	log.Println("Shutdown complete")
+}
+
+// initObservability returns a shutdown func. Init failures only disable telemetry.
+func initObservability(ctx context.Context) func(context.Context) error {
+	obsConfig := observability.Config{
+		Enabled:          config.SCALEODM_OBSERVABILITY_ENABLED,
+		ServiceName:      config.SCALEODM_OBSERVABILITY_SERVICE_NAME,
+		ServiceVersion:   config.SCALEODM_OBSERVABILITY_SERVICE_VERSION,
+		OTLPEndpoint:     config.SCALEODM_OBSERVABILITY_OTLP_ENDPOINT,
+		OTLPInsecure:     config.SCALEODM_OBSERVABILITY_OTLP_INSECURE,
+		MetricsEnabled:   config.SCALEODM_OBSERVABILITY_METRICS_ENABLED,
+		TracesEnabled:    config.SCALEODM_OBSERVABILITY_TRACES_ENABLED,
+		TraceSampleRatio: config.SCALEODM_OBSERVABILITY_TRACE_SAMPLE_RATIO,
+	}
+	shutdown, err := observability.Init(ctx, obsConfig)
+	if err != nil {
+		log.Printf("observability init failed, continuing without telemetry: %v", err)
+		return func(context.Context) error { return nil }
+	}
+	if obsConfig.Enabled {
+		log.Printf("observability enabled service=%s version=%s traces=%t metrics=%t endpoint=%q", obsConfig.ServiceName, obsConfig.ServiceVersion, obsConfig.TracesEnabled, obsConfig.MetricsEnabled, obsConfig.OTLPEndpoint)
+	}
+	return shutdown
+}
+
+func newHTTPServer(port int, handler http.Handler) *http.Server {
+	return &http.Server{
+		Addr:              fmt.Sprintf(":%d", port),
+		Handler:           handler,
+		ReadHeaderTimeout: secondsOr(config.SCALEODM_SERVER_READ_HEADER_TIMEOUT_SECONDS, 10*time.Second),
+		ReadTimeout:       secondsOr(config.SCALEODM_SERVER_READ_TIMEOUT_SECONDS, 30*time.Second),
+		WriteTimeout:      secondsOr(config.SCALEODM_SERVER_WRITE_TIMEOUT_SECONDS, 300*time.Second),
+		IdleTimeout:       secondsOr(config.SCALEODM_SERVER_IDLE_TIMEOUT_SECONDS, 120*time.Second),
+	}
+}
+
+func secondsOr(seconds int, fallback time.Duration) time.Duration {
+	if seconds <= 0 {
+		return fallback
+	}
+	return time.Duration(seconds) * time.Second
 }

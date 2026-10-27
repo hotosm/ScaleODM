@@ -188,13 +188,13 @@ func TestAccumulateImageStatsFromObjectsWithExcludes_SkipsExcludedPaths(t *testi
 	matcher := compileExcludeMatcher([]string{
 		"odm_orthophoto/**", "odm_dem/**", "submodels/**", "all.zip", "**/all.zip",
 	})
-	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "project/", matcher)
+	count, totalBytes, err := accumulateImageStats(objectCh, "project/", matcher)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, int64(300), totalBytes)
 }
 
-func TestCountImageStatsInS3PathWithExcludes_AlwaysExcludesOutputDirs(t *testing.T) {
+func TestCountImageStatsInS3Path_AlwaysExcludesOutputDirs(t *testing.T) {
 	// output/** and **/output/** are unconditionally excluded even when the caller
 	// passes no user excludes (alwaysExcludePatterns are prepended internally).
 	objectCh := make(chan minio.ObjectInfo, 4)
@@ -205,13 +205,13 @@ func TestCountImageStatsInS3PathWithExcludes_AlwaysExcludesOutputDirs(t *testing
 	close(objectCh)
 
 	matcher := compileExcludeMatcher(alwaysExcludePatterns)
-	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "images/", matcher)
+	count, totalBytes, err := accumulateImageStats(objectCh, "images/", matcher)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, int64(300), totalBytes)
 }
 
-func TestCountImageStatsInS3PathWithExcludes_ThumbsDirExcludedViaDefaultExcludes(t *testing.T) {
+func TestCountImageStatsInS3Path_ThumbsDirExcludedViaDefaultExcludes(t *testing.T) {
 	// thumbs/** and **/thumbs/** are in DefaultProjectExcludes so thumbnail images
 	// are not counted when useDefaultExcludes is true.
 	objectCh := make(chan minio.ObjectInfo, 4)
@@ -222,7 +222,7 @@ func TestCountImageStatsInS3PathWithExcludes_ThumbsDirExcludedViaDefaultExcludes
 	close(objectCh)
 
 	matcher := compileExcludeMatcher([]string{"thumbs/**", "**/thumbs/**"})
-	count, totalBytes, err := accumulateImageStatsFromObjectsWithExcludes(objectCh, "images/", matcher)
+	count, totalBytes, err := accumulateImageStats(objectCh, "images/", matcher)
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, int64(300), totalBytes)
@@ -295,7 +295,7 @@ func TestCountImageStatsInS3Path_AccumulatesCountAndBytes(t *testing.T) {
 	objectCh <- minio.ObjectInfo{Key: "images/c.txt", Size: 999}
 	close(objectCh)
 
-	count, totalBytes, err := accumulateImageStatsFromObjects(objectCh)
+	count, totalBytes, err := accumulateImageStats(objectCh, "", excludeMatcher{})
 	require.NoError(t, err)
 	assert.Equal(t, 2, count)
 	assert.Equal(t, int64(30), totalBytes)
@@ -310,7 +310,7 @@ func TestCountImageStatsInS3Path_FiltersSupportedExtensionsCaseInsensitive(t *te
 	objectCh <- minio.ObjectInfo{Key: "images/e.png", Size: 15}
 	close(objectCh)
 
-	count, totalBytes, err := accumulateImageStatsFromObjects(objectCh)
+	count, totalBytes, err := accumulateImageStats(objectCh, "", excludeMatcher{})
 	require.NoError(t, err)
 	assert.Equal(t, 4, count)
 	assert.Equal(t, int64(50), totalBytes)
@@ -321,7 +321,7 @@ func TestCountImageStatsInS3Path_PropagatesListingErrors(t *testing.T) {
 	objectCh <- minio.ObjectInfo{Err: errors.New("list failed")}
 	close(objectCh)
 
-	count, totalBytes, err := accumulateImageStatsFromObjects(objectCh)
+	count, totalBytes, err := accumulateImageStats(objectCh, "", excludeMatcher{})
 	require.Error(t, err)
 	assert.Equal(t, 0, count)
 	assert.Equal(t, int64(0), totalBytes)
@@ -400,7 +400,7 @@ func TestSanitizeZipEntryName_RejectsUnsafePaths(t *testing.T) {
 	assert.Empty(t, name)
 }
 
-func TestStatObjectAtURL_RejectsMalformedPaths(t *testing.T) {
+func TestReadObjectAtURL_RejectsMalformedPaths(t *testing.T) {
 	for name, path := range map[string]string{
 		"not s3":      "https://example.com/aoi.geojson",
 		"empty":       "",
@@ -409,36 +409,8 @@ func TestStatObjectAtURL_RejectsMalformedPaths(t *testing.T) {
 		"no bucket":   "s3:///aoi.geojson",
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, err := StatObjectAtURL(context.Background(), nil, path)
+			_, err := ReadObjectAtURL(context.Background(), nil, path, 1)
 			assert.Error(t, err)
 		})
 	}
-}
-
-// parseS3Path appends a trailing slash to keys, hence the separate whole-URL stat.
-func TestStatObjectAtURL_ReturnsSizeAndDistinguishesMissing(t *testing.T) {
-	ctx := context.Background()
-	bucket := "test-bucket-stat-object-url"
-	require.NoError(t, testutil.SetupTestS3Bucket(ctx, bucket))
-
-	client := testS3Client(t)
-	putTestObject(t, client, bucket, "projects/p1/aoi-buffered.geojson", `{"type":"Polygon"}`)
-	putTestObject(t, client, bucket, "projects/p1/empty.geojson", "")
-	putTestObject(t, client, bucket, "projects/p1/nested/inner.geojson", "{}")
-
-	size, err := StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/aoi-buffered.geojson")
-	require.NoError(t, err)
-	assert.Equal(t, int64(18), size)
-
-	// An empty object stats fine; the caller is what rejects size 0.
-	size, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/empty.geojson")
-	require.NoError(t, err)
-	assert.Equal(t, int64(0), size)
-
-	_, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/missing.geojson")
-	assert.Error(t, err)
-
-	// A prefix is not an object; this is what makes rclone write a directory.
-	_, err = StatObjectAtURL(ctx, client, "s3://"+bucket+"/projects/p1/nested")
-	assert.Error(t, err)
 }

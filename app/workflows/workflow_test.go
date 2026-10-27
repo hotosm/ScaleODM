@@ -6,6 +6,7 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/hotosm/scaleodm/app/config"
+	"github.com/hotosm/scaleodm/app/meta"
 	apiv1 "k8s.io/api/core/v1"
 
 	"github.com/stretchr/testify/assert"
@@ -1102,4 +1103,80 @@ func volumeNames(volumes []apiv1.Volume) []string {
 		names = append(names, v.Name)
 	}
 	return names
+}
+
+func TestInfraFailureMessage(t *testing.T) {
+	tests := []struct {
+		name     string
+		workflow *wfv1.Workflow
+		expected string
+	}{
+		{
+			name: "detect image pull backoff in node message",
+			workflow: &wfv1.Workflow{
+				Status: wfv1.WorkflowStatus{
+					Nodes: map[string]wfv1.NodeStatus{
+						"n1": {
+							Message: "Error: ImagePullBackOff",
+						},
+					},
+				},
+			},
+			expected: "Error: ImagePullBackOff",
+		},
+		{
+			name: "detect failed pull in workflow message",
+			workflow: &wfv1.Workflow{
+				Status: wfv1.WorkflowStatus{
+					Message: "failed to pull image docker.io/opendronemap/odm:3.6.2",
+				},
+			},
+			expected: "failed to pull image docker.io/opendronemap/odm:3.6.2",
+		},
+		{
+			name: "no infra failure",
+			workflow: &wfv1.Workflow{
+				Status: wfv1.WorkflowStatus{
+					Message: "workflow running",
+				},
+			},
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, InfraFailureMessage(tt.workflow))
+		})
+	}
+}
+
+func TestLiveStatus(t *testing.T) {
+	workflow := func(phase wfv1.WorkflowPhase, message, nodeMessage string) *wfv1.Workflow {
+		wf := &wfv1.Workflow{Status: wfv1.WorkflowStatus{Phase: phase, Message: message}}
+		if nodeMessage != "" {
+			wf.Status.Nodes = map[string]wfv1.NodeStatus{"n1": {Message: nodeMessage}}
+		}
+		return wf
+	}
+	tests := []struct {
+		name       string
+		stored     meta.JobStatus
+		wf         *wfv1.Workflow
+		wantStatus meta.JobStatus
+		wantMsg    string
+	}{
+		{"advances", meta.JobQueued, workflow(wfv1.WorkflowRunning, "", ""), meta.JobRunning, ""},
+		{"never regresses", meta.JobRunning, workflow("", "", ""), meta.JobRunning, ""},
+		{"terminal stored wins", meta.JobFailed, workflow(wfv1.WorkflowRunning, "", ""), meta.JobFailed, ""},
+		{"failure carries Argo message", meta.JobRunning, workflow(wfv1.WorkflowFailed, "OOMKilled", ""), meta.JobFailed, "OOMKilled"},
+		{"infra failure shows as failed", meta.JobRunning, workflow(wfv1.WorkflowRunning, "", "Error: ImagePullBackOff"), meta.JobFailed, "Error: ImagePullBackOff"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, msg := LiveStatus(tt.stored, tt.wf)
+			assert.Equal(t, tt.wantStatus, status)
+			assert.Equal(t, tt.wantMsg, msg)
+		})
+	}
 }

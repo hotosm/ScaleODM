@@ -16,7 +16,4 @@ type WorkflowClient interface {
 	DeleteWorkflow(ctx context.Context, name string) error
 	GetWorkflowLogs(ctx context.Context, workflowName string, writer io.Writer) error
 	GetWorkflowLogsWithArchiveFallback(ctx context.Context, workflowName string, writer io.Writer) error
-	WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.Workflow, error)
-	GetWorkflowStatus(ctx context.Context, workflowName string) (wfv1.WorkflowPhase, string, error)
-	IsWorkflowComplete(ctx context.Context, workflowName string) (bool, error)
 }

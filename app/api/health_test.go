@@ -8,12 +8,13 @@ import (
 	"testing"
 
 	"github.com/hotosm/scaleodm/app/meta"
+	"github.com/hotosm/scaleodm/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
 func TestHealthCheck(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -24,7 +25,7 @@ func TestHealthCheck(t *testing.T) {
 }
 
 func TestHeartbeatLightweightEndpoints(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)
@@ -50,7 +51,7 @@ func TestHeartbeatLightweightEndpoints(t *testing.T) {
 }
 
 func TestHeartbeatDependencyAwareEndpoints(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	metadataStore := meta.NewStore(db)

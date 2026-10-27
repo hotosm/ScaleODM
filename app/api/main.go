@@ -28,10 +28,9 @@ import (
 
 // Make the API, JobQueue, and WorkflowClient available on each endpoint
 type API struct {
-	api             huma.API
-	workflowClient  workflows.WorkflowClient
-	metadataStore   *meta.Store
-	downloadHandler http.Handler // raw handler for download redirect
+	api            huma.API
+	workflowClient workflows.WorkflowClient
+	metadataStore  *meta.Store
 }
 
 // NewAPI creates the Huma API and registers routes.
@@ -99,17 +98,11 @@ func NewAPI(metadataStore *meta.Store, workflowClient workflows.WorkflowClient) 
 
 	apiObj.registerGlobalMRoutes()
 	apiObj.registerNodeODMRoutes()
-	// apiObj.registerScaleODMRoutes()
 
-	// Register the download handler as a raw HTTP route (outside Huma)
-	// so we can issue proper HTTP redirects to pre-signed S3 URLs.
-	if apiObj.downloadHandler != nil {
-		router.Handle("GET /task/{uuid}/download/{asset}", apiObj.downloadHandler)
-		// Mirror the download under /ui so the browser UI can reach it through the
-		// UI-only ingress (which routes only /ui). Same handler, same {uuid}/{asset}
-		// path values; the NodeODM /task path stays for API compatibility.
-		router.Handle("GET /ui/api/tasks/{uuid}/download/{asset}", apiObj.downloadHandler)
-	}
+	// Raw routes (outside Huma) so downloads can redirect to pre-signed URLs.
+	// The /ui mirror is reachable through the UI-only ingress.
+	router.HandleFunc("GET /task/{uuid}/download/{asset}", apiObj.downloadTaskAsset)
+	router.HandleFunc("GET /ui/api/tasks/{uuid}/download/{asset}", apiObj.downloadTaskAsset)
 
 	if config.SCALEODM_UI_ENABLED {
 		uiHandler, err := ui.NewHandler(metadataStore, workflowClient, config.SCALEODM_UI_READONLY, version.Version)
@@ -155,77 +148,38 @@ func (a *API) registerGlobalMRoutes() {
 		defer span.End()
 		checks := map[string]string{}
 		ready := true
+		fail := func(dependency, reason, detail string, err error) {
+			ready = false
+			checks[dependency] = "unavailable: " + detail
+			span.AddEvent("readiness."+dependency+".failed", trace.WithAttributes(attribute.String("reason", reason)))
+			observability.RecordReadinessDependencyFailure(dependency, reason)
+			if err != nil {
+				log.Printf("readiness dependency failure dependency=%s reason=%s error=%v", dependency, reason, err)
+			} else {
+				log.Printf("readiness dependency failure dependency=%s reason=%s", dependency, reason)
+			}
+		}
 
 		if err := a.metadataStore.HealthCheck(ctx); err != nil {
-			span.AddEvent("readiness.database.failed", trace.WithAttributes(attribute.String("reason", "db_healthcheck_failed")))
-			ready = false
-			reason := "db_healthcheck_failed"
-			checks["database"] = fmt.Sprintf("unavailable: %v", err)
-			observability.RecordReadinessDependencyFailure("database", reason)
-			log.Printf("readiness dependency failure dependency=database reason=%s error=%v", reason, err)
+			fail("database", "db_healthcheck_failed", err.Error(), err)
 		} else {
 			checks["database"] = "ok"
 		}
 
 		if a.workflowClient == nil {
-			span.AddEvent("readiness.argo.failed", trace.WithAttributes(attribute.String("reason", "argo_client_missing")))
-			ready = false
-			reason := "argo_client_missing"
-			checks["argo"] = "unavailable: workflow client not initialized"
-			observability.RecordReadinessDependencyFailure("argo", reason)
-			log.Printf("readiness dependency failure dependency=argo reason=%s", reason)
+			fail("argo", "argo_client_missing", "workflow client not initialized", nil)
 		} else if _, err := a.workflowClient.ListWorkflows(ctx, ""); err != nil {
-			ready = false
-			reason := "argo_list_failed"
 			if errors.IsUnauthorized(err) || errors.IsForbidden(err) {
-				reason = "argo_forbidden"
-				checks["argo"] = fmt.Sprintf("unavailable: insufficient permissions (%v)", err)
+				fail("argo", "argo_forbidden", fmt.Sprintf("insufficient permissions (%v)", err), err)
 			} else {
-				checks["argo"] = fmt.Sprintf("unavailable: %v", err)
+				fail("argo", "argo_list_failed", err.Error(), err)
 			}
-			span.AddEvent("readiness.argo.failed", trace.WithAttributes(attribute.String("reason", reason)))
-			observability.RecordReadinessDependencyFailure("argo", reason)
-			log.Printf("readiness dependency failure dependency=argo reason=%s error=%v", reason, err)
 		} else {
 			checks["argo"] = "ok"
 		}
 
 		if config.SCALEODM_READINESS_CHECK_S3 {
-			probePath := config.SCALEODM_READINESS_S3_PROBE_PATH
-			if strings.TrimSpace(probePath) == "" {
-				span.AddEvent("readiness.s3.failed", trace.WithAttributes(attribute.String("reason", "s3_probe_path_missing")))
-				ready = false
-				reason := "s3_probe_path_missing"
-				checks["s3"] = "unavailable: SCALEODM_READINESS_S3_PROBE_PATH not configured"
-				observability.RecordReadinessDependencyFailure("s3", reason)
-				log.Printf("readiness dependency failure dependency=s3 reason=%s", reason)
-			} else {
-				timeout := time.Duration(config.SCALEODM_READINESS_TIMEOUT_SECONDS) * time.Second
-				if timeout <= 0 {
-					timeout = 5 * time.Second
-				}
-				s3Ctx, cancel := context.WithTimeout(ctx, timeout)
-				defer cancel()
-
-				s3Client, s3Err := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
-				if s3Err != nil {
-					ready = false
-					reason := "s3_client_init_failed"
-					checks["s3"] = fmt.Sprintf("unavailable: failed to initialize client: %v", s3Err)
-					span.AddEvent("readiness.s3.failed", trace.WithAttributes(attribute.String("reason", reason)))
-					observability.RecordReadinessDependencyFailure("s3", reason)
-					log.Printf("readiness dependency failure dependency=s3 reason=%s error=%v", reason, s3Err)
-				} else if err := s3.ProbeS3Path(s3Ctx, s3Client, probePath); err != nil {
-					ready = false
-					reason := "s3_probe_failed"
-					checks["s3"] = fmt.Sprintf("unavailable: %v", err)
-					span.AddEvent("readiness.s3.failed", trace.WithAttributes(attribute.String("reason", reason)))
-					observability.RecordReadinessDependencyFailure("s3", reason)
-					log.Printf("readiness dependency failure dependency=s3 reason=%s error=%v", reason, err)
-				} else {
-					checks["s3"] = "ok"
-				}
-			}
+			a.checkS3Readiness(ctx, checks, fail)
 		}
 
 		resp := &ReadinessResponse{}
@@ -285,4 +239,29 @@ func (a *API) registerGlobalMRoutes() {
 		Description: "Compatibility alias for /__heartbeat__",
 		Tags:        []string{"system"},
 	}, dependencyAwareHandler)
+}
+
+func (a *API) checkS3Readiness(ctx context.Context, checks map[string]string, fail func(dependency, reason, detail string, err error)) {
+	probePath := config.SCALEODM_READINESS_S3_PROBE_PATH
+	if strings.TrimSpace(probePath) == "" {
+		fail("s3", "s3_probe_path_missing", "SCALEODM_READINESS_S3_PROBE_PATH not configured", nil)
+		return
+	}
+	timeout := time.Duration(config.SCALEODM_READINESS_TIMEOUT_SECONDS) * time.Second
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
+	s3Client, err := s3.GetS3ClientForEndpoint(config.AWS_S3_ENDPOINT)
+	if err != nil {
+		fail("s3", "s3_client_init_failed", fmt.Sprintf("failed to initialize client: %v", err), err)
+		return
+	}
+	if err := s3.ProbeS3Path(ctx, s3Client, probePath); err != nil {
+		fail("s3", "s3_probe_failed", err.Error(), err)
+		return
+	}
+	checks["s3"] = "ok"
 }

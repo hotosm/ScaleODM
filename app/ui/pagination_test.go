@@ -1,20 +1,27 @@
 package ui
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/hotosm/scaleodm/app/meta"
+)
 
 func TestCompletedAssets(t *testing.T) {
 	// Still processing (or no output path) -> nil, i.e. JSON null.
-	for _, tc := range []struct{ status, writePath string }{
-		{"running", "s3://bucket/out/"},
-		{"queued", "s3://bucket/out/"},
-		{"completed", ""},
+	for _, tc := range []struct {
+		status    meta.JobStatus
+		writePath string
+	}{
+		{meta.JobRunning, "s3://bucket/out/"},
+		{meta.JobQueued, "s3://bucket/out/"},
+		{meta.JobCompleted, ""},
 	} {
 		if got := completedAssets("wf-1", tc.status, tc.writePath); got != nil {
 			t.Errorf("completedAssets(%q,%q) = %v, want nil", tc.status, tc.writePath, got)
 		}
 	}
 	// Completed with an output path -> the full alias link set.
-	got := completedAssets("wf-1", "completed", "s3://bucket/out/")
+	got := completedAssets("wf-1", meta.JobCompleted, "s3://bucket/out/")
 	if len(got) != len(primaryAssetDefs) {
 		t.Fatalf("completed job: got %d assets, want %d", len(got), len(primaryAssetDefs))
 	}

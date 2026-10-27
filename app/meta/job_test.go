@@ -8,10 +8,12 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/hotosm/scaleodm/testutil"
 )
 
 func TestCreateJob(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -35,13 +37,13 @@ func TestCreateJob(t *testing.T) {
 	assert.Equal(t, "s3://bucket/images/", job.ReadS3Path)
 	assert.Equal(t, "s3://bucket/output/", job.WriteS3Path)
 	assert.Equal(t, "us-east-1", job.S3Region)
-	assert.Equal(t, "queued", job.JobStatus)
+	assert.Equal(t, JobQueued, job.JobStatus)
 	assert.NotZero(t, job.ID)
 	assert.False(t, job.CreatedAt.IsZero())
 }
 
 func TestGetJob(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -69,7 +71,7 @@ func TestGetJob(t *testing.T) {
 }
 
 func TestGetJob_NotFound(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -81,7 +83,7 @@ func TestGetJob_NotFound(t *testing.T) {
 }
 
 func TestUpdateJobStatus(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -107,7 +109,7 @@ func TestUpdateJobStatus(t *testing.T) {
 	job, err := store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Equal(t, "running", job.JobStatus)
+	assert.Equal(t, JobRunning, job.JobStatus)
 	assert.NotNil(t, job.StartedAt, "StartedAt should be set once running")
 	assert.False(t, job.StartedAt.IsZero())
 
@@ -117,13 +119,13 @@ func TestUpdateJobStatus(t *testing.T) {
 	job, err = store.GetJob(ctx, workflowName)
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Equal(t, "completed", job.JobStatus)
+	assert.Equal(t, JobCompleted, job.JobStatus)
 	assert.NotNil(t, job.CompletedAt, "CompletedAt should be set once completed")
 	assert.False(t, job.CompletedAt.IsZero())
 }
 
 func TestUpdateJobStatus_WithError(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -148,7 +150,7 @@ func TestUpdateJobStatus_WithError(t *testing.T) {
 	job, err := store.GetJob(ctx, "test-workflow-4")
 	require.NoError(t, err)
 	require.NotNil(t, job)
-	assert.Equal(t, "failed", job.JobStatus)
+	assert.Equal(t, JobFailed, job.JobStatus)
 	assert.NotNil(t, job.ErrorMessage)
 	assert.Equal(t, "Workflow failed: timeout", *job.ErrorMessage)
 }
@@ -157,14 +159,14 @@ func TestMapArgoPhaseToJobStatus(t *testing.T) {
 	tests := []struct {
 		name     string
 		phase    string
-		expected string
+		expected JobStatus
 	}{
-		{"Pending", "Pending", "queued"},
-		{"Running", "Running", "running"},
-		{"Succeeded", "Succeeded", "completed"},
-		{"Failed", "Failed", "failed"},
-		{"Error", "Error", "failed"},
-		{"Unknown", "Unknown", "queued"},
+		{"Pending", "Pending", JobQueued},
+		{"Running", "Running", JobRunning},
+		{"Succeeded", "Succeeded", JobCompleted},
+		{"Failed", "Failed", JobFailed},
+		{"Error", "Error", JobFailed},
+		{"Unknown", "Unknown", JobQueued},
 	}
 
 	for _, tt := range tests {
@@ -175,11 +177,11 @@ func TestMapArgoPhaseToJobStatus(t *testing.T) {
 	}
 }
 
-func TestIsForwardJobStatusTransition(t *testing.T) {
+func TestJobStatusCanAdvanceTo(t *testing.T) {
 	tests := []struct {
 		name string
-		src  string
-		dst  string
+		src  JobStatus
+		dst  JobStatus
 		want bool
 	}{
 		{name: "queued to running", src: "queued", dst: "running", want: true},
@@ -189,20 +191,20 @@ func TestIsForwardJobStatusTransition(t *testing.T) {
 		{name: "running to queued is not forward", src: "running", dst: "queued", want: false},
 		{name: "terminal to terminal is not forward", src: "failed", dst: "completed", want: false},
 		{name: "same status is not forward", src: "running", dst: "running", want: false},
-		{name: "normalizes whitespace and case", src: " Queued ", dst: "Running", want: true},
+		{name: "non-canonical status is unknown", src: " Queued ", dst: JobRunning, want: false},
 		{name: "unknown source", src: "unknown", dst: "running", want: false},
 		{name: "unknown destination", src: "running", dst: "unknown", want: false},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, IsForwardJobStatusTransition(tt.src, tt.dst))
+			assert.Equal(t, tt.want, tt.src.CanAdvanceTo(tt.dst))
 		})
 	}
 }
 
 func TestUpdateJobMetadata(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -236,7 +238,7 @@ func TestUpdateJobMetadata(t *testing.T) {
 }
 
 func TestListJobs(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -266,7 +268,7 @@ func TestListJobs(t *testing.T) {
 }
 
 func TestListJobs_ByProjectID(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -317,7 +319,7 @@ func TestListJobs_ByProjectID(t *testing.T) {
 }
 
 func TestDeleteJob(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -344,7 +346,7 @@ func TestDeleteJob(t *testing.T) {
 }
 
 func TestDeleteJob_NotFound(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -356,7 +358,7 @@ func TestDeleteJob_NotFound(t *testing.T) {
 }
 
 func TestMergeJobMetadata(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -392,7 +394,7 @@ func TestMergeJobMetadata(t *testing.T) {
 }
 
 func TestRestartJobMetadata_AtomicSwap(t *testing.T) {
-	db, cleanup := testDB(t)
+	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
 
 	store := NewStore(db)
@@ -436,4 +438,25 @@ func TestRestartJobMetadata_AtomicSwap(t *testing.T) {
 	assert.Equal(t, "http://localhost:9000", metaMap["s3_endpoint"])
 	assert.Equal(t, float64(12), metaMap["image_count"])
 	assert.Equal(t, float64(2048), metaMap["image_total_bytes"])
+}
+
+func TestListActiveJobs_IncludesOldJobsAndSkipsTerminal(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	for _, name := range []string{"old-running", "done"} {
+		_, err := store.CreateJob(ctx, name, "project", "s3://bucket/in/", "s3://bucket/out/", nil, "us-east-1", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.UpdateJobStatus(ctx, "old-running", JobRunning, nil))
+	require.NoError(t, store.UpdateJobStatus(ctx, "done", JobCompleted, nil))
+	_, err := db.Pool.Exec(ctx, `UPDATE scaleodm_job_metadata SET created_at = NOW() - INTERVAL '30 days' WHERE workflow_name = 'old-running'`)
+	require.NoError(t, err)
+
+	jobs, err := store.ListActiveJobs(ctx)
+	require.NoError(t, err)
+	require.Len(t, jobs, 1)
+	assert.Equal(t, "old-running", jobs[0].WorkflowName)
 }

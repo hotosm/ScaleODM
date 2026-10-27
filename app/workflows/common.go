@@ -5,7 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
+	"strings"
 	"time"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -17,6 +17,7 @@ import (
 	workflowclient "github.com/argoproj/argo-workflows/v3/pkg/client/clientset/versioned"
 	apiv1 "k8s.io/api/core/v1"
 
+	"github.com/hotosm/scaleodm/app/meta"
 	"github.com/hotosm/scaleodm/app/s3"
 )
 
@@ -271,111 +272,58 @@ func (c *Client) GetWorkflowLogsWithArchiveFallback(ctx context.Context, workflo
 	return c.getWorkflowLogsFromPods(ctx, wf, writer)
 }
 
-// WatchWorkflow watches a workflow until completion and returns the final workflow
-func (c *Client) WatchWorkflow(ctx context.Context, workflowName string) (*wfv1.Workflow, error) {
-	// First, verify the workflow exists and get initial status
-	wf, err := c.GetWorkflow(ctx, workflowName)
-	if err != nil {
-		return nil, fmt.Errorf("failed to get workflow: %w", err)
+// InfraFailureMessage returns the first pod infra failure (missing secret,
+// image pull backoff), or "". Argo can leave such a workflow Running.
+func InfraFailureMessage(wf *wfv1.Workflow) string {
+	infraFailure := func(msg string) bool {
+		lower := strings.ToLower(msg)
+		if strings.Contains(lower, "createcontainerconfigerror") {
+			return true
+		}
+		if strings.Contains(lower, "secret") && strings.Contains(lower, "not found") {
+			return true
+		}
+		if strings.Contains(lower, "errimagepull") || strings.Contains(lower, "imagepullbackoff") {
+			return true
+		}
+		if strings.Contains(lower, "failed to pull image") || strings.Contains(lower, "back-off pulling image") {
+			return true
+		}
+		return false
 	}
 
-	// If already complete, return immediately
-	if wf.Status.Phase == wfv1.WorkflowSucceeded ||
-		wf.Status.Phase == wfv1.WorkflowFailed ||
-		wf.Status.Phase == wfv1.WorkflowError {
-		return wf, nil
+	if infraFailure(wf.Status.Message) {
+		return wf.Status.Message
 	}
 
-	// Watch for workflow completion, with automatic reconnection on watch failures
-	for {
-		watcher, err := c.wfClientset.ArgoprojV1alpha1().Workflows(c.namespace).Watch(
-			ctx,
-			metav1.ListOptions{
-				FieldSelector: fmt.Sprintf("metadata.name=%s", workflowName),
-			},
-		)
-		if err != nil {
-			log.Printf("workflow watch terminated workflow=%s reason=watch_init_failed error=%v", workflowName, err)
-			return nil, fmt.Errorf("failed to watch workflow: %w", err)
-		}
-		log.Printf("workflow watch started workflow=%s", workflowName)
-
-		for {
-			select {
-			case <-ctx.Done():
-				// Context cancelled - get final status before returning
-				watcher.Stop()
-				log.Printf("workflow watch terminated workflow=%s reason=context_cancelled error=%v", workflowName, ctx.Err())
-				finalWf, err := c.GetWorkflow(ctx, workflowName)
-				if err != nil {
-					return nil, fmt.Errorf("context cancelled and failed to get workflow status: %w", err)
-				}
-				return finalWf, ctx.Err()
-			case event, ok := <-watcher.ResultChan():
-				if !ok {
-					// Channel closed - watcher ended, check final status and potentially restart
-					watcher.Stop()
-					log.Printf("workflow watch terminated workflow=%s reason=channel_closed", workflowName)
-					finalWf, err := c.GetWorkflow(ctx, workflowName)
-					if err != nil {
-						return nil, fmt.Errorf("watch ended and failed to get workflow status: %w", err)
-					}
-					// If workflow is complete, return it
-					if finalWf.Status.Phase == wfv1.WorkflowSucceeded ||
-						finalWf.Status.Phase == wfv1.WorkflowFailed ||
-						finalWf.Status.Phase == wfv1.WorkflowError {
-						return finalWf, nil
-					}
-					// Workflow still running - break inner loop to restart watch
-					break
-				}
-
-				wf, ok := event.Object.(*wfv1.Workflow)
-				if !ok {
-					continue
-				}
-
-				if wf.Status.Phase == wfv1.WorkflowSucceeded ||
-					wf.Status.Phase == wfv1.WorkflowFailed ||
-					wf.Status.Phase == wfv1.WorkflowError {
-					watcher.Stop()
-					return wf, nil
-				}
-			}
-			// Break inner loop to restart watch
-			break
-		}
-		// Small delay before restarting watch to avoid tight loop
-		select {
-		case <-ctx.Done():
-			finalWf, err := c.GetWorkflow(ctx, workflowName)
-			if err != nil {
-				return nil, fmt.Errorf("context cancelled: %w", err)
-			}
-			return finalWf, ctx.Err()
-		case <-time.After(1 * time.Second):
-			// Continue to restart watch
+	for _, node := range wf.Status.Nodes {
+		if infraFailure(node.Message) {
+			return node.Message
 		}
 	}
+
+	return ""
 }
 
-// GetWorkflowStatus returns the current phase and message of a workflow
-func (c *Client) GetWorkflowStatus(ctx context.Context, workflowName string) (wfv1.WorkflowPhase, string, error) {
-	wf, err := c.GetWorkflow(ctx, workflowName)
-	if err != nil {
-		return "", "", err
+// LiveStatus is the status readers should show for a job, without saving it.
+// A terminal stored status is final, and a job never moves backwards. Infra
+// failures show as failed while they last, since Argo can still recover.
+// The message is "" when Argo gives none.
+func LiveStatus(stored meta.JobStatus, wf *wfv1.Workflow) (meta.JobStatus, string) {
+	if stored.IsTerminal() {
+		return stored, ""
 	}
-	return wf.Status.Phase, wf.Status.Message, nil
-}
-
-// IsWorkflowComplete checks if a workflow has completed (succeeded, failed, or error)
-func (c *Client) IsWorkflowComplete(ctx context.Context, workflowName string) (bool, error) {
-	phase, _, err := c.GetWorkflowStatus(ctx, workflowName)
-	if err != nil {
-		return false, err
+	live := meta.MapArgoPhaseToJobStatus(string(wf.Status.Phase))
+	if live == meta.JobRunning {
+		if msg := InfraFailureMessage(wf); msg != "" {
+			return meta.JobFailed, msg
+		}
 	}
-
-	return phase == wfv1.WorkflowSucceeded ||
-		phase == wfv1.WorkflowFailed ||
-		phase == wfv1.WorkflowError, nil
+	if !stored.CanAdvanceTo(live) {
+		return stored, ""
+	}
+	if live == meta.JobFailed {
+		return live, wf.Status.Message
+	}
+	return live, ""
 }
