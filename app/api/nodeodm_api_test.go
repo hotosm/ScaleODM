@@ -951,7 +951,7 @@ func TestResolveODMImage(t *testing.T) {
 }
 
 func TestODMImageRepo(t *testing.T) {
-	assert.Equal(t, "ghcr.io/hotosm/odm", odmImageRepo("docker.io/opendronemap/odm:3.6.2"))
+	assert.Equal(t, "docker.io/opendronemap/odm", odmImageRepo("docker.io/opendronemap/odm:3.6.2"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx:gpu"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("docker.io/webodm/odx"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx@sha256:abc"))
