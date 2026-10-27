@@ -431,9 +431,9 @@ func TestTaskCancelEndpoint(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// May return 200/204 on success, or error if workflow doesn't exist
+	// May return 200 on success, or error if workflow doesn't exist
 	// Just verify we got a response
-	assert.True(t, w.Code == http.StatusOK || w.Code == http.StatusNoContent || w.Code >= 400)
+	assert.True(t, w.Code == http.StatusOK || w.Code >= 400)
 }
 
 func TestTaskRemoveEndpoint(t *testing.T) {
@@ -472,16 +472,11 @@ func TestTaskRemoveEndpoint(t *testing.T) {
 
 	handler.ServeHTTP(w, req)
 
-	// A successful delete is either 204 No Content or 200 OK with a JSON body.
-	if w.Code == http.StatusNoContent {
-		assert.Empty(t, w.Body.Bytes())
-	} else {
-		assert.Equal(t, http.StatusOK, w.Code)
-		var response Response
-		err = json.Unmarshal(w.Body.Bytes(), &response)
-		require.NoError(t, err)
-		assert.True(t, response.Success)
-	}
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response Response
+	err = json.Unmarshal(w.Body.Bytes(), &response)
+	require.NoError(t, err)
+	assert.True(t, response.Success)
 
 	job, err := metadataStore.GetJob(ctx, workflowName)
 	require.NoError(t, err)
@@ -956,7 +951,7 @@ func TestResolveODMImage(t *testing.T) {
 }
 
 func TestODMImageRepo(t *testing.T) {
-	assert.Equal(t, "ghcr.io/hotosm/odm", odmImageRepo("docker.io/opendronemap/odm:3.6.2"))
+	assert.Equal(t, "docker.io/opendronemap/odm", odmImageRepo("docker.io/opendronemap/odm:3.6.2"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx:gpu"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("docker.io/webodm/odx"))
 	assert.Equal(t, "docker.io/webodm/odx", odmImageRepo("webodm/odx@sha256:abc"))
@@ -1192,7 +1187,10 @@ func TestTaskRestart_SuccessfulCutoverDeletesOldWorkflowAfterSwap(t *testing.T) 
 
 	handler.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusNoContent, w.Code)
+	assert.Equal(t, http.StatusOK, w.Code)
+	var response Response
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+	assert.True(t, response.Success)
 	require.Len(t, wfClient.deletedNames, 1)
 	assert.Equal(t, "old-wf", wfClient.deletedNames[0])
 

@@ -52,6 +52,12 @@ repos:
         files: (\.go|go\.mod|go\.sum)$
         pass_filenames: false
 
+  # Lint: workflow container scripts (app/workflows/scripts)
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+
   # Spelling: Checks for common misspellings in text files.
   - repo: https://github.com/codespell-project/codespell
     rev: v2.4.3

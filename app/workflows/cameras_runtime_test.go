@@ -1,14 +1,13 @@
 package workflows
 
 import (
-	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
-func containerArgs(t *testing.T, cfg *ODMPipelineConfig, name string) string {
+func containerArgs(t *testing.T, cfg *ODMPipelineConfig, name string) []string {
 	t.Helper()
 
 	client := &Client{namespace: "test-namespace"}
@@ -17,12 +16,21 @@ func containerArgs(t *testing.T, cfg *ODMPipelineConfig, name string) string {
 
 	for _, c := range wf.Spec.Templates[0].ContainerSet.Containers {
 		if c.Name == name {
-			require.Len(t, c.Args, 1)
-			return c.Args[0]
+			require.NotEmpty(t, c.Args)
+			return c.Args
 		}
 	}
 	t.Fatalf("no %q container in the workflow", name)
-	return ""
+	return nil
+}
+
+// processFlagArgs returns the ODM flags passed after `bash -c SCRIPT process`.
+func processFlagArgs(t *testing.T, cfg *ODMPipelineConfig) []string {
+	t.Helper()
+	args := containerArgs(t, cfg, "process")
+	require.GreaterOrEqual(t, len(args), 2)
+	require.Equal(t, "process", args[1])
+	return args[2:]
 }
 
 func camerasConfig(source FileSource) *ODMPipelineConfig {
@@ -31,51 +39,43 @@ func camerasConfig(source FileSource) *ODMPipelineConfig {
 	return cfg
 }
 
-func TestDownloadArgs_S3CamerasFailureIsFatal(t *testing.T) {
-	args := containerArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"}), "download")
-	fetch := args[strings.Index(args, "Fetching ODM cameras"):]
+func TestDownloadArgs_S3CamerasPassedToFetch(t *testing.T) {
+	script := containerArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"}), "download")[0]
 
-	assert.Equal(t, 3, strings.Count(fetch, "exit 1"))
-	assert.Contains(t, fetch, "ERROR: cameras not found or unreadable at s3://bucket/calibration/cameras.json")
-	assert.Contains(t, fetch, "ERROR: cameras path s3://bucket/calibration/cameras.json is a prefix, not a single object")
-	assert.Contains(t, fetch, "ERROR: cameras at s3://bucket/calibration/cameras.json is empty")
-
-	assert.Contains(t, fetch, `CAMERAS_TMP="$CAMERAS_DEST.part"`)
-	assert.Contains(t, fetch, `mv "$CAMERAS_TMP" "$CAMERAS_DEST"`)
-	assert.NotContains(t, fetch, "BOUNDARY_TMP")
+	assert.Contains(t, script, "CAMERAS_DEST='/workspace/{{workflow.name}}/cameras-input.json'\n")
+	assert.Contains(t, script, "CAMERAS_S3_PATH='s3://bucket/calibration/cameras.json'\n")
+	assert.Contains(t, script, `fetch_input_file cameras "${CAMERAS_DEST:-}" "${CAMERAS_S3_PATH:-}" "${CAMERAS_INLINE:-}"`)
+	assert.NotContains(t, script, "BOUNDARY_DEST=")
 }
 
-func TestDownloadArgs_InlineCamerasWrittenToWorkspace(t *testing.T) {
+func TestDownloadArgs_InlineCamerasPassedToFetch(t *testing.T) {
 	source, _, err := ParseCamerasValue(testCameraModel)
 	require.NoError(t, err)
 
-	args := containerArgs(t, camerasConfig(source), "download")
+	script := containerArgs(t, camerasConfig(source), "download")[0]
 
-	assert.Contains(t, args, "Writing inline ODM cameras")
-	assert.Contains(t, args, "<<'SCALEODM_CAMERAS_EOF'")
-	assert.Contains(t, args, `"focal_x":0.74018822`)
-	assert.Contains(t, args, "/workspace/{{workflow.name}}/cameras-input.json")
+	assert.Contains(t, script, "CAMERAS_DEST='/workspace/{{workflow.name}}/cameras-input.json'\n")
+	assert.Contains(t, script, "CAMERAS_INLINE="+shellQuote(source.Inline)+"\n")
+	assert.Contains(t, script, `"focal_x":0.74018822`)
 }
 
 // Download failure prevents processing with a missing calibration.
 func TestProcessArgs_CamerasFlagIsStatic(t *testing.T) {
-	args := containerArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"}), "process")
-
-	assert.Contains(t, args, `odm_args="--dsm --cameras=/workspace/{{workflow.name}}/cameras-input.json --project-path /workspace $JOB_ID"`)
+	assert.Equal(t, []string{"--dsm", "--cameras=/workspace/{{workflow.name}}/cameras-input.json"},
+		processFlagArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"})))
 }
 
 // OpenSfM controls whether intrinsics are refined.
 func TestProcessArgs_CamerasNeverForcesFixedCameraParams(t *testing.T) {
-	args := containerArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"}), "process")
-
-	assert.NotContains(t, args, "--use-fixed-camera-params")
+	assert.NotContains(t, processFlagArgs(t, camerasConfig(FileSource{S3Path: "s3://bucket/calibration/cameras.json"})),
+		"--use-fixed-camera-params")
 }
 
 func TestProcessArgs_NoCamerasNoFlag(t *testing.T) {
 	cfg := NewDefaultODMConfig("test-project", "s3://bucket/input/", "s3://bucket/output/", []string{"--dsm"})
 
-	assert.NotContains(t, containerArgs(t, cfg, "download"), "ODM cameras")
-	assert.NotContains(t, containerArgs(t, cfg, "process"), "--cameras")
+	assert.NotContains(t, containerArgs(t, cfg, "download")[0], "CAMERAS_DEST=")
+	assert.Equal(t, []string{"--dsm"}, processFlagArgs(t, cfg))
 }
 
 func TestWorkflow_BoundaryAndCamerasTogether(t *testing.T) {
@@ -86,13 +86,15 @@ func TestWorkflow_BoundaryAndCamerasTogether(t *testing.T) {
 	cfg.Boundary = FileSource{S3Path: "s3://bucket/aoi.geojson"}
 	cfg.Cameras = cameras
 
-	download := containerArgs(t, cfg, "download")
-	assert.Contains(t, download, "Fetching ODM boundary")
-	assert.Contains(t, download, "Writing inline ODM cameras")
+	download := containerArgs(t, cfg, "download")[0]
+	assert.Contains(t, download, "BOUNDARY_S3_PATH='s3://bucket/aoi.geojson'\n")
+	assert.Contains(t, download, "CAMERAS_INLINE=")
 
-	assert.Contains(t, containerArgs(t, cfg, "process"),
-		`odm_args="--fast-orthophoto --boundary=/workspace/{{workflow.name}}/boundary.geojson `+
-			`--cameras=/workspace/{{workflow.name}}/cameras-input.json --project-path /workspace $JOB_ID"`)
+	assert.Equal(t, []string{
+		"--fast-orthophoto",
+		"--boundary=/workspace/{{workflow.name}}/boundary.geojson",
+		"--cameras=/workspace/{{workflow.name}}/cameras-input.json",
+	}, processFlagArgs(t, cfg))
 }
 
 func TestWorkflow_DoesNotMutateCallerFlags(t *testing.T) {
