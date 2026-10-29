@@ -1,0 +1,2539 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Kubernetes-native orchestration for OpenDroneMap workloads.">
+      
+      
+      
+        <link rel="canonical" href="https://hotosm.github.io/ScaleODM/nodeodm-compatibility/">
+      
+      
+      
+        <link rel="prev" href="../about/">
+      
+      
+        <link rel="next" href="../nodeodm-migrate/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../images/logo.svg">
+      <meta name="generator" content="zensical-0.0.72">
+    
+    
+      
+        <title>NodeODM compatibility - ScaleODM</title>
+      
+    
+    
+      
+        
+      
+      <link rel="stylesheet" href="../assets/stylesheets/modern/main.4ab2de0c.min.css">
+      
+        
+          
+        
+        <link rel="stylesheet" href="../assets/stylesheets/modern/palette.b60ce83d.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,500,500i,700,700i%7CJetBrains+Mono:400,400i,700,700i&amp;display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"JetBrains Mono"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_scope.pathname.endsWith("/")||(__md_scope=new URL(__md_scope.pathname+"/",location)),__md_hash=e=>[...e].reduce(((e,t)=>(e<<5)-e+t.charCodeAt(0)),0),__md_get=(e,t=localStorage,_=__md_scope)=>JSON.parse(t.getItem(_.pathname+"."+e)),__md_set=(e,t,_=localStorage,a=__md_scope)=>{try{_.setItem(a.pathname+"."+e,JSON.stringify(t))}catch(e){}},document.documentElement.setAttribute("data-platform",navigator.platform)</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer" aria-hidden="true"></label>
+    <div data-md-component="skip">
+      <a href="#__skip" class="md-skip">
+        Skip to content
+      </a>
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="./.." title="ScaleODM" class="md-header__button md-logo" aria-label="ScaleODM" data-md-component="logo">
+      
+  <img src="../images/logo.svg" alt="ScaleODM">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-menu" viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg>
+      <span class="md-visually-hidden">Navigation</span>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            ScaleODM
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              NodeODM compatibility
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="indigo" data-md-color-accent="indigo"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-moon" viewBox="0 0 24 24"><path d="M20.985 12.486a9 9 0 1 1-9.473-9.472c.405-.022.617.46.402.803a6 6 0 0 0 8.268 8.268c.344-.215.825-.004.803.401"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-search" viewBox="0 0 24 24"><path d="m21 21-4.34-4.34"/><circle cx="11" cy="11" r="8"/></svg>
+          <span class="md-visually-hidden">Search</span>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog" aria-label="Search">
+  <button type="button" class="md-search__button">
+    Search
+  </button>
+</div>
+      
+    
+    <div class="md-header__source">
+      
+        <a href="https://github.com/hotosm/ScaleODM" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hotosm/ScaleODM
+  </div>
+</a>
+      
+    </div>
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="./.." title="ScaleODM" class="md-nav__button md-logo" aria-label="ScaleODM" data-md-component="logo">
+      
+  <img src="../images/logo.svg" alt="ScaleODM">
+
+    </a>
+    ScaleODM
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/hotosm/ScaleODM" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.3.1 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2026 Fonticons, Inc.--><path fill="currentColor" d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    hotosm/ScaleODM
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="./.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Home
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../about/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  About
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Usage
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+            <label class="md-nav__title" for="__nav_3">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Usage
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  NodeODM compatibility
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="././" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  NodeODM compatibility
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start-deploy-to-existing-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick Start: Deploy to Existing Cluster
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How It Works
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-with-pyodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Using with pyodm
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using with pyodm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#create-tasks-with-pyodm-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create tasks with pyodm + S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#helper-function-for-cleaner-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Helper function for cleaner integration
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-from-nodeodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Migration from NodeODM
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implemented Endpoints
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implemented Endpoints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Server Information
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server Information">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /info</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /options</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Task Management
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task Management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-tasknew" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/new</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processing-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Processing modes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scan-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scan depth
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclude-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exclude patterns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-file-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Workspace file options
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workspace file options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Boundary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cameras" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Cameras
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/info</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidoutput" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/output</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidassets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/assets</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuiddownloadasset" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/download/{asset}</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskcancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/cancel</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskremove" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/remove</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskrestart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/restart</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-differences-from-nodeodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Key Differences from NodeODM
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key Differences from NodeODM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#status-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Status Mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Deployment Reference
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-values-for-external-argo-external-db-external-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Helm Values for External Argo + External DB + External S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3 Structure
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Not Implemented
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../nodeodm-migrate/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Migrating from NodeODM
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/index.html" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  API reference
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+          
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="https://github.com/hotosm/ScaleODM/blob/main/chart/README.md" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Deployment
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_4" id="__nav_4_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_4">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Deployment
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../system-requirements/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Memory sizing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../swap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Swap
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Development
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_5">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Development
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Architecture
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Testing
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../testing-alternative-images/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Alternative ODM images
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+          
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_6" >
+        
+          
+          <div class="md-nav__link md-nav__container">
+            <a href="../decisions/" class="md-nav__link ">
+              
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Decisions
+
+    
+  </span>
+  
+  
+
+            </a>
+            
+              
+              <label class="md-nav__link " for="__nav_6" id="__nav_6_label" tabindex="">
+                <span class="md-nav__icon md-icon"></span>
+              </label>
+            
+          </div>
+        
+        
+          <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_6_label" aria-expanded="false">
+            <label class="md-nav__title" for="__nav_6">
+              <span class="md-nav__icon md-icon"></span>
+              
+  
+  Decisions
+
+            </label>
+            <ul class="md-nav__list" data-md-scrollfix>
+              
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0000-hotosm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Higher Level HOTOSM Decisions
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0001-argo-workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Use Kubernetes-Native Argo Workflows Instead of NodeODM + ClusterODM
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0002-s3/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  S3 Credential Management for Argo Workflows
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0003-swap/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Swap-based Memory Sizing for ODM Jobs
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+                
+                  
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../decisions/0004-logs-not-telemetry/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+  Plain Logs Instead of Built-in OpenTelemetry
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+                
+              
+            </ul>
+          </nav>
+        
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  
+                    
+                    
+                    
+                      
+                    
+                    
+                      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+                      <div class="md-sidebar-button__wrapper">
+                        <label class="md-sidebar-button" for="__toc"></label>
+                      </div>
+                    
+                  
+                  <div class="md-sidebar__inner">
+                    
+
+
+<nav class="md-nav md-nav--secondary" aria-label="On this page">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      On this page
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start-deploy-to-existing-cluster" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Quick Start: Deploy to Existing Cluster
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        How It Works
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-with-pyodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Using with pyodm
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using with pyodm">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#create-tasks-with-pyodm-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Create tasks with pyodm + S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#helper-function-for-cleaner-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Helper function for cleaner integration
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#migration-from-nodeodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Migration from NodeODM
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implemented-endpoints" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Implemented Endpoints
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implemented Endpoints">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#server-information" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Server Information
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Server Information">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get-info" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /info</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /options</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#task-management" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Task Management
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Task Management">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#post-tasknew" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/new</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#processing-modes" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Processing modes
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scan-depth" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Scan depth
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#exclude-patterns" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Exclude patterns
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#workspace-file-options" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Workspace file options
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Workspace file options">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#boundary" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Boundary
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cameras" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Cameras
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidinfo" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/info</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidoutput" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/output</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuidassets" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/assets</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get-taskuuiddownloadasset" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>GET /task/{uuid}/download/{asset}</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskcancel" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/cancel</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskremove" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/remove</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#post-taskrestart" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        <code>POST /task/restart</code>
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#key-differences-from-nodeodm" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Key Differences from NodeODM
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Key Differences from NodeODM">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#status-mapping" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Status Mapping
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#deployment-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Deployment Reference
+      </span>
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Deployment Reference">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#helm-values-for-external-argo-external-db-external-s3" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Helm Values for External Argo + External DB + External S3
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#s3-structure" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        S3 Structure
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Testing
+      </span>
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#not-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      <span class="md-typeset">
+        Not Implemented
+      </span>
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                <a id="__skip" tabindex="-1"></a>
+                
+                  
+
+  
+    <a href="https://github.com/hotosm/ScaleODM/edit/main/docs/nodeodm-compatibility.md" title="Edit this page" class="md-content__button md-icon" rel="edit">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-file-pen" viewBox="0 0 24 24"><path d="M12.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v9.34"/><path d="M14 2v5a1 1 0 0 0 1 1h5M10.378 12.622a1 1 0 0 1 3 3.003L8.36 20.637a2 2 0 0 1-.854.506l-2.867.837a.5.5 0 0 1-.62-.62l.836-2.869a2 2 0 0 1 .506-.853z"/></svg>
+    </a>
+  
+  
+
+
+<h1 id="nodeodm-api-compatibility">NodeODM API Compatibility<a class="headerlink" href="#nodeodm-api-compatibility" title="Permanent link">&para;</a></h1>
+<p>ScaleODM implements the NodeODM API, but stores data in S3 and runs jobs as Argo
+Workflows. This makes it a drop-in, scalable replacement for NodeODM.</p>
+<p>Just want the shortest pyodm migration path? Start with the
+<a href=".././nodeodm-migrate/">quick migration guide</a>, then come back here for the full
+endpoint and behaviour reference.</p>
+<h2 id="quick-start-deploy-to-existing-cluster">Quick Start: Deploy to Existing Cluster<a class="headerlink" href="#quick-start-deploy-to-existing-cluster" title="Permanent link">&para;</a></h2>
+<p>If you already have Argo Workflows installed in an <code>argo</code> namespace:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># 1. Create the namespace</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>kubectl<span class="w"> </span>create<span class="w"> </span>namespace<span class="w"> </span>scaleodm
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># 2. Create the required runtime secret</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>kubectl<span class="w"> </span>create<span class="w"> </span>secret<span class="w"> </span>generic<span class="w"> </span>scaleodm-secrets<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a><span class="w">  </span>--namespace<span class="w"> </span>scaleodm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">SCALEODM_DATABASE_URL</span><span class="o">=</span><span class="s2">"postgresql://user:pass@your-db:5432/scaleodm?sslmode=require"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">AWS_S3_ENDPOINT</span><span class="o">=</span><span class="s2">"https://s3.amazonaws.com"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">AWS_ACCESS_KEY_ID</span><span class="o">=</span><span class="s2">"YOUR_ACCESS_KEY"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">AWS_SECRET_ACCESS_KEY</span><span class="o">=</span><span class="s2">"YOUR_SECRET_KEY"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">  </span>--from-literal<span class="o">=</span><span class="nv">AWS_DEFAULT_REGION</span><span class="o">=</span><span class="s2">"us-east-1"</span>
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a><span class="c1"># 3. Install the chart (skip Argo subchart since you already have it)</span>
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>helm<span class="w"> </span>install<span class="w"> </span>scaleodm<span class="w"> </span>./chart<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a><span class="w">  </span>--namespace<span class="w"> </span>scaleodm<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a><span class="w">  </span>--set<span class="w"> </span>argo.enabled<span class="o">=</span><span class="nb">false</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="w">  </span>--set<span class="w"> </span>database.external.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a><span class="w">  </span>--set<span class="w"> </span>s3.external.enabled<span class="o">=</span><span class="nb">true</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a><span class="w">  </span>--set<span class="w"> </span>secrets.runtime.name<span class="o">=</span><span class="s2">"scaleodm-secrets"</span>
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a><span class="c1"># 4. Verify</span>
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>scaleodm
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>curl<span class="w"> </span>http://scaleodm.scaleodm.svc.cluster.local:31100/info
+</code></pre></div>
+<p>The API is now available at <code>scaleodm.scaleodm.svc.cluster.local:31100</code> from within the cluster.</p>
+<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>The processing pipeline for each task:</p>
+<ol>
+<li><strong>Task creation</strong> - <code>POST /task/new</code> with an S3 path (via <code>zipurl</code> or <code>readS3Path</code>)</li>
+<li><strong>Download stage</strong> - Argo workflow pod uses rclone to copy images from S3 to local disk. Supports raw images (jpg/tif) and archives (zip/tar/tar.gz) which are auto-extracted and flattened.</li>
+<li><strong>Process stage</strong> - ODM container processes the images</li>
+<li><strong>Upload stage</strong> - rclone pushes results back to S3 (to <code>writeS3Path</code> or <code>{zipurl}-output/</code>)</li>
+<li><strong>Query results</strong> - <code>GET /task/{uuid}/info</code> for status, <code>GET /task/{uuid}/assets</code> for output discovery, and <code>GET /task/{uuid}/download/{asset}</code> for the canonical 302 redirect flow to pre-signed S3 URLs</li>
+</ol>
+<h2 id="using-with-pyodm">Using with pyodm<a class="headerlink" href="#using-with-pyodm" title="Permanent link">&para;</a></h2>
+<p>pyodm's <code>create_task()</code> uses NodeODM's chunked upload flow (<code>/task/new/init</code> + <code>/task/new/upload</code> + <code>/task/new/commit</code>) which ScaleODM does not implement - ScaleODM processes images already in S3.</p>
+<p>However, pyodm works with ScaleODM for <strong>task creation via <code>Node.post()</code></strong> and for <strong>all monitoring/download operations</strong> via the standard <code>Task</code> class. No custom wrapper package needed.</p>
+<h3 id="create-tasks-with-pyodm-s3">Create tasks with pyodm + S3<a class="headerlink" href="#create-tasks-with-pyodm-s3" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyodm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyodm.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">Task</span>
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="n">node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span><span class="s2">"scaleodm.scaleodm.svc.cluster.local"</span><span class="p">,</span> <span class="mi">31100</span><span class="p">)</span>
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="c1"># Create task - use Node.post() to send zipurl directly</span>
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a><span class="n">result</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">"/task/new"</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="p">{</span>
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>    <span class="s2">"name"</span><span class="p">:</span> <span class="s2">"my-project"</span><span class="p">,</span>
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>    <span class="s2">"zipurl"</span><span class="p">:</span> <span class="s2">"s3://mybucket/drone-images/"</span><span class="p">,</span>
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>    <span class="s2">"options"</span><span class="p">:</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">([</span>
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>        <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"fast-orthophoto"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>        <span class="p">{</span><span class="s2">"name"</span><span class="p">:</span> <span class="s2">"dsm"</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>    <span class="p">]),</span>
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a><span class="p">})</span>
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a><span class="n">uuid</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">"uuid"</span><span class="p">]</span>
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Task created: </span><span class="si">{</span><span class="n">uuid</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a><span class="c1"># Wrap in a pyodm Task for monitoring - all standard methods work</span>
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a><span class="n">task</span> <span class="o">=</span> <span class="n">Task</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">uuid</span><span class="p">)</span>
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a><span class="c1"># Poll status</span>
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a><span class="n">info</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">info</span><span class="p">()</span>
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Status: </span><span class="si">{</span><span class="n">info</span><span class="o">.</span><span class="n">status</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>       <span class="c1"># TaskStatus enum</span>
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a><span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Progress: </span><span class="si">{</span><span class="n">info</span><span class="o">.</span><span class="n">progress</span><span class="si">}</span><span class="s2">%"</span><span class="p">)</span>
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a><span class="c1"># Block until complete</span>
+<a id="__codelineno-1-28" name="__codelineno-1-28" href="#__codelineno-1-28"></a><span class="n">task</span><span class="o">.</span><span class="n">wait_for_completion</span><span class="p">()</span>
+<a id="__codelineno-1-29" name="__codelineno-1-29" href="#__codelineno-1-29"></a>
+<a id="__codelineno-1-30" name="__codelineno-1-30" href="#__codelineno-1-30"></a><span class="c1"># Download results (follows redirect to pre-signed S3 URL)</span>
+<a id="__codelineno-1-31" name="__codelineno-1-31" href="#__codelineno-1-31"></a><span class="n">task</span><span class="o">.</span><span class="n">download_assets</span><span class="p">(</span><span class="s2">"/tmp/results/"</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="helper-function-for-cleaner-integration">Helper function for cleaner integration<a class="headerlink" href="#helper-function-for-cleaner-integration" title="Permanent link">&para;</a></h3>
+<p>If you're replacing NodeODM in an existing app, add this helper:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="kn">import</span><span class="w"> </span><span class="nn">json</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyodm</span><span class="w"> </span><span class="kn">import</span> <span class="n">Node</span>
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a><span class="kn">from</span><span class="w"> </span><span class="nn">pyodm.api</span><span class="w"> </span><span class="kn">import</span> <span class="n">Task</span>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>
+<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a><span class="k">def</span><span class="w"> </span><span class="nf">create_s3_task</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">s3_path</span><span class="p">,</span> <span class="n">name</span><span class="o">=</span><span class="s2">"odm-project"</span><span class="p">,</span> <span class="n">options</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="w">    </span><span class="sd">"""Create a ScaleODM task from an S3 path of images.</span>
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a><span class="sd">    Args:</span>
+<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="sd">        node: pyodm Node pointed at ScaleODM</span>
+<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="sd">        s3_path: S3 path containing images (e.g. "s3://bucket/images/")</span>
+<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a><span class="sd">        name: Project name</span>
+<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a><span class="sd">        options: Dict of ODM options (e.g. {"dsm": True})</span>
+<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>
+<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a><span class="sd">    Returns:</span>
+<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a><span class="sd">        pyodm Task object (supports .info(), .wait_for_completion(),</span>
+<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a><span class="sd">        .download_assets(), etc.)</span>
+<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a><span class="sd">    """</span>
+<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>    <span class="n">odm_options</span> <span class="o">=</span> <span class="p">[]</span>
+<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>    <span class="k">if</span> <span class="n">options</span><span class="p">:</span>
+<a id="__codelineno-2-21" name="__codelineno-2-21" href="#__codelineno-2-21"></a>        <span class="k">for</span> <span class="n">k</span><span class="p">,</span> <span class="n">v</span> <span class="ow">in</span> <span class="n">options</span><span class="o">.</span><span class="n">items</span><span class="p">():</span>
+<a id="__codelineno-2-22" name="__codelineno-2-22" href="#__codelineno-2-22"></a>            <span class="n">odm_options</span><span class="o">.</span><span class="n">append</span><span class="p">({</span><span class="s2">"name"</span><span class="p">:</span> <span class="n">k</span><span class="p">,</span> <span class="s2">"value"</span><span class="p">:</span> <span class="n">v</span><span class="p">})</span>
+<a id="__codelineno-2-23" name="__codelineno-2-23" href="#__codelineno-2-23"></a>
+<a id="__codelineno-2-24" name="__codelineno-2-24" href="#__codelineno-2-24"></a>    <span class="n">data</span> <span class="o">=</span> <span class="p">{</span>
+<a id="__codelineno-2-25" name="__codelineno-2-25" href="#__codelineno-2-25"></a>        <span class="s2">"name"</span><span class="p">:</span> <span class="n">name</span><span class="p">,</span>
+<a id="__codelineno-2-26" name="__codelineno-2-26" href="#__codelineno-2-26"></a>        <span class="s2">"zipurl"</span><span class="p">:</span> <span class="n">s3_path</span><span class="p">,</span>
+<a id="__codelineno-2-27" name="__codelineno-2-27" href="#__codelineno-2-27"></a>    <span class="p">}</span>
+<a id="__codelineno-2-28" name="__codelineno-2-28" href="#__codelineno-2-28"></a>    <span class="k">if</span> <span class="n">odm_options</span><span class="p">:</span>
+<a id="__codelineno-2-29" name="__codelineno-2-29" href="#__codelineno-2-29"></a>        <span class="n">data</span><span class="p">[</span><span class="s2">"options"</span><span class="p">]</span> <span class="o">=</span> <span class="n">json</span><span class="o">.</span><span class="n">dumps</span><span class="p">(</span><span class="n">odm_options</span><span class="p">)</span>
+<a id="__codelineno-2-30" name="__codelineno-2-30" href="#__codelineno-2-30"></a>
+<a id="__codelineno-2-31" name="__codelineno-2-31" href="#__codelineno-2-31"></a>    <span class="n">result</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">post</span><span class="p">(</span><span class="s2">"/task/new"</span><span class="p">,</span> <span class="n">data</span><span class="o">=</span><span class="n">data</span><span class="p">)</span>
+<a id="__codelineno-2-32" name="__codelineno-2-32" href="#__codelineno-2-32"></a>    <span class="k">return</span> <span class="n">Task</span><span class="p">(</span><span class="n">node</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">json</span><span class="p">()[</span><span class="s2">"uuid"</span><span class="p">])</span>
+<a id="__codelineno-2-33" name="__codelineno-2-33" href="#__codelineno-2-33"></a>
+<a id="__codelineno-2-34" name="__codelineno-2-34" href="#__codelineno-2-34"></a>
+<a id="__codelineno-2-35" name="__codelineno-2-35" href="#__codelineno-2-35"></a><span class="c1"># Usage - almost identical to pyodm's create_task():</span>
+<a id="__codelineno-2-36" name="__codelineno-2-36" href="#__codelineno-2-36"></a><span class="n">node</span> <span class="o">=</span> <span class="n">Node</span><span class="p">(</span><span class="s2">"scaleodm-host"</span><span class="p">,</span> <span class="mi">31100</span><span class="p">)</span>
+<a id="__codelineno-2-37" name="__codelineno-2-37" href="#__codelineno-2-37"></a><span class="n">task</span> <span class="o">=</span> <span class="n">create_s3_task</span><span class="p">(</span>
+<a id="__codelineno-2-38" name="__codelineno-2-38" href="#__codelineno-2-38"></a>    <span class="n">node</span><span class="p">,</span>
+<a id="__codelineno-2-39" name="__codelineno-2-39" href="#__codelineno-2-39"></a>    <span class="s2">"s3://mybucket/drone-images/"</span><span class="p">,</span>
+<a id="__codelineno-2-40" name="__codelineno-2-40" href="#__codelineno-2-40"></a>    <span class="n">name</span><span class="o">=</span><span class="s2">"my-project"</span><span class="p">,</span>
+<a id="__codelineno-2-41" name="__codelineno-2-41" href="#__codelineno-2-41"></a>    <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">"fast-orthophoto"</span><span class="p">:</span> <span class="kc">True</span><span class="p">,</span> <span class="s2">"dsm"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-2-42" name="__codelineno-2-42" href="#__codelineno-2-42"></a><span class="p">)</span>
+<a id="__codelineno-2-43" name="__codelineno-2-43" href="#__codelineno-2-43"></a><span class="n">task</span><span class="o">.</span><span class="n">wait_for_completion</span><span class="p">()</span>
+<a id="__codelineno-2-44" name="__codelineno-2-44" href="#__codelineno-2-44"></a><span class="n">task</span><span class="o">.</span><span class="n">download_assets</span><span class="p">(</span><span class="s2">"/tmp/results/"</span><span class="p">)</span>
+</code></pre></div>
+<h3 id="migration-from-nodeodm">Migration from NodeODM<a class="headerlink" href="#migration-from-nodeodm" title="Permanent link">&para;</a></h3>
+<p>Replace your existing <code>create_task()</code> calls:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># BEFORE (NodeODM - uploads files directly):</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a><span class="n">task</span> <span class="o">=</span> <span class="n">node</span><span class="o">.</span><span class="n">create_task</span><span class="p">(</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>    <span class="p">[</span><span class="s2">"img1.jpg"</span><span class="p">,</span> <span class="s2">"img2.jpg"</span><span class="p">,</span> <span class="o">...</span><span class="p">],</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>    <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">"dsm"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="p">)</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="c1"># AFTER (ScaleODM - images pre-uploaded to S3):</span>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="n">task</span> <span class="o">=</span> <span class="n">create_s3_task</span><span class="p">(</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>    <span class="n">node</span><span class="p">,</span>
+<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a>    <span class="s2">"s3://mybucket/project/images/"</span><span class="p">,</span>
+<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a>    <span class="n">options</span><span class="o">=</span><span class="p">{</span><span class="s2">"dsm"</span><span class="p">:</span> <span class="kc">True</span><span class="p">},</span>
+<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="p">)</span>
+<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a>
+<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="c1"># Everything else stays the same:</span>
+<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="n">task</span><span class="o">.</span><span class="n">wait_for_completion</span><span class="p">()</span>
+<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a><span class="n">task</span><span class="o">.</span><span class="n">download_assets</span><span class="p">(</span><span class="s2">"/tmp/results/"</span><span class="p">)</span>
+<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="n">info</span> <span class="o">=</span> <span class="n">task</span><span class="o">.</span><span class="n">info</span><span class="p">()</span>
+<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a><span class="n">task</span><span class="o">.</span><span class="n">cancel</span><span class="p">()</span>
+<a id="__codelineno-3-19" name="__codelineno-3-19" href="#__codelineno-3-19"></a><span class="n">task</span><span class="o">.</span><span class="n">remove</span><span class="p">()</span>
+</code></pre></div>
+<h2 id="implemented-endpoints">Implemented Endpoints<a class="headerlink" href="#implemented-endpoints" title="Permanent link">&para;</a></h2>
+<h3 id="server-information">Server Information<a class="headerlink" href="#server-information" title="Permanent link">&para;</a></h3>
+<h4 id="get-info"><code>GET /info</code><a class="headerlink" href="#get-info" title="Permanent link">&para;</a></h4>
+<p>Returns node information including queue count and engine version.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="p">{</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a><span class="w">  </span><span class="nt">"version"</span><span class="p">:</span><span class="w"> </span><span class="s2">"&lt;chart appVersion&gt;"</span><span class="p">,</span>
+<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a><span class="w">  </span><span class="nt">"taskQueueCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">5</span><span class="p">,</span>
+<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="w">  </span><span class="nt">"maxImages"</span><span class="p">:</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span>
+<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a><span class="w">  </span><span class="nt">"engine"</span><span class="p">:</span><span class="w"> </span><span class="s2">"odm"</span><span class="p">,</span>
+<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a><span class="w">  </span><span class="nt">"engineVersion"</span><span class="p">:</span><span class="w"> </span><span class="s2">"docker.io/opendronemap/odm:3.6.2"</span>
+<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="p">}</span>
+</code></pre></div>
+<h4 id="get-options"><code>GET /options</code><a class="headerlink" href="#get-options" title="Permanent link">&para;</a></h4>
+<p>Returns available ODM processing options.</p>
+<h3 id="task-management">Task Management<a class="headerlink" href="#task-management" title="Permanent link">&para;</a></h3>
+<h4 id="post-tasknew"><code>POST /task/new</code><a class="headerlink" href="#post-tasknew" title="Permanent link">&para;</a></h4>
+<p>Creates a new processing task.</p>
+<p><strong>Parameters (form-encoded or JSON body):</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Required</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>zipurl</code></td>
+<td>*</td>
+<td>S3 path to images (e.g. <code>s3://bucket/images/</code>). NodeODM-compatible.</td>
+</tr>
+<tr>
+<td><code>readS3Path</code></td>
+<td>*</td>
+<td>S3 path to images. Preferred for new integrations.</td>
+</tr>
+<tr>
+<td><code>writeS3Path</code></td>
+<td></td>
+<td>S3 path for outputs. Defaults to <code>readS3Path/output/</code>.</td>
+</tr>
+<tr>
+<td><code>name</code></td>
+<td></td>
+<td>Task name. Defaults to <code>odm-project</code>.</td>
+</tr>
+<tr>
+<td><code>options</code></td>
+<td></td>
+<td>JSON array: <code>[{"name": "dsm", "value": true}]</code></td>
+</tr>
+<tr>
+<td><code>s3Endpoint</code></td>
+<td></td>
+<td>Custom S3 endpoint (MinIO, Garage, etc.). Must be reachable from workflow pods.</td>
+</tr>
+<tr>
+<td><code>s3Region</code></td>
+<td></td>
+<td>S3 region. Defaults to <code>us-east-1</code>.</td>
+</tr>
+<tr>
+<td><code>webhook</code></td>
+<td></td>
+<td>Callback URL on completion.</td>
+</tr>
+<tr>
+<td><code>skipPostProcessing</code></td>
+<td></td>
+<td>Skip point cloud tiles.</td>
+</tr>
+<tr>
+<td><code>processingMode</code></td>
+<td></td>
+<td>Pipeline mode. See <a href="#processing-modes">Processing Modes</a>. Defaults to <code>standard</code>.</td>
+</tr>
+<tr>
+<td><code>s3ScanDepth</code></td>
+<td></td>
+<td>Max depth for the rclone scan beneath <code>readS3Path</code>. Defaults to <code>1</code> (just the given dir). Range: <code>1</code>-<code>10</code>. See <a href="#scan-depth">Scan depth</a>.</td>
+</tr>
+<tr>
+<td><code>excludePaths</code></td>
+<td></td>
+<td>JSON array of rclone-style filter patterns appended to the default exclude set.</td>
+</tr>
+<tr>
+<td><code>useDefaultExcludes</code></td>
+<td></td>
+<td>Apply the built-in ODM-output exclude list. Defaults to <code>true</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>* One of <code>zipurl</code> or <code>readS3Path</code> is required. Both must be <code>s3://</code> paths.</p>
+<p>When using <code>zipurl</code>, outputs are written to <code>{zipurl}-output/</code>.
+When using <code>readS3Path</code>, outputs default to <code>readS3Path/output/</code> (or explicit <code>writeS3Path</code>).</p>
+<h4 id="processing-modes">Processing modes<a class="headerlink" href="#processing-modes" title="Permanent link">&para;</a></h4>
+<p><code>processingMode</code> selects the pipeline shape. Today only <code>standard</code> is implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).</p>
+<table>
+<thead>
+<tr>
+<th>Mode</th>
+<th>Status</th>
+<th>Behaviour</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>standard</code></td>
+<td>implemented (default)</td>
+<td>The regular ODM pipeline: download → process → upload. Imagery under <code>readS3Path</code> is gathered into a single ODM run. How wide the input scan is is configured separately via <a href="#scan-depth"><code>s3ScanDepth</code></a> - use depth <code>1</code> for one task's images dir, or a higher value to roll up several task subdirs under a project root.</td>
+</tr>
+<tr>
+<td><code>merge-existing</code></td>
+<td>reserved (501)</td>
+<td>Given a project root that already contains per-task ODM outputs, run only the merge half of split-merge to stitch the existing orthos, DEMs, and point clouds into a single set of products. The "split" half is assumed already complete, which is much cheaper than re-running per-task processing from raw imagery.</td>
+</tr>
+<tr>
+<td><code>thermal</code></td>
+<td>reserved (501)</td>
+<td>Dedicated pipeline for thermal imagery: applies a thermal-specific pre-processing stage (radiometric handling, alignment) before the ODM run. Implementation deferred.</td>
+</tr>
+<tr>
+<td><code>city-scale</code></td>
+<td>reserved (501)</td>
+<td>Large-area (&gt;40 km²) projects requiring corrective alignment. The pipeline iteratively fans out from a central anchor task, aligning each subsequent task against prior LAZ point clouds, then runs a final alignment pass against a global DEM. Implementation deferred.</td>
+</tr>
+</tbody>
+</table>
+<p>Reserved modes return HTTP 501 with a clear message so clients can probe support.</p>
+<h4 id="scan-depth">Scan depth<a class="headerlink" href="#scan-depth" title="Permanent link">&para;</a></h4>
+<p><code>s3ScanDepth</code> caps how deep the download stage walks beneath <code>readS3Path</code>. It maps directly to rclone's <code>--max-depth N</code>.</p>
+<table>
+<thead>
+<tr>
+<th><code>s3ScanDepth</code></th>
+<th>Behaviour</th>
+<th>When to use</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1</code> (default)</td>
+<td>Only files in the given directory itself.</td>
+<td><code>readS3Path</code> already points at the imagery dir, e.g. <code>s3://bucket/project-id/task-id/images/</code>.</td>
+</tr>
+<tr>
+<td><code>2</code>-<code>10</code></td>
+<td>Walks N levels of subdirectories.</td>
+<td><code>readS3Path</code> points at a higher-level prefix that contains nested task layouts. For DroneTM-style <code>projectid/taskid/images/*.jpg</code>, a depth of <code>3</code> against <code>s3://bucket/projectid/</code> will pick up imagery in every task subdir in one run.</td>
+</tr>
+<tr>
+<td><code>0</code>/unset</td>
+<td>Resolved to the default (<code>1</code>).</td>
+<td>-</td>
+</tr>
+</tbody>
+</table>
+<p>Values outside <code>1</code>-<code>10</code> are rejected with HTTP 400.</p>
+<h4 id="exclude-patterns">Exclude patterns<a class="headerlink" href="#exclude-patterns" title="Permanent link">&para;</a></h4>
+<p>The download stage applies a default exclude list when <code>useDefaultExcludes</code> is <code>true</code> (the default). The current default set is:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>odm_orthophoto/**
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>odm_dem/**
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>odm_dem_tiles/**
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a>odm_texturing/**
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>odm_texturing_25d/**
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>odm_meshing/**
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a>odm_filterpoints/**
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>odm_georeferencing/**
+<a id="__codelineno-5-9" name="__codelineno-5-9" href="#__codelineno-5-9"></a>odm_report/**
+<a id="__codelineno-5-10" name="__codelineno-5-10" href="#__codelineno-5-10"></a>images_resize/**
+<a id="__codelineno-5-11" name="__codelineno-5-11" href="#__codelineno-5-11"></a>entwine_pointcloud/**
+<a id="__codelineno-5-12" name="__codelineno-5-12" href="#__codelineno-5-12"></a>mapproxy/**
+<a id="__codelineno-5-13" name="__codelineno-5-13" href="#__codelineno-5-13"></a>submodels/**
+<a id="__codelineno-5-14" name="__codelineno-5-14" href="#__codelineno-5-14"></a>*-output/**
+<a id="__codelineno-5-15" name="__codelineno-5-15" href="#__codelineno-5-15"></a>all.zip
+<a id="__codelineno-5-16" name="__codelineno-5-16" href="#__codelineno-5-16"></a>**/all.zip
+</code></pre></div>
+<p>These are rclone filter patterns: <code>dir/**</code> matches the directory at any depth and excludes its contents. The <code>all.zip</code> entries are critical - the download stage auto-extracts archives with junk-paths, so a stray <code>all.zip</code> from a prior run would otherwise dump every flattened orthophoto/DSM/log file into the input image dir.</p>
+<p>Set <code>useDefaultExcludes: false</code> only if you genuinely want to re-process a prior run's output as input.</p>
+<p><code>excludePaths</code> accepts a JSON array of additional patterns, validated for path traversal (<code>..</code>), absolute paths (leading <code>/</code>), embedded newlines, and shell metacharacters. Patterns are written to a <code>--filter-from</code> file at workflow runtime, so they never touch a shell.</p>
+<p>Example - roll up every task under a project root into one run, deeper scan, and ignore a custom scratch dir:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://scaleodm:31100/task/new<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-2" name="__codelineno-6-2" href="#__codelineno-6-2"></a><span class="w">  </span>-H<span class="w"> </span><span class="s2">"Content-Type: application/json"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-6-3" name="__codelineno-6-3" href="#__codelineno-6-3"></a><span class="w">  </span>-d<span class="w"> </span><span class="s1">'{</span>
+<a id="__codelineno-6-4" name="__codelineno-6-4" href="#__codelineno-6-4"></a><span class="s1">    "name": "project-123",</span>
+<a id="__codelineno-6-5" name="__codelineno-6-5" href="#__codelineno-6-5"></a><span class="s1">    "readS3Path": "s3://mybucket/project-123/",</span>
+<a id="__codelineno-6-6" name="__codelineno-6-6" href="#__codelineno-6-6"></a><span class="s1">    "processingMode": "standard",</span>
+<a id="__codelineno-6-7" name="__codelineno-6-7" href="#__codelineno-6-7"></a><span class="s1">    "s3ScanDepth": 3,</span>
+<a id="__codelineno-6-8" name="__codelineno-6-8" href="#__codelineno-6-8"></a><span class="s1">    "excludePaths": "[\"scratch/**\", \"*.bak\"]"</span>
+<a id="__codelineno-6-9" name="__codelineno-6-9" href="#__codelineno-6-9"></a><span class="s1">  }'</span>
+</code></pre></div>
+<h4 id="workspace-file-options">Workspace file options<a class="headerlink" href="#workspace-file-options" title="Permanent link">&para;</a></h4>
+<p><code>boundary</code> and <code>cameras</code> accept inline JSON (string or object), an <code>s3://</code> URL,
+or a plain ODM file path. Inline and S3 documents are written to the workspace
+before processing and preserved on restart when <code>options</code> is omitted.</p>
+<p>S3 documents are validated on submission; missing, unreadable, empty or invalid
+files return <code>400</code>. Inline limits are 256 KiB for boundaries and 64 KiB for
+cameras to keep workflow specs small. Use S3 for larger documents.</p>
+<h5 id="boundary">Boundary<a class="headerlink" href="#boundary" title="Permanent link">&para;</a></h5>
+<p><code>--boundary</code> clips the reconstruction to one <code>Polygon</code>, supplied as a geometry,
+<code>Feature</code>, or single-feature <code>FeatureCollection</code>. It requires a non-empty ring
+of numeric coordinate pairs and is saved as <code>/workspace/{workflow}/boundary.geojson</code>.</p>
+<h5 id="cameras">Cameras<a class="headerlink" href="#cameras" title="Permanent link">&para;</a></h5>
+<p><code>--cameras</code> supplies camera intrinsics. The document must be a non-empty object
+keyed by ODM camera ID. Each entry requires <code>projection_type</code>, positive integer
+<code>width</code> and <code>height</code>, and both <code>focal_x</code> and <code>focal_y</code> if either is set.</p>
+<p>IDs require at least six space-separated parts, such as
+<code>dji fc8482 4032 3024 brown 0.6666</code>; the <code>v2</code> prefix is accepted. Shorter IDs
+return <code>400</code> because ODM silently discards them.</p>
+<p>Calibration is saved as <code>/workspace/{workflow}/cameras-input.json</code> to avoid
+ODM overwriting it. ScaleODM does not add <code>--use-fixed-camera-params</code>.</p>
+<p>If <code>s3Endpoint</code> is provided, ScaleODM applies that endpoint to workflow pods and API-side
+S3 operations (image counting, workspace file preflight, log fallback, and pre-signed downloads).
+When it is omitted, both fall back to the deployment's <code>AWS_S3_ENDPOINT</code>, so the API and the
+workflow always resolve against the same store. Endpoints are normalized to
+scheme+host[:port]; whether a store is treated as AWS or as S3-compatible is decided by
+host, so an explicit <code>s3.amazonaws.com</code> keeps AWS addressing rather than being forced to
+path-style.</p>
+<p><strong>Response:</strong> <code>{"uuid": "odm-pipeline-abc123"}</code></p>
+<h4 id="get-taskuuidinfo"><code>GET /task/{uuid}/info</code><a class="headerlink" href="#get-taskuuidinfo" title="Permanent link">&para;</a></h4>
+<p>Returns task status. The <code>status</code> field is a nested object matching NodeODM spec:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a><span class="p">{</span>
+<a id="__codelineno-7-2" name="__codelineno-7-2" href="#__codelineno-7-2"></a><span class="w">  </span><span class="nt">"uuid"</span><span class="p">:</span><span class="w"> </span><span class="s2">"odm-pipeline-abc123"</span><span class="p">,</span>
+<a id="__codelineno-7-3" name="__codelineno-7-3" href="#__codelineno-7-3"></a><span class="w">  </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"my-project"</span><span class="p">,</span>
+<a id="__codelineno-7-4" name="__codelineno-7-4" href="#__codelineno-7-4"></a><span class="w">  </span><span class="nt">"dateCreated"</span><span class="p">:</span><span class="w"> </span><span class="mi">1705334400</span><span class="p">,</span>
+<a id="__codelineno-7-5" name="__codelineno-7-5" href="#__codelineno-7-5"></a><span class="w">  </span><span class="nt">"processingTime"</span><span class="p">:</span><span class="w"> </span><span class="mi">120000</span><span class="p">,</span>
+<a id="__codelineno-7-6" name="__codelineno-7-6" href="#__codelineno-7-6"></a><span class="w">  </span><span class="nt">"status"</span><span class="p">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nt">"code"</span><span class="p">:</span><span class="w"> </span><span class="mi">20</span><span class="w"> </span><span class="p">},</span>
+<a id="__codelineno-7-7" name="__codelineno-7-7" href="#__codelineno-7-7"></a><span class="w">  </span><span class="nt">"options"</span><span class="p">:</span><span class="w"> </span><span class="p">[{</span><span class="w"> </span><span class="nt">"name"</span><span class="p">:</span><span class="w"> </span><span class="s2">"fast-orthophoto"</span><span class="p">,</span><span class="w"> </span><span class="nt">"value"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="w"> </span><span class="p">}],</span>
+<a id="__codelineno-7-8" name="__codelineno-7-8" href="#__codelineno-7-8"></a><span class="w">  </span><span class="nt">"imagesCount"</span><span class="p">:</span><span class="w"> </span><span class="mi">0</span><span class="p">,</span>
+<a id="__codelineno-7-9" name="__codelineno-7-9" href="#__codelineno-7-9"></a><span class="w">  </span><span class="nt">"progress"</span><span class="p">:</span><span class="w"> </span><span class="mi">50</span><span class="p">,</span>
+<a id="__codelineno-7-10" name="__codelineno-7-10" href="#__codelineno-7-10"></a><span class="w">  </span><span class="nt">"output"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span><span class="s2">"Processing images..."</span><span class="p">]</span>
+<a id="__codelineno-7-11" name="__codelineno-7-11" href="#__codelineno-7-11"></a><span class="p">}</span>
+</code></pre></div>
+<p>Failed tasks include an error message: <code>{"status": {"code": 30, "errorMessage": "..."}}</code></p>
+<p><strong>Status codes:</strong> 10=QUEUED, 20=RUNNING, 30=FAILED, 40=COMPLETED, 50=CANCELED</p>
+<h4 id="get-taskuuidoutput"><code>GET /task/{uuid}/output</code><a class="headerlink" href="#get-taskuuidoutput" title="Permanent link">&para;</a></h4>
+<p>Console output. Query param <code>line</code> to start from a specific line.</p>
+<h4 id="get-taskuuidassets"><code>GET /task/{uuid}/assets</code><a class="headerlink" href="#get-taskuuidassets" title="Permanent link">&para;</a></h4>
+<p>Additive convenience endpoint for explicit output discovery.</p>
+<p>Query params:</p>
+<ul>
+<li><code>includeAdditional</code> (default <code>false</code>): when true, includes discovered non-primary files.</li>
+<li><code>additionalLimit</code> (default <code>100</code>, max <code>1000</code>): cap for additional discovered files.</li>
+</ul>
+<p>Response shape:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a><span class="p">{</span>
+<a id="__codelineno-8-2" name="__codelineno-8-2" href="#__codelineno-8-2"></a><span class="w">  </span><span class="nt">"primary"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-3" name="__codelineno-8-3" href="#__codelineno-8-3"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-8-4" name="__codelineno-8-4" href="#__codelineno-8-4"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"all_zip"</span><span class="p">,</span>
+<a id="__codelineno-8-5" name="__codelineno-8-5" href="#__codelineno-8-5"></a><span class="w">      </span><span class="nt">"asset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"all.zip"</span><span class="p">,</span>
+<a id="__codelineno-8-6" name="__codelineno-8-6" href="#__codelineno-8-6"></a><span class="w">      </span><span class="nt">"exists"</span><span class="p">:</span><span class="w"> </span><span class="kc">true</span><span class="p">,</span>
+<a id="__codelineno-8-7" name="__codelineno-8-7" href="#__codelineno-8-7"></a><span class="w">      </span><span class="nt">"downloadUrl"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/task/odm-pipeline-abc/download/all.zip"</span>
+<a id="__codelineno-8-8" name="__codelineno-8-8" href="#__codelineno-8-8"></a><span class="w">    </span><span class="p">},</span>
+<a id="__codelineno-8-9" name="__codelineno-8-9" href="#__codelineno-8-9"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-8-10" name="__codelineno-8-10" href="#__codelineno-8-10"></a><span class="w">      </span><span class="nt">"id"</span><span class="p">:</span><span class="w"> </span><span class="s2">"point_cloud"</span><span class="p">,</span>
+<a id="__codelineno-8-11" name="__codelineno-8-11" href="#__codelineno-8-11"></a><span class="w">      </span><span class="nt">"asset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"georeferenced_model.laz"</span><span class="p">,</span>
+<a id="__codelineno-8-12" name="__codelineno-8-12" href="#__codelineno-8-12"></a><span class="w">      </span><span class="nt">"exists"</span><span class="p">:</span><span class="w"> </span><span class="kc">false</span>
+<a id="__codelineno-8-13" name="__codelineno-8-13" href="#__codelineno-8-13"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-8-14" name="__codelineno-8-14" href="#__codelineno-8-14"></a><span class="w">  </span><span class="p">],</span>
+<a id="__codelineno-8-15" name="__codelineno-8-15" href="#__codelineno-8-15"></a><span class="w">  </span><span class="nt">"additional"</span><span class="p">:</span><span class="w"> </span><span class="p">[</span>
+<a id="__codelineno-8-16" name="__codelineno-8-16" href="#__codelineno-8-16"></a><span class="w">    </span><span class="p">{</span>
+<a id="__codelineno-8-17" name="__codelineno-8-17" href="#__codelineno-8-17"></a><span class="w">      </span><span class="nt">"asset"</span><span class="p">:</span><span class="w"> </span><span class="s2">"report.pdf"</span><span class="p">,</span>
+<a id="__codelineno-8-18" name="__codelineno-8-18" href="#__codelineno-8-18"></a><span class="w">      </span><span class="nt">"downloadUrl"</span><span class="p">:</span><span class="w"> </span><span class="s2">"/task/odm-pipeline-abc/download/report.pdf"</span>
+<a id="__codelineno-8-19" name="__codelineno-8-19" href="#__codelineno-8-19"></a><span class="w">    </span><span class="p">}</span>
+<a id="__codelineno-8-20" name="__codelineno-8-20" href="#__codelineno-8-20"></a><span class="w">  </span><span class="p">]</span>
+<a id="__codelineno-8-21" name="__codelineno-8-21" href="#__codelineno-8-21"></a><span class="p">}</span>
+</code></pre></div>
+<p>Primary assets are always returned as exists/missing using a bounded check set (<code>all.zip</code>, <code>orthophoto.tif</code>, <code>dsm.tif</code>, <code>dtm.tif</code>, and first-match point-cloud candidates).</p>
+<h4 id="get-taskuuiddownloadasset"><code>GET /task/{uuid}/download/{asset}</code><a class="headerlink" href="#get-taskuuiddownloadasset" title="Permanent link">&para;</a></h4>
+<p>Canonical download endpoint. Returns HTTP 302 redirect to a pre-signed S3 URL (1 hour expiry). The new <code>/assets</code> endpoint returns URLs pointing here (not direct pre-signed URLs), so existing redirect semantics remain unchanged.</p>
+<h4 id="post-taskcancel"><code>POST /task/cancel</code><a class="headerlink" href="#post-taskcancel" title="Permanent link">&para;</a></h4>
+<p>Body: <code>{"uuid": "..."}</code> → <code>{"success": true}</code></p>
+<h4 id="post-taskremove"><code>POST /task/remove</code><a class="headerlink" href="#post-taskremove" title="Permanent link">&para;</a></h4>
+<p>Body: <code>{"uuid": "..."}</code> → <code>{"success": true}</code></p>
+<h4 id="post-taskrestart"><code>POST /task/restart</code><a class="headerlink" href="#post-taskrestart" title="Permanent link">&para;</a></h4>
+<p>Body: <code>{"uuid": "...", "options": "[...]"}</code> → <code>{"success": true}</code></p>
+<p>Omitting <code>options</code> reuses the stored flags, files and <code>odmImage</code>.</p>
+<h2 id="key-differences-from-nodeodm">Key Differences from NodeODM<a class="headerlink" href="#key-differences-from-nodeodm" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>NodeODM</th>
+<th>ScaleODM</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Image input</strong></td>
+<td>Upload via multipart form</td>
+<td>S3 path via <code>zipurl</code> or <code>readS3Path</code></td>
+</tr>
+<tr>
+<td><strong>Chunked upload</strong></td>
+<td><code>/task/new/init</code> + <code>/upload</code> + <code>/commit</code></td>
+<td>Not implemented (not needed)</td>
+</tr>
+<tr>
+<td><strong>Downloads</strong></td>
+<td>Direct binary response</td>
+<td>302 redirect to pre-signed S3 URL</td>
+</tr>
+<tr>
+<td><strong>UUIDs</strong></td>
+<td>Random UUID</td>
+<td>Argo workflow name (<code>odm-pipeline-xxxxx</code>)</td>
+</tr>
+<tr>
+<td><strong>Scaling</strong></td>
+<td>Single machine</td>
+<td>Kubernetes + Argo Workflows</td>
+</tr>
+<tr>
+<td><strong>Image formats</strong></td>
+<td>Upload any file</td>
+<td>S3 dir with jpg/tif (or zip/tar archives)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="status-mapping">Status Mapping<a class="headerlink" href="#status-mapping" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Argo Phase</th>
+<th>NodeODM Code</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Pending</td>
+<td>10</td>
+<td>QUEUED</td>
+</tr>
+<tr>
+<td>Running</td>
+<td>20</td>
+<td>RUNNING</td>
+</tr>
+<tr>
+<td>Succeeded</td>
+<td>40</td>
+<td>COMPLETED</td>
+</tr>
+<tr>
+<td>Failed</td>
+<td>30</td>
+<td>FAILED</td>
+</tr>
+<tr>
+<td>Error</td>
+<td>30</td>
+<td>FAILED</td>
+</tr>
+</tbody>
+</table>
+<p>A Running workflow whose pod hits an infrastructure error (image pull
+failure, missing secret) is reported as 30 with that error while it lasts.
+It is not saved, so the status returns to the live phase if Argo recovers.
+Clients that treat 30 as final, such as pyodm's <code>wait_for_completion()</code>,
+stop at that point.</p>
+<h2 id="deployment-reference">Deployment Reference<a class="headerlink" href="#deployment-reference" title="Permanent link">&para;</a></h2>
+<h3 id="helm-values-for-external-argo-external-db-external-s3">Helm Values for External Argo + External DB + External S3<a class="headerlink" href="#helm-values-for-external-argo-external-db-external-s3" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="c1"># values-production.yaml</span>
+<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="nt">argo</span><span class="p">:</span>
+<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">  </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">false</span><span class="w"> </span><span class="c1"># Use your existing Argo Workflows installation</span>
+<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a>
+<a id="__codelineno-9-5" name="__codelineno-9-5" href="#__codelineno-9-5"></a><span class="nt">database</span><span class="p">:</span>
+<a id="__codelineno-9-6" name="__codelineno-9-6" href="#__codelineno-9-6"></a><span class="w">  </span><span class="nt">external</span><span class="p">:</span>
+<a id="__codelineno-9-7" name="__codelineno-9-7" href="#__codelineno-9-7"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-9-8" name="__codelineno-9-8" href="#__codelineno-9-8"></a>
+<a id="__codelineno-9-9" name="__codelineno-9-9" href="#__codelineno-9-9"></a><span class="nt">s3</span><span class="p">:</span>
+<a id="__codelineno-9-10" name="__codelineno-9-10" href="#__codelineno-9-10"></a><span class="w">  </span><span class="nt">external</span><span class="p">:</span>
+<a id="__codelineno-9-11" name="__codelineno-9-11" href="#__codelineno-9-11"></a><span class="w">    </span><span class="nt">enabled</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span>
+<a id="__codelineno-9-12" name="__codelineno-9-12" href="#__codelineno-9-12"></a>
+<a id="__codelineno-9-13" name="__codelineno-9-13" href="#__codelineno-9-13"></a><span class="nt">secrets</span><span class="p">:</span>
+<a id="__codelineno-9-14" name="__codelineno-9-14" href="#__codelineno-9-14"></a><span class="w">  </span><span class="nt">runtime</span><span class="p">:</span>
+<a id="__codelineno-9-15" name="__codelineno-9-15" href="#__codelineno-9-15"></a><span class="w">    </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="s">"scaleodm-secrets"</span>
+<a id="__codelineno-9-16" name="__codelineno-9-16" href="#__codelineno-9-16"></a><span class="w">    </span><span class="nt">keys</span><span class="p">:</span>
+<a id="__codelineno-9-17" name="__codelineno-9-17" href="#__codelineno-9-17"></a><span class="w">      </span><span class="nt">databaseUrl</span><span class="p">:</span><span class="w"> </span><span class="s">"SCALEODM_DATABASE_URL"</span>
+<a id="__codelineno-9-18" name="__codelineno-9-18" href="#__codelineno-9-18"></a><span class="w">      </span><span class="nt">s3Endpoint</span><span class="p">:</span><span class="w"> </span><span class="s">"AWS_S3_ENDPOINT"</span>
+<a id="__codelineno-9-19" name="__codelineno-9-19" href="#__codelineno-9-19"></a><span class="w">      </span><span class="nt">accessKey</span><span class="p">:</span><span class="w"> </span><span class="s">"AWS_ACCESS_KEY_ID"</span>
+<a id="__codelineno-9-20" name="__codelineno-9-20" href="#__codelineno-9-20"></a><span class="w">      </span><span class="nt">secretKey</span><span class="p">:</span><span class="w"> </span><span class="s">"AWS_SECRET_ACCESS_KEY"</span>
+<a id="__codelineno-9-21" name="__codelineno-9-21" href="#__codelineno-9-21"></a><span class="w">      </span><span class="nt">region</span><span class="p">:</span><span class="w"> </span><span class="s">"AWS_DEFAULT_REGION"</span>
+<a id="__codelineno-9-22" name="__codelineno-9-22" href="#__codelineno-9-22"></a>
+<a id="__codelineno-9-23" name="__codelineno-9-23" href="#__codelineno-9-23"></a><span class="nt">api</span><span class="p">:</span>
+<a id="__codelineno-9-24" name="__codelineno-9-24" href="#__codelineno-9-24"></a><span class="w">  </span><span class="nt">replicaCount</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">2</span><span class="w"> </span><span class="c1"># HA - also creates a PodDisruptionBudget</span>
+<a id="__codelineno-9-25" name="__codelineno-9-25" href="#__codelineno-9-25"></a>
+<a id="__codelineno-9-26" name="__codelineno-9-26" href="#__codelineno-9-26"></a><span class="nt">config</span><span class="p">:</span>
+<a id="__codelineno-9-27" name="__codelineno-9-27" href="#__codelineno-9-27"></a><span class="w">  </span><span class="nt">odmImage</span><span class="p">:</span><span class="w"> </span><span class="s">"docker.io/opendronemap/odm:3.6.2"</span>
+</code></pre></div>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>helm<span class="w"> </span>install<span class="w"> </span>scaleodm<span class="w"> </span>./chart<span class="w"> </span>-n<span class="w"> </span>scaleodm<span class="w"> </span>-f<span class="w"> </span>values-production.yaml
+</code></pre></div>
+<h3 id="s3-structure">S3 Structure<a class="headerlink" href="#s3-structure" title="Permanent link">&para;</a></h3>
+<p>Single-task layout (default - <code>s3ScanDepth: 1</code>):</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>s3://mybucket/
+<a id="__codelineno-11-2" name="__codelineno-11-2" href="#__codelineno-11-2"></a>  └── project-123/
+<a id="__codelineno-11-3" name="__codelineno-11-3" href="#__codelineno-11-3"></a>      ├── images/            ← zipurl/readS3Path points here
+<a id="__codelineno-11-4" name="__codelineno-11-4" href="#__codelineno-11-4"></a>      │   ├── DJI_0001.jpg
+<a id="__codelineno-11-5" name="__codelineno-11-5" href="#__codelineno-11-5"></a>      │   ├── DJI_0002.jpg
+<a id="__codelineno-11-6" name="__codelineno-11-6" href="#__codelineno-11-6"></a>      │   └── ...
+<a id="__codelineno-11-7" name="__codelineno-11-7" href="#__codelineno-11-7"></a>      └── images-output/     ← auto-created by ScaleODM (zipurl mode)
+<a id="__codelineno-11-8" name="__codelineno-11-8" href="#__codelineno-11-8"></a>          ├── odm_orthophoto/
+<a id="__codelineno-11-9" name="__codelineno-11-9" href="#__codelineno-11-9"></a>          │   └── odm_orthophoto.tif
+<a id="__codelineno-11-10" name="__codelineno-11-10" href="#__codelineno-11-10"></a>          ├── odm_dem/
+<a id="__codelineno-11-11" name="__codelineno-11-11" href="#__codelineno-11-11"></a>          │   ├── dsm.tif
+<a id="__codelineno-11-12" name="__codelineno-11-12" href="#__codelineno-11-12"></a>          │   └── dtm.tif
+<a id="__codelineno-11-13" name="__codelineno-11-13" href="#__codelineno-11-13"></a>          └── ...
+</code></pre></div>
+<p>Multi-task layout (set <code>s3ScanDepth</code> deep enough to reach the imagery - typically <code>3</code> for <code>projectid/taskid/images/*.jpg</code>) - point <code>readS3Path</code> at the project root and ScaleODM gathers every task's imagery into one run:</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>s3://mybucket/project-123/   ← readS3Path points here
+<a id="__codelineno-12-2" name="__codelineno-12-2" href="#__codelineno-12-2"></a>  ├── task-a/
+<a id="__codelineno-12-3" name="__codelineno-12-3" href="#__codelineno-12-3"></a>  │   ├── images/
+<a id="__codelineno-12-4" name="__codelineno-12-4" href="#__codelineno-12-4"></a>  │   │   ├── DJI_0001.jpg
+<a id="__codelineno-12-5" name="__codelineno-12-5" href="#__codelineno-12-5"></a>  │   │   └── DJI_0002.jpg
+<a id="__codelineno-12-6" name="__codelineno-12-6" href="#__codelineno-12-6"></a>  │   └── output/            ← excluded by default
+<a id="__codelineno-12-7" name="__codelineno-12-7" href="#__codelineno-12-7"></a>  │       └── odm_orthophoto/odm_orthophoto.tif
+<a id="__codelineno-12-8" name="__codelineno-12-8" href="#__codelineno-12-8"></a>  ├── task-b/
+<a id="__codelineno-12-9" name="__codelineno-12-9" href="#__codelineno-12-9"></a>  │   └── images/
+<a id="__codelineno-12-10" name="__codelineno-12-10" href="#__codelineno-12-10"></a>  │       ├── DJI_0101.jpg
+<a id="__codelineno-12-11" name="__codelineno-12-11" href="#__codelineno-12-11"></a>  │       └── DJI_0102.jpg
+<a id="__codelineno-12-12" name="__codelineno-12-12" href="#__codelineno-12-12"></a>  └── output/                ← project-level output written here
+</code></pre></div>
+<h3 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a><span class="c1"># Verify API is up</span>
+<a id="__codelineno-13-2" name="__codelineno-13-2" href="#__codelineno-13-2"></a>curl<span class="w"> </span>http://scaleodm:31100/info
+<a id="__codelineno-13-3" name="__codelineno-13-3" href="#__codelineno-13-3"></a>
+<a id="__codelineno-13-4" name="__codelineno-13-4" href="#__codelineno-13-4"></a><span class="c1"># Create a task</span>
+<a id="__codelineno-13-5" name="__codelineno-13-5" href="#__codelineno-13-5"></a>curl<span class="w"> </span>-X<span class="w"> </span>POST<span class="w"> </span>http://scaleodm:31100/task/new<span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-6" name="__codelineno-13-6" href="#__codelineno-13-6"></a><span class="w">  </span>-F<span class="w"> </span><span class="s2">"zipurl=s3://mybucket/images/"</span><span class="w"> </span><span class="se">\</span>
+<a id="__codelineno-13-7" name="__codelineno-13-7" href="#__codelineno-13-7"></a><span class="w">  </span>-F<span class="w"> </span><span class="s1">'options=[{"name":"fast-orthophoto","value":true}]'</span>
+<a id="__codelineno-13-8" name="__codelineno-13-8" href="#__codelineno-13-8"></a>
+<a id="__codelineno-13-9" name="__codelineno-13-9" href="#__codelineno-13-9"></a><span class="c1"># Check status</span>
+<a id="__codelineno-13-10" name="__codelineno-13-10" href="#__codelineno-13-10"></a>curl<span class="w"> </span>http://scaleodm:31100/task/odm-pipeline-xxxxx/info
+<a id="__codelineno-13-11" name="__codelineno-13-11" href="#__codelineno-13-11"></a>
+<a id="__codelineno-13-12" name="__codelineno-13-12" href="#__codelineno-13-12"></a><span class="c1"># Download (follows redirect)</span>
+<a id="__codelineno-13-13" name="__codelineno-13-13" href="#__codelineno-13-13"></a>curl<span class="w"> </span>-L<span class="w"> </span>http://scaleodm:31100/task/odm-pipeline-xxxxx/download/orthophoto.tif<span class="w"> </span>-o<span class="w"> </span>orthophoto.tif
+</code></pre></div>
+<h2 id="not-implemented">Not Implemented<a class="headerlink" href="#not-implemented" title="Permanent link">&para;</a></h2>
+<ul>
+<li>File uploads via <code>/task/new/init</code>, <code>/task/new/upload</code>, <code>/task/new/commit</code> (chunked upload)</li>
+<li>HTTP zip URL downloads (only <code>s3://</code> paths supported)</li>
+<li>Auth endpoints (<code>/auth/login</code>, <code>/auth/info</code>)</li>
+<li><code>imagesCount</code> (always 0)</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-circle-arrow-up" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m16 12-4-4-4 4M12 16V8"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+    
+      
+      <nav class="md-footer__inner md-grid" aria-label="Footer" >
+        
+          
+          <a href="../about/" class="md-footer__link md-footer__link--prev" aria-label="Previous: About">
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-left" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7M19 12H5"/></svg>
+            </div>
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Previous
+              </span>
+              <div class="md-ellipsis">
+                About
+              </div>
+            </div>
+          </a>
+        
+        
+          
+          <a href="../nodeodm-migrate/" class="md-footer__link md-footer__link--next" aria-label="Next: Migrating from NodeODM">
+            <div class="md-footer__title">
+              <span class="md-footer__direction">
+                Next
+              </span>
+              <div class="md-ellipsis">
+                Migrating from NodeODM
+              </div>
+            </div>
+            <div class="md-footer__button md-icon">
+              
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2" class="lucide lucide-arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+            </div>
+          </a>
+        
+      </nav>
+    
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; HOTOSM
+    </div>
+  
+  
+    Made with
+    <a href="https://zensical.org/" target="_blank" rel="noopener">
+      Zensical
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog" role="status" aria-atomic="true">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      
+      
+        
+        
+      <script id="__config" type="application/json">{"annotate":null,"base":"..","features":["content.code.copy","content.action.edit","navigation.footer","navigation.indexes","navigation.instant","navigation.sections","navigation.top","search.highlight"],"redirect":null,"search":"../assets/javascripts/workers/search.c47bb847.min.js","tags":null,"translations":{"clipboard.copied":"Copied to clipboard","clipboard.copy":"Copy to clipboard","clipboard.error":"Could not copy to clipboard","search.result.more.one":"1 more on this page","search.result.more.other":"# more on this page","search.result.none":"No matching documents","search.result.one":"1 matching document","search.result.other":"# matching documents","search.result.placeholder":"Type to start searching","search.result.term.missing":"Missing","select.version":"Select version"},"version":null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.10ee5ab6.min.js"></script>
+      
+    
+  </body>
+</html>
