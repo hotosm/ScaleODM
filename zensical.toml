@@ -31,6 +31,7 @@ nav = [
     "decisions/0001-argo-workflows.md",
     "decisions/0002-s3.md",
     "decisions/0003-swap.md",
+    "decisions/0004-logs-not-telemetry.md",
   ] },
 ]
 

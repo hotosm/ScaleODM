@@ -52,7 +52,6 @@ Karpenter on AWS) decide when and where pods run.
 | `app/s3/`                | S3 helpers: listing images, output files, download filters.                |
 | `app/config/`            | Environment variable config and defaults.                                  |
 | `app/ui/`                | Small web UI at `/ui` for browsing jobs (read-only by default).            |
-| `app/observability/`     | OpenTelemetry traces and metrics.                                          |
 | `chart/`                 | Helm chart for ScaleODM, with optional Argo and Postgres.                  |
 
 ## Further reading

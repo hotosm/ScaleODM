@@ -88,7 +88,7 @@ func (s taskSpec) newTaskMetadata(imageCount int, imageTotalBytes int64, webhook
 	return patch
 }
 
-// rejection is a client-facing error plus the metric reason it is recorded under.
+// rejection is a client-facing error plus a stable reason code for logs.
 type rejection struct {
 	reason string
 	status int

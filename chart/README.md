@@ -118,13 +118,12 @@ ScaleODM now exposes optional endpoint policy controls and workflow runtime guar
 - `config.workflow.*` for active deadline, retry, TTL, pod GC behavior, and workspace storage mode (`auto|emptyDir|pvc`)
 - `config.workflow.resources.*` for per-container requests/limits
 - `config.processSizing.*` for image-count-based process resource estimation (memory interpolation table + headroom, CPU, ephemeral storage)
-- `config.observability.*` for OpenTelemetry bootstrap (OTLP endpoint, sampling, traces/metrics toggles)
 
 These settings are conservative by default and can be tuned per deployment environment.
 
-### Observability backend strategy
+### Logging
 
-ScaleODM instrumentation is OpenTelemetry-first and vendor-neutral. The application emits OTLP traces and metrics that can be routed to any compatible backend. For Sentry users, the recommended path is collector/exporter routing from OTLP into Sentry ingestion, rather than binding ScaleODM business logic directly to the Sentry Go SDK.
+ScaleODM logs to stdout. Collect them with your cluster's log stack (e.g. Loki).
 
 ### Probe Endpoints (Dockerflow convention)
 
@@ -408,11 +407,6 @@ kubectl exec -n scaleodm -it deployment/scaleodm -- env | grep SCALEODM_S3
 | `config.workflow.retryBackoffMaxDuration`                     | Total time window from workflow start in which retries are allowed                | `"48h"`                      |
 | `config.ui.enabled`                                           | Enable built-in `/ui` operator pages                                              | `false`                      |
 | `config.ui.readOnly`                                          | Keep UI in read-only mode                                                         | `true`                       |
-| `config.observability.enabled`                                | Enable OpenTelemetry bootstrap                                                    | `false`                      |
-| `config.observability.otlpEndpoint`                           | OTLP gRPC endpoint for traces/metrics                                             | `""`                         |
-| `config.observability.metricsEnabled`                         | Enable OTel metrics export                                                        | `true`                       |
-| `config.observability.tracesEnabled`                          | Enable OTel traces export                                                         | `true`                       |
-| `config.observability.traceSampleRatio`                       | Trace sampling ratio (0.0-1.0)                                                    | `0.1`                        |
 | `argo.enabled`                                                | Deploy Argo Workflows subchart                                                    | `true`                       |
 | `argo.controller.parallelism`                                 | Max concurrent workflows (0 = unlimited)                                          | `10`                         |
 | `argo.namespaceOverride`                                      | Namespace for Argo controller (subchart mode)                                     | `argo`                       |

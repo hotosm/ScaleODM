@@ -50,7 +50,6 @@ import (
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/meta"
-	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
 
@@ -187,7 +186,6 @@ func (r *reconciler) failMissingWorkflow(ctx context.Context, job *meta.JobMetad
 		return outcomeSkipped
 	}
 
-	observability.RecordWorkflowReconciliation("missing_workflow_to_failed", "missing_workflow_grace_expired")
 	log.Printf("reconciliation transition uuid=%s source=metadata transition=missing_workflow_to_failed reason=missing_workflow_grace_expired", job.WorkflowName)
 	msg := missingWorkflowMessage
 	outcome := r.updateStatus(ctx, job, metadata, meta.JobFailed, &msg, nil)

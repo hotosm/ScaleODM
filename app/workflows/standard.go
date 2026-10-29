@@ -8,11 +8,9 @@ import (
 	"math"
 	"strconv"
 	"strings"
-	"time"
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/hotosm/scaleodm/app/config"
-	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -231,17 +229,14 @@ func (c *Client) CreateODMWorkflow(ctx context.Context, cfg *ODMPipelineConfig) 
 
 	wf := c.buildODMWorkflow(cfg)
 
-	createStart := time.Now()
 	created, err := c.wfClientset.ArgoprojV1alpha1().Workflows(c.namespace).Create(
 		ctx,
 		wf,
 		metav1.CreateOptions{},
 	)
 	if err != nil {
-		observability.RecordWorkflowCreate("failure", "argo_create_failed", time.Since(createStart))
 		return nil, fmt.Errorf("failed to create workflow: %w", err)
 	}
-	observability.RecordWorkflowCreate("success", "none", time.Since(createStart))
 
 	return created, nil
 }

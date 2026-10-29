@@ -11,7 +11,6 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/hotosm/scaleodm/app/db"
-	"github.com/hotosm/scaleodm/app/observability"
 )
 
 type JobMetadata struct {
@@ -179,11 +178,6 @@ func (s *Store) UpdateJobStatusWithFailureDetails(ctx context.Context, workflowN
 }
 
 func (s *Store) updateJobStatus(ctx context.Context, workflowName string, status JobStatus, errorMsg *string, failureDetails json.RawMessage) error {
-	started := time.Now()
-	reason := "none"
-	if errorMsg != nil && strings.TrimSpace(*errorMsg) != "" {
-		reason = "error_message_present"
-	}
 	// Conditional COALESCE on failure_details: only overwrite when the caller
 	// passes a non-nil value. Successive "running -> running" status pings
 	// must not clobber an earlier failure capture.
@@ -221,15 +215,12 @@ func (s *Store) updateJobStatus(ctx context.Context, workflowName string, status
 
 	result, err := s.db.Pool.Exec(ctx, query, workflowName, string(status), errValue, failureValue)
 	if err != nil {
-		observability.RecordJobStatusUpdate("failure", string(status), "db_exec_failed", time.Since(started))
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 	rowsAffected := result.RowsAffected()
 	if rowsAffected == 0 {
-		observability.RecordJobStatusUpdate("failure", string(status), "job_not_found", time.Since(started))
 		return fmt.Errorf("job not found: %s", workflowName)
 	}
-	observability.RecordJobStatusUpdate("success", string(status), reason, time.Since(started))
 	return nil
 }
 

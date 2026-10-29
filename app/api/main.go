@@ -13,13 +13,10 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 	_ "github.com/danielgtaylor/huma/v2/formats/cbor"
-	"go.opentelemetry.io/otel/attribute"
-	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
-	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/ui"
 	"github.com/hotosm/scaleodm/app/version"
@@ -143,16 +140,11 @@ func (a *API) registerGlobalMRoutes() {
 
 	dependencyAwareHandler := func(ctx context.Context, input *struct{}) (*ReadinessResponse, error) {
 		_ = input
-		start := time.Now()
-		ctx, span := observability.Tracer().Start(ctx, "readiness.check")
-		defer span.End()
 		checks := map[string]string{}
 		ready := true
 		fail := func(dependency, reason, detail string, err error) {
 			ready = false
 			checks[dependency] = "unavailable: " + detail
-			span.AddEvent("readiness."+dependency+".failed", trace.WithAttributes(attribute.String("reason", reason)))
-			observability.RecordReadinessDependencyFailure(dependency, reason)
 			if err != nil {
 				log.Printf("readiness dependency failure dependency=%s reason=%s error=%v", dependency, reason, err)
 			} else {
@@ -190,13 +182,6 @@ func (a *API) registerGlobalMRoutes() {
 		}
 		resp.Body.Timestamp = time.Now().UTC().Format(time.RFC3339)
 		resp.Body.Checks = checks
-
-		duration := time.Since(start)
-		span.SetAttributes(
-			attribute.Bool("readiness.ready", ready),
-			attribute.Int64("readiness.duration_ms", duration.Milliseconds()),
-		)
-		observability.RecordReadinessCheck(ready, duration)
 
 		if !ready {
 			return nil, huma.NewError(http.StatusServiceUnavailable, "Dependencies not ready")

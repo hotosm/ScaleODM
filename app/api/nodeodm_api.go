@@ -12,12 +12,10 @@ import (
 
 	wfv1 "github.com/argoproj/argo-workflows/v3/pkg/apis/workflow/v1alpha1"
 	"github.com/danielgtaylor/huma/v2"
-	"go.opentelemetry.io/otel/attribute"
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/meta"
-	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/s3"
 	"github.com/hotosm/scaleodm/app/version"
 	"github.com/hotosm/scaleodm/app/workflows"
@@ -164,21 +162,9 @@ type taskNewInput struct {
 }
 
 func (a *API) createTask(ctx context.Context, input *taskNewInput) (*TaskNewResponse, error) {
-	start := time.Now()
-	metricResult := "failure"
-	metricReason := "unknown"
-	ctx, span := observability.Tracer().Start(ctx, "task.new")
-	defer func() {
-		span.SetAttributes(
-			attribute.String("task.new.result", metricResult),
-			attribute.String("task.new.reason", metricReason),
-		)
-		span.End()
-		observability.RecordTaskNew(metricResult, metricReason, time.Since(start))
-	}()
-	// No log line needed: withTaskNewErrorLogging logs every failed response body.
+	// withTaskNewErrorLogging logs the response body; this adds a greppable code.
 	fail := func(rej *rejection) (*TaskNewResponse, error) {
-		metricReason = rej.reason
+		log.Printf("POST /task/new: rejected reason=%s", rej.reason)
 		return nil, rej.humaError()
 	}
 
@@ -240,8 +226,6 @@ func (a *API) createTask(ctx context.Context, input *taskNewInput) (*TaskNewResp
 
 	resp := &TaskNewResponse{}
 	resp.Body.UUID = wf.Name
-	metricResult = "success"
-	metricReason = "none"
 	return resp, nil
 }
 

@@ -24,7 +24,6 @@ import (
 	"github.com/hotosm/scaleodm/app/config"
 	"github.com/hotosm/scaleodm/app/db"
 	"github.com/hotosm/scaleodm/app/meta"
-	"github.com/hotosm/scaleodm/app/observability"
 	"github.com/hotosm/scaleodm/app/reconciler"
 	"github.com/hotosm/scaleodm/app/workflows"
 )
@@ -53,8 +52,6 @@ func main() {
 	log.Println("Validating environment variables...")
 	config.ValidateEnv()
 	log.Printf("Environment validation complete (took %v)", time.Since(startTime))
-
-	obsShutdown := initObservability(ctx)
 
 	// Database connection
 	log.Println("Connecting to database...")
@@ -102,7 +99,7 @@ func main() {
 
 	cli := humacli.New(func(hooks humacli.Hooks, options *Options) {
 		_, handler := api.NewAPI(metadataStore, wfClient)
-		srv := newHTTPServer(options.Port, observability.WrapHTTPHandler(handler))
+		srv := newHTTPServer(options.Port, handler)
 
 		hooks.OnStart(func() {
 			log.Printf("API server starting on :%d", options.Port)
@@ -145,36 +142,7 @@ func main() {
 		// Server never started
 	}
 
-	obsShutdownCtx, obsShutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer obsShutdownCancel()
-	if err := obsShutdown(obsShutdownCtx); err != nil {
-		log.Printf("observability shutdown error: %v", err)
-	}
-
 	log.Println("Shutdown complete")
-}
-
-// initObservability returns a shutdown func. Init failures only disable telemetry.
-func initObservability(ctx context.Context) func(context.Context) error {
-	obsConfig := observability.Config{
-		Enabled:          config.SCALEODM_OBSERVABILITY_ENABLED,
-		ServiceName:      config.SCALEODM_OBSERVABILITY_SERVICE_NAME,
-		ServiceVersion:   config.SCALEODM_OBSERVABILITY_SERVICE_VERSION,
-		OTLPEndpoint:     config.SCALEODM_OBSERVABILITY_OTLP_ENDPOINT,
-		OTLPInsecure:     config.SCALEODM_OBSERVABILITY_OTLP_INSECURE,
-		MetricsEnabled:   config.SCALEODM_OBSERVABILITY_METRICS_ENABLED,
-		TracesEnabled:    config.SCALEODM_OBSERVABILITY_TRACES_ENABLED,
-		TraceSampleRatio: config.SCALEODM_OBSERVABILITY_TRACE_SAMPLE_RATIO,
-	}
-	shutdown, err := observability.Init(ctx, obsConfig)
-	if err != nil {
-		log.Printf("observability init failed, continuing without telemetry: %v", err)
-		return func(context.Context) error { return nil }
-	}
-	if obsConfig.Enabled {
-		log.Printf("observability enabled service=%s version=%s traces=%t metrics=%t endpoint=%q", obsConfig.ServiceName, obsConfig.ServiceVersion, obsConfig.TracesEnabled, obsConfig.MetricsEnabled, obsConfig.OTLPEndpoint)
-	}
-	return shutdown
 }
 
 func newHTTPServer(port int, handler http.Handler) *http.Server {

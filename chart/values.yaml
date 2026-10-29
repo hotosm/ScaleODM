@@ -213,18 +213,6 @@ config:
     enabled: true
     readOnly: true
 
-  observability:
-    enabled: false
-    serviceName: "scaleodm"
-    # Leave empty to inherit the chart's appVersion (recommended); set only
-    # to override the version reported by the observability layer.
-    serviceVersion: ""
-    otlpEndpoint: ""
-    otlpInsecure: false
-    metricsEnabled: true
-    tracesEnabled: true
-    traceSampleRatio: 0.1
-
   workflow:
     # 48hrs processing deadline
     activeDeadlineSeconds: 172800

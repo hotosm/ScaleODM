@@ -9,3 +9,4 @@ taken in this project.
 - [0001 - Argo Workflows](./0001-argo-workflows.md)
 - [0002 - AWS S3](./0002-s3.md)
 - [0003 - Swap-based Memory Sizing](./0003-swap.md)
+- [0004 - Plain Logs Instead of Built-in OpenTelemetry](./0004-logs-not-telemetry.md)
