@@ -280,6 +280,10 @@ config:
     nodeSelector: "node-type=cpu"
     # Extra tolerations (both modes), ';'-separated "key=value:Effect".
     tolerations: ""
+    # Jobs requesting >= largeJobMinMemoryGiB also get largeJobTolerations,
+    # so small jobs stay off the tainted big-node pool. 0 disables.
+    largeJobMinMemoryGiB: 0
+    largeJobTolerations: ""
 
     # These limits are not used in reality, but only the edge case when 0 images are counted.
     # We use a dynamic pod resource estimator, based on number of images to process.

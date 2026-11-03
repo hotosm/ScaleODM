@@ -521,6 +521,19 @@ func burstHeadroomGiB(r ContainerResources) int64 {
 	return int64(math.Ceil(float64(diffBytes) / giB))
 }
 
+// isLargeJob is true when the memory request reaches LARGE_JOB_MIN_MEMORY_GIB.
+func isLargeJob(r ContainerResources) bool {
+	minGiB := config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB
+	if minGiB <= 0 {
+		return false
+	}
+	req, err := resource.ParseQuantity(r.Requests.Memory)
+	if err != nil {
+		return false
+	}
+	return req.Cmp(resource.MustParse(formatGiBAsMi(minGiB))) >= 0
+}
+
 // applyOnDemandUpgrade pins large spot jobs to on-demand capacity, since a spot
 // eviction partway through a multi-hour run would waste the whole job.
 func applyOnDemandUpgrade(cfg *ODMPipelineConfig) {
@@ -871,6 +884,9 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	ttlSuccess := positiveOr(cfg.RuntimeGuardrails.TTLSuccessSeconds, 86400)
 	ttlFailure := positiveOr(cfg.RuntimeGuardrails.TTLFailureSeconds, 604800)
 	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
+	if isLargeJob(cfg.ProcessResources) {
+		tolerations = append(tolerations, parseTolerations(config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS)...)
+	}
 
 	// Advertise limit - request as a rough guide (not the real LimitedSwap grant,
 	// which is proportional); see docs/swap.md.

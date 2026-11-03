@@ -939,6 +939,34 @@ func TestBuildNodeScheduling_EmptySelectorPlacesAnywhere(t *testing.T) {
 	assert.Empty(t, tolerations)
 }
 
+func TestBuildODMWorkflow_LargeJobGetsLargeJobTolerations(t *testing.T) {
+	prevMin := config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB
+	prevTol := config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS
+	config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = 128
+	config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS = "scaleodm-size=large:NoSchedule"
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = prevMin
+		config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS = prevTol
+	})
+	client := &Client{namespace: "test-namespace"}
+	hasLargeToleration := func(memoryRequest string) bool {
+		cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+		cfg.ProcessResources.Requests.Memory = memoryRequest
+		for _, tol := range client.buildODMWorkflow(cfg).Spec.Tolerations {
+			if tol.Key == "scaleodm-size" {
+				return true
+			}
+		}
+		return false
+	}
+
+	assert.True(t, hasLargeToleration("128Gi"))
+	assert.False(t, hasLargeToleration("127Gi"))
+
+	config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = 0
+	assert.False(t, hasLargeToleration("600Gi"), "0 disables")
+}
+
 func TestParseTolerations(t *testing.T) {
 	tolerations := parseTolerations("swap=true:NoSchedule; dedicated:NoExecute; ;bad")
 	require.Len(t, tolerations, 3)
