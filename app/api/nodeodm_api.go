@@ -4,6 +4,7 @@ import (
 	"cmp"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -189,6 +190,10 @@ func (a *API) createTask(ctx context.Context, input *taskNewInput) (*TaskNewResp
 	imageCount, imageTotalBytes, err := s3.CountImageStatsInS3Path(ctx, taskClient, spec.readPath, spec.excludePatterns())
 	if err != nil {
 		return fail(reject("image_count_failed", 400, "Unable to read imagery from readS3Path", err))
+	}
+	if workflows.ExceedsMemoryCeiling(imageCount, spec.odmFlags) {
+		msg := fmt.Sprintf("%d images is more than this server can process in one job; split it into smaller jobs", imageCount)
+		return fail(reject("too_many_images", 422, msg))
 	}
 	if option, err := preflightWorkspaceFiles(ctx, taskClient, spec.files); err != nil {
 		return fail(reject(option+"_unreadable", 400, err.Error()))

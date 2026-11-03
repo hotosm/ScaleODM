@@ -287,19 +287,26 @@ func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
 	// Table value returned as-is when under the cap.
 	assert.InDelta(t, 227, estimateMemoryGiB(5000), 0.001)
 	// Interpolation on the steep (5000, 227) -> (12000, 800) segment
-	// (573/7000 = 0.08186/image), clamped by the 256 GiB default max:
-	// 8000 -> 227 + 3000*0.08186 = ~473, clamped to 256.
-	assert.InDelta(t, 256, estimateMemoryGiB(8000), 0.001)
+	// (573/7000 = 0.08186/image), unclamped: 8000 -> 227 + 3000*0.08186 = ~473.
+	assert.InDelta(t, 473, estimateMemoryGiB(8000), 1.0)
 }
 
 func TestEstimateMemoryGiB_ExtrapolatesBeyondTable(t *testing.T) {
+	// 13000 images extrapolate to 800 + (13000-12000)*0.08186 = ~882 GiB peak.
+	assert.InDelta(t, 882, estimateMemoryGiB(13000), 1.0)
+}
+
+func TestExceedsMemoryCeiling(t *testing.T) {
 	prev := config.SCALEODM_PROCESS_MEMORY_MAX_GIB
-	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 2048
+	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 1200
 	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
 
-	// With the cap raised, 13000 images extrapolate to
-	// 800 + (13000-12000)*0.08186 = ~882 GiB peak.
-	assert.InDelta(t, 882, estimateMemoryGiB(13000), 1.0)
+	// 12000 images = 800 GiB peak, under the ceiling.
+	assert.False(t, ExceedsMemoryCeiling(12000, nil))
+	// 17570 images = ~1256 GiB peak, over it.
+	assert.True(t, ExceedsMemoryCeiling(17570, []string{"--dsm"}))
+	// --fast-orthophoto halves the estimate, so the same job fits.
+	assert.False(t, ExceedsMemoryCeiling(17570, []string{"--fast-orthophoto"}))
 }
 
 // withSwapRatio sets the swap ratio (default is 0/off) for tests that exercise

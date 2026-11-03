@@ -219,6 +219,11 @@ Creates a new processing task.
 When using `zipurl`, outputs are written to `{zipurl}-output/`.
 When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `writeS3Path`).
 
+**Rejections (ScaleODM-specific):**
+
+- **422** when the image count needs more memory than `SCALEODM_PROCESS_MEMORY_MAX_GIB`
+  allows. Split the job instead.
+
 #### Processing modes
 
 `processingMode` selects the pipeline shape. Today only `standard` is implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).

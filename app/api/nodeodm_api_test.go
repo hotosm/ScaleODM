@@ -1109,6 +1109,40 @@ func TestTaskNew_MetadataCreateFailureCompensatesWorkflow(t *testing.T) {
 	assert.Equal(t, "wf-new-fail", wfClient.deletedNames[0])
 }
 
+func TestTaskNew_RejectsJobAboveMemoryCeiling(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	require.NoError(t, testutil.SetupTestS3Bucket(ctx, "test-bucket"))
+	ensureTestImageInBucket(ctx, t, "test-bucket", "images/input.jpg")
+
+	// The smallest estimate (18 GiB) is above a 10 GiB ceiling.
+	prev := config.SCALEODM_PROCESS_MEMORY_MAX_GIB
+	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 10
+	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(meta.NewStore(db), wfClient)
+
+	body, err := json.Marshal(TaskNewRequest{
+		Name:        "test-project",
+		ReadS3Path:  "s3://test-bucket/images/",
+		WriteS3Path: "s3://test-bucket/output/",
+		S3Region:    "us-east-1",
+		S3Endpoint:  "http://" + testutil.TestS3Endpoint(),
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	assert.Empty(t, wfClient.createdNames)
+}
+
 func TestTaskRestart_CreateFailureDoesNotDeleteOldWorkflowFirst(t *testing.T) {
 	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
