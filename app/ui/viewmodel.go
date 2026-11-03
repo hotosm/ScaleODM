@@ -146,7 +146,10 @@ func toTaskSummary(job *meta.JobMetadata, now time.Time) taskSummary {
 	}
 	if job.CompletedAt != nil {
 		summary.CompletedAt = formatTime(*job.CompletedAt)
-		summary.RunDuration = formatDuration((*job.CompletedAt).Sub(*job.StartedAt))
+	}
+	// Jobs canceled while queued have CompletedAt but no StartedAt.
+	if job.StartedAt != nil && job.CompletedAt != nil {
+		summary.RunDuration = formatDuration(job.CompletedAt.Sub(*job.StartedAt))
 	}
 	return summary
 }
