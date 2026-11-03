@@ -442,16 +442,23 @@ func (a *API) cancelTask(ctx context.Context, input *taskUUIDInput) (*SuccessRes
 	uuid := input.Body.UUID
 	log.Printf("POST /task/cancel: uuid=%q token_provided=%t", uuid, input.Token != "")
 
-	if err := a.workflowClient.DeleteWorkflow(ctx, uuid); err != nil {
-		if k8serrors.IsNotFound(err) {
-			log.Printf("POST /task/cancel: task %q not found", uuid)
-			return nil, huma.NewError(404, "Task not found")
-		}
+	job, err := a.metadataStore.GetJob(ctx, uuid)
+	if err != nil {
+		log.Printf("POST /task/cancel: failed to retrieve metadata for %q: %v", uuid, err)
+		return nil, huma.NewError(500, "Failed to retrieve task metadata", err)
+	}
+	if job == nil {
+		log.Printf("POST /task/cancel: task %q not found", uuid)
+		return nil, huma.NewError(404, "Task not found")
+	}
+	// NotFound means an earlier cancel deleted the workflow but failed to record it.
+	if err := a.workflowClient.DeleteWorkflow(ctx, uuid); err != nil && !k8serrors.IsNotFound(err) {
 		log.Printf("POST /task/cancel: failed to cancel task %q: %v", uuid, err)
 		return nil, huma.NewError(500, "Failed to cancel task", err)
 	}
 	if err := a.metadataStore.UpdateJobStatus(ctx, uuid, meta.JobCanceled, nil); err != nil {
 		log.Printf("POST /task/cancel: failed to update job status for %q: %v", uuid, err)
+		return nil, huma.NewError(500, "Failed to record cancellation", err)
 	}
 
 	log.Printf("POST /task/cancel: task %q canceled", uuid)

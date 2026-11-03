@@ -67,7 +67,10 @@ func TestTaskCancel_AcceptsPyODMFormRequest(t *testing.T) {
 	wfClient := &recordingWorkflowClient{
 		deleteFn: func(ctx context.Context, name string) error { return nil },
 	}
-	_, handler := NewAPI(meta.NewStore(db), wfClient)
+	store := meta.NewStore(db)
+	_, handler := NewAPI(store, wfClient)
+	_, err := store.CreateJob(context.Background(), "wf-form-cancel", "test-project", "s3://bucket/in/", "", nil, "us-east-1", nil)
+	require.NoError(t, err)
 
 	req := httptest.NewRequest(http.MethodPost, "/task/cancel", strings.NewReader("uuid=wf-form-cancel"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")

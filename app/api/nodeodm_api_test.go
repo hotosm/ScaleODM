@@ -25,6 +25,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -497,6 +498,42 @@ func TestTaskCancelEndpoint(t *testing.T) {
 	// May return 200 on success, or error if workflow doesn't exist
 	// Just verify we got a response
 	assert.True(t, w.Code == http.StatusOK || w.Code >= 400)
+}
+
+func TestTaskCancelRetryAfterWorkflowDeleted(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := &recordingWorkflowClient{
+		deleteFn: func(ctx context.Context, name string) error {
+			return k8serrors.NewNotFound(wfv1.Resource("workflows"), name)
+		},
+	}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	ctx := context.Background()
+	_, err := metadataStore.CreateJob(ctx, "wf-cancel-retry", "test-project", "s3://bucket/in/", "", nil, "us-east-1", nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		uuid string
+		want int
+	}{
+		{"wf-cancel-retry", http.StatusOK},
+		{"wf-unknown", http.StatusNotFound},
+	} {
+		body := strings.NewReader(fmt.Sprintf(`{"uuid":%q}`, tc.uuid))
+		req := httptest.NewRequest(http.MethodPost, "/task/cancel", body)
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		assert.Equal(t, tc.want, w.Code, tc.uuid)
+	}
+
+	job, err := metadataStore.GetJob(ctx, "wf-cancel-retry")
+	require.NoError(t, err)
+	assert.Equal(t, meta.JobCanceled, job.JobStatus)
 }
 
 func TestTaskRemoveEndpoint(t *testing.T) {
