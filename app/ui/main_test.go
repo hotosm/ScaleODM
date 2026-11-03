@@ -257,19 +257,21 @@ func TestTaskOutputWithoutWorkflowClientReturns500(t *testing.T) {
 	assert.Equal(t, http.StatusInternalServerError, w.Code)
 }
 
-func TestTasksPageWithoutWorkflowClientListsActiveJobs(t *testing.T) {
+func TestTaskPagesWithoutWorkflowClientShowActiveJobs(t *testing.T) {
 	store, server := setupServerWithoutWorkflowClient(t)
 	ctx := context.Background()
 
 	_, err := store.CreateJob(ctx, "wf-ui-7", "project-no-wf", "s3://bucket/in/", "", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
-	req := httptest.NewRequest(http.MethodGet, "/ui", nil)
-	w := httptest.NewRecorder()
-	server.ServeHTTP(w, req)
+	for _, path := range []string{"/ui", "/ui/tasks/wf-ui-7", "/ui/api/tasks/wf-ui-7"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		server.ServeHTTP(w, req)
 
-	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "wf-ui-7")
+		assert.Equal(t, http.StatusOK, w.Code, path)
+		assert.Contains(t, w.Body.String(), "wf-ui-7", path)
+	}
 }
 
 func TestInvalidQueryValidation(t *testing.T) {

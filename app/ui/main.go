@@ -139,6 +139,9 @@ func (h *Handler) handleTasksPage(w http.ResponseWriter, r *http.Request) {
 // applyLiveStatus shows Argo's current view of a job without saving it. The
 // reconciler owns persisting status.
 func (h *Handler) applyLiveStatus(ctx context.Context, job *meta.JobMetadata) {
+	if h.workflow == nil {
+		return
+	}
 	wf, err := h.workflow.GetWorkflow(ctx, job.WorkflowName)
 	if err != nil {
 		return
@@ -153,9 +156,6 @@ func (h *Handler) applyLiveStatus(ctx context.Context, job *meta.JobMetadata) {
 // applyLiveStatuses runs concurrently so the list page doesn't serialize N
 // Argo round-trips.
 func (h *Handler) applyLiveStatuses(ctx context.Context, jobs []*meta.JobMetadata) {
-	if h.workflow == nil {
-		return
-	}
 	var wg sync.WaitGroup
 	for _, job := range jobs {
 		if job.JobStatus.IsTerminal() {
