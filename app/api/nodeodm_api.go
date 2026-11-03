@@ -162,6 +162,17 @@ type activeJobConflict struct {
 	UUID string `json:"uuid"`
 }
 
+func newActiveJobConflict(writePath string, active *meta.JobMetadata) *activeJobConflict {
+	return &activeJobConflict{
+		ErrorModel: huma.ErrorModel{
+			Status: http.StatusConflict,
+			Title:  http.StatusText(http.StatusConflict),
+			Detail: fmt.Sprintf("A job for %s is already %s as %s", writePath, active.JobStatus, active.WorkflowName),
+		},
+		UUID: active.WorkflowName,
+	}
+}
+
 type taskNewInput struct {
 	Token   string `query:"token" doc:"Authentication token (optional)"`
 	SetUUID string `header:"set-uuid" doc:"Optional UUID to use for this task"`
@@ -195,14 +206,7 @@ func (a *API) createTask(ctx context.Context, input *taskNewInput) (*TaskNewResp
 	}
 	if active != nil {
 		log.Printf("POST /task/new: rejected reason=duplicate_active_job workflow=%q", active.WorkflowName)
-		return nil, &activeJobConflict{
-			ErrorModel: huma.ErrorModel{
-				Status: http.StatusConflict,
-				Title:  http.StatusText(http.StatusConflict),
-				Detail: fmt.Sprintf("A job for %s is already %s as %s", spec.writePath, active.JobStatus, active.WorkflowName),
-			},
-			UUID: active.WorkflowName,
-		}
+		return nil, newActiveJobConflict(spec.writePath, active)
 	}
 
 	// Count images before workflow submission so resources can be sized.
@@ -501,6 +505,17 @@ func (a *API) restartTask(ctx context.Context, input *taskRestartInput) (*Succes
 	if job == nil {
 		return nil, huma.NewError(404, "Task not found")
 	}
+
+	// Another job may have claimed the output path since this one finished.
+	active, err := a.metadataStore.FindActiveJobByWritePath(ctx, job.WriteS3Path)
+	if err != nil {
+		log.Printf("POST /task/restart: failed active job lookup for %q: %v", oldWorkflowName, err)
+		return nil, huma.NewError(500, "Failed to check for an active job", err)
+	}
+	if active != nil && active.WorkflowName != oldWorkflowName {
+		log.Printf("POST /task/restart: rejected %q reason=duplicate_active_job workflow=%q", oldWorkflowName, active.WorkflowName)
+		return nil, newActiveJobConflict(job.WriteS3Path, active)
+	}
 	metadata := parseTaskMetadata(job.Metadata)
 
 	spec, rej := restartSpec(job, metadata, input.Body.Options)
@@ -519,6 +534,11 @@ func (a *API) restartTask(ctx context.Context, input *taskRestartInput) (*Succes
 			imageCount = cmp.Or(imageCount, counted)
 			imageTotalBytes = cmp.Or(imageTotalBytes, totalBytes)
 		}
+	}
+	if workflows.ExceedsMemoryCeiling(imageCount, spec.odmFlags) {
+		log.Printf("POST /task/restart: rejected %q reason=too_many_images imageCount=%d", oldWorkflowName, imageCount)
+		msg := fmt.Sprintf("%d images is more than this server can process in one job; split it into smaller jobs", imageCount)
+		return nil, huma.NewError(422, msg)
 	}
 
 	// File validation requires a working S3 client.

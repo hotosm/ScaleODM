@@ -1215,6 +1215,58 @@ func TestTaskNew_RejectsJobAboveMemoryCeiling(t *testing.T) {
 	assert.Empty(t, wfClient.createdNames)
 }
 
+func TestTaskRestart_RejectsWhenAnotherJobOwnsOutput(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	metadataStore := meta.NewStore(db)
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", nil, "us-east-1", nil)
+	require.NoError(t, err)
+	require.NoError(t, metadataStore.UpdateJobStatus(ctx, "old-wf", meta.JobCompleted, nil))
+	_, err = metadataStore.CreateJob(ctx, "other-wf", "project", "s3://bucket/images/", "s3://bucket/output/", nil, "us-east-1", nil)
+	require.NoError(t, err)
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/restart", strings.NewReader(`{"uuid":"old-wf"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	assert.Contains(t, w.Body.String(), "other-wf")
+	assert.Empty(t, wfClient.createdNames)
+}
+
+func TestTaskRestart_RejectsJobAboveMemoryCeiling(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	// The smallest estimate (18 GiB) is above a 10 GiB ceiling.
+	prev := config.SCALEODM_PROCESS_MEMORY_MAX_GIB
+	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 10
+	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
+
+	metadataStore := meta.NewStore(db)
+	stats := map[string]any{"image_count": 1, "image_total_bytes": 1}
+	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", nil, "us-east-1", stats)
+	require.NoError(t, err)
+
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	req := httptest.NewRequest(http.MethodPost, "/task/restart", strings.NewReader(`{"uuid":"old-wf"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	assert.Equal(t, http.StatusUnprocessableEntity, w.Code, w.Body.String())
+	assert.Empty(t, wfClient.createdNames)
+}
+
 func TestTaskRestart_CreateFailureDoesNotDeleteOldWorkflowFirst(t *testing.T) {
 	db, cleanup := testutil.TestDB(t)
 	defer cleanup()
@@ -1251,7 +1303,7 @@ func TestTaskRestart_MetadataSwapFailureDeletesNewWorkflow(t *testing.T) {
 	metadataStore := meta.NewStore(db)
 	_, err := metadataStore.CreateJob(ctx, "old-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
-	_, err = metadataStore.CreateJob(ctx, "new-wf", "project", "s3://bucket/images/", "s3://bucket/output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
+	_, err = metadataStore.CreateJob(ctx, "new-wf", "project", "s3://bucket/images/", "s3://bucket/other-output/", []string{"--fast-orthophoto"}, "us-east-1", nil)
 	require.NoError(t, err)
 
 	wfClient := &recordingWorkflowClient{
