@@ -460,3 +460,32 @@ func TestListActiveJobs_IncludesOldJobsAndSkipsTerminal(t *testing.T) {
 	require.Len(t, jobs, 1)
 	assert.Equal(t, "old-running", jobs[0].WorkflowName)
 }
+
+func TestFindActiveJobByWritePath(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	store := NewStore(db)
+	ctx := context.Background()
+
+	for _, name := range []string{"done", "running"} {
+		_, err := store.CreateJob(ctx, name, "project", "s3://bucket/in/", "s3://bucket/out/", nil, "us-east-1", nil)
+		require.NoError(t, err)
+	}
+	require.NoError(t, store.UpdateJobStatus(ctx, "done", JobCompleted, nil))
+	require.NoError(t, store.UpdateJobStatus(ctx, "running", JobRunning, nil))
+
+	job, err := store.FindActiveJobByWritePath(ctx, "s3://bucket/out/")
+	require.NoError(t, err)
+	require.NotNil(t, job)
+	assert.Equal(t, "running", job.WorkflowName)
+	assert.Equal(t, JobRunning, job.JobStatus)
+
+	require.NoError(t, store.UpdateJobStatus(ctx, "running", JobFailed, nil))
+	job, err = store.FindActiveJobByWritePath(ctx, "s3://bucket/out/")
+	require.NoError(t, err)
+	assert.Nil(t, job)
+
+	job, err = store.FindActiveJobByWritePath(ctx, "s3://bucket/other/")
+	require.NoError(t, err)
+	assert.Nil(t, job)
+}

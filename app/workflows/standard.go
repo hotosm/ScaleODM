@@ -300,7 +300,7 @@ func flagMemoryMultiplier(odmFlags []string) float64 {
 func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, fallback ContainerResources) ContainerResources {
 	// peakRAMGiB is the brief peak working set (RAM + swap), not the resident
 	// set. It sets the memory limit and the CPU/ephemeral sizing.
-	peakRAMGiB := clamp(estimateMemoryGiB(imageCount)*flagMemoryMultiplier(odmFlags), config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+	peakRAMGiB := clamp(estimatePeakGiB(imageCount, odmFlags), config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
 
 	// requestGiB is the real RAM to schedule; swap absorbs the peak. See
 	// SCALEODM_PROCESS_SWAP_RATIO.
@@ -370,22 +370,18 @@ func estimateProcessResourcesFromImageCount(imageCount int, odmFlags []string, f
 	return estimated
 }
 
+// estimateMemoryGiB is unclamped; callers clamp it.
 func estimateMemoryGiB(imageCount int) float64 {
-	if imageCount <= 0 {
-		return clamp(config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
-	}
-
-	if imageCount <= odmMemoryEstimationPoints[0].images {
-		return clamp(odmMemoryEstimationPoints[0].ramGiB, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+	first := odmMemoryEstimationPoints[0]
+	if imageCount <= first.images {
+		return first.ramGiB
 	}
 	last := odmMemoryEstimationPoints[len(odmMemoryEstimationPoints)-1]
 	if imageCount >= last.images {
-		// Beyond the table, extrapolate on the last segment's slope instead of
-		// clamping. MEMORY_MAX_GIB still bounds it to what the cluster can schedule.
+		// Beyond the table, extrapolate on the last segment's slope.
 		prev := odmMemoryEstimationPoints[len(odmMemoryEstimationPoints)-2]
 		slope := (last.ramGiB - prev.ramGiB) / float64(last.images-prev.images)
-		extrapolated := last.ramGiB + slope*float64(imageCount-last.images)
-		return clamp(extrapolated, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+		return last.ramGiB + slope*float64(imageCount-last.images)
 	}
 
 	for i := 1; i < len(odmMemoryEstimationPoints); i++ {
@@ -393,12 +389,20 @@ func estimateMemoryGiB(imageCount int) float64 {
 		right := odmMemoryEstimationPoints[i]
 		if imageCount <= right.images {
 			ratio := float64(imageCount-left.images) / float64(right.images-left.images)
-			interpolated := left.ramGiB + ratio*(right.ramGiB-left.ramGiB)
-			return clamp(interpolated, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+			return left.ramGiB + ratio*(right.ramGiB-left.ramGiB)
 		}
 	}
+	return last.ramGiB
+}
 
-	return clamp(last.ramGiB, config.SCALEODM_PROCESS_MEMORY_MIN_GIB, config.SCALEODM_PROCESS_MEMORY_MAX_GIB)
+// estimatePeakGiB is the unclamped peak RAM after flag adjustments.
+func estimatePeakGiB(imageCount int, odmFlags []string) float64 {
+	return estimateMemoryGiB(imageCount) * flagMemoryMultiplier(odmFlags)
+}
+
+// ExceedsMemoryCeiling is true when a job needs more RAM than MEMORY_MAX_GIB allows, so it would likely OOM.
+func ExceedsMemoryCeiling(imageCount int, odmFlags []string) bool {
+	return estimatePeakGiB(imageCount, odmFlags) > config.SCALEODM_PROCESS_MEMORY_MAX_GIB
 }
 
 func clamp(v, minV, maxV float64) float64 {
@@ -515,6 +519,19 @@ func burstHeadroomGiB(r ContainerResources) int64 {
 	}
 	const giB = 1024 * 1024 * 1024
 	return int64(math.Ceil(float64(diffBytes) / giB))
+}
+
+// isLargeJob is true when the memory request reaches LARGE_JOB_MIN_MEMORY_GIB.
+func isLargeJob(r ContainerResources) bool {
+	minGiB := config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB
+	if minGiB <= 0 {
+		return false
+	}
+	req, err := resource.ParseQuantity(r.Requests.Memory)
+	if err != nil {
+		return false
+	}
+	return req.Cmp(resource.MustParse(formatGiBAsMi(minGiB))) >= 0
 }
 
 // applyOnDemandUpgrade pins large spot jobs to on-demand capacity, since a spot
@@ -867,6 +884,9 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	ttlSuccess := positiveOr(cfg.RuntimeGuardrails.TTLSuccessSeconds, 86400)
 	ttlFailure := positiveOr(cfg.RuntimeGuardrails.TTLFailureSeconds, 604800)
 	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
+	if isLargeJob(cfg.ProcessResources) {
+		tolerations = append(tolerations, parseTolerations(config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS)...)
+	}
 
 	// Advertise limit - request as a rough guide (not the real LimitedSwap grant,
 	// which is proportional); see docs/swap.md.

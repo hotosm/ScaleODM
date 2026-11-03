@@ -612,6 +612,27 @@ func (s *Store) ListActiveJobs(ctx context.Context) ([]*JobMetadata, error) {
 	return jobs, nil
 }
 
+// FindActiveJobByWritePath returns the newest unfinished job for writePath, or nil.
+func (s *Store) FindActiveJobByWritePath(ctx context.Context, writePath string) (*JobMetadata, error) {
+	query := `
+		SELECT workflow_name, job_status
+		FROM scaleodm_job_metadata
+		WHERE write_s3_path = $1
+		  AND job_status NOT IN ('completed', 'failed', 'canceled')
+		ORDER BY created_at DESC
+		LIMIT 1
+	`
+	job := &JobMetadata{}
+	err := s.db.Pool.QueryRow(ctx, query, writePath).Scan(&job.WorkflowName, &job.JobStatus)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to find active job: %w", err)
+	}
+	return job, nil
+}
+
 // DeleteJob removes job metadata
 func (s *Store) DeleteJob(ctx context.Context, workflowName string) error {
 	query := `DELETE FROM scaleodm_job_metadata WHERE workflow_name = $1`

@@ -161,6 +161,10 @@ spec:
               value: {{ .Values.config.workflow.nodeSelector | quote }}
             - name: SCALEODM_WORKFLOW_TOLERATIONS
               value: {{ .Values.config.workflow.tolerations | quote }}
+            - name: SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB
+              value: {{ .Values.config.workflow.largeJobMinMemoryGiB | quote }}
+            - name: SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS
+              value: {{ .Values.config.workflow.largeJobTolerations | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_CPU
               value: {{ .Values.config.workflow.resources.download.requests.cpu | quote }}
             - name: SCALEODM_WORKFLOW_RESOURCES_DOWNLOAD_REQUEST_MEMORY

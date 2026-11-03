@@ -153,3 +153,5 @@ kubelet, and ideally a fast, encrypted, dedicated swap disk.
 | `SCALEODM_WORKFLOW_SCHEDULING_MODE` / `config.workflow.schedulingMode`                  | `karpenter`      | `karpenter` or `generic`                                                         |
 | `SCALEODM_WORKFLOW_NODE_SELECTOR` / `config.workflow.nodeSelector`                      | `node-type=cpu`  | base node selector                                                               |
 | `SCALEODM_WORKFLOW_TOLERATIONS` / `config.workflow.tolerations`                         | `""`             | extra tolerations                                                                |
+| `SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB` / `config.workflow.largeJobMinMemoryGiB`   | `0`              | RAM request at/above which jobs get the large-job tolerations; `0` disables      |
+| `SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS` / `config.workflow.largeJobTolerations`       | `""`             | tolerations for a tainted big-node pool                                          |

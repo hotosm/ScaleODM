@@ -287,19 +287,26 @@ func TestEstimateMemoryGiB_InterpolatesFromTable(t *testing.T) {
 	// Table value returned as-is when under the cap.
 	assert.InDelta(t, 227, estimateMemoryGiB(5000), 0.001)
 	// Interpolation on the steep (5000, 227) -> (12000, 800) segment
-	// (573/7000 = 0.08186/image), clamped by the 256 GiB default max:
-	// 8000 -> 227 + 3000*0.08186 = ~473, clamped to 256.
-	assert.InDelta(t, 256, estimateMemoryGiB(8000), 0.001)
+	// (573/7000 = 0.08186/image), unclamped: 8000 -> 227 + 3000*0.08186 = ~473.
+	assert.InDelta(t, 473, estimateMemoryGiB(8000), 1.0)
 }
 
 func TestEstimateMemoryGiB_ExtrapolatesBeyondTable(t *testing.T) {
+	// 13000 images extrapolate to 800 + (13000-12000)*0.08186 = ~882 GiB peak.
+	assert.InDelta(t, 882, estimateMemoryGiB(13000), 1.0)
+}
+
+func TestExceedsMemoryCeiling(t *testing.T) {
 	prev := config.SCALEODM_PROCESS_MEMORY_MAX_GIB
-	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 2048
+	config.SCALEODM_PROCESS_MEMORY_MAX_GIB = 1200
 	t.Cleanup(func() { config.SCALEODM_PROCESS_MEMORY_MAX_GIB = prev })
 
-	// With the cap raised, 13000 images extrapolate to
-	// 800 + (13000-12000)*0.08186 = ~882 GiB peak.
-	assert.InDelta(t, 882, estimateMemoryGiB(13000), 1.0)
+	// 12000 images = 800 GiB peak, under the ceiling.
+	assert.False(t, ExceedsMemoryCeiling(12000, nil))
+	// 17570 images = ~1256 GiB peak, over it.
+	assert.True(t, ExceedsMemoryCeiling(17570, []string{"--dsm"}))
+	// --fast-orthophoto halves the estimate, so the same job fits.
+	assert.False(t, ExceedsMemoryCeiling(17570, []string{"--fast-orthophoto"}))
 }
 
 // withSwapRatio sets the swap ratio (default is 0/off) for tests that exercise
@@ -930,6 +937,34 @@ func TestBuildNodeScheduling_EmptySelectorPlacesAnywhere(t *testing.T) {
 	selector, tolerations := buildNodeScheduling(CapacityTypeSpot)
 	assert.Empty(t, selector)
 	assert.Empty(t, tolerations)
+}
+
+func TestBuildODMWorkflow_LargeJobGetsLargeJobTolerations(t *testing.T) {
+	prevMin := config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB
+	prevTol := config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS
+	config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = 128
+	config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS = "scaleodm-size=large:NoSchedule"
+	t.Cleanup(func() {
+		config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = prevMin
+		config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS = prevTol
+	})
+	client := &Client{namespace: "test-namespace"}
+	hasLargeToleration := func(memoryRequest string) bool {
+		cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", nil)
+		cfg.ProcessResources.Requests.Memory = memoryRequest
+		for _, tol := range client.buildODMWorkflow(cfg).Spec.Tolerations {
+			if tol.Key == "scaleodm-size" {
+				return true
+			}
+		}
+		return false
+	}
+
+	assert.True(t, hasLargeToleration("128Gi"))
+	assert.False(t, hasLargeToleration("127Gi"))
+
+	config.SCALEODM_WORKFLOW_LARGE_JOB_MIN_MEMORY_GIB = 0
+	assert.False(t, hasLargeToleration("600Gi"), "0 disables")
 }
 
 func TestParseTolerations(t *testing.T) {
