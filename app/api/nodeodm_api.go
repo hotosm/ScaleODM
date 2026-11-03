@@ -156,6 +156,12 @@ func (a *API) getOptions(ctx context.Context, input *tokenInput) (*struct{ Body 
 	return &struct{ Body []OptionResponse }{Body: options}, nil
 }
 
+// activeJobConflict is the 409 for a duplicate submit; UUID is the job already running.
+type activeJobConflict struct {
+	huma.ErrorModel
+	UUID string `json:"uuid"`
+}
+
 type taskNewInput struct {
 	Token   string `query:"token" doc:"Authentication token (optional)"`
 	SetUUID string `header:"set-uuid" doc:"Optional UUID to use for this task"`
@@ -181,6 +187,23 @@ func (a *API) createTask(ctx context.Context, input *taskNewInput) (*TaskNewResp
 		return fail(rej)
 	}
 	log.Printf("POST /task/new: endpoint selection endpoint=%q region=%q allowlist_enforced=%t", spec.s3Endpoint, spec.s3Region, config.SCALEODM_ENFORCE_S3_ENDPOINT_ALLOWLIST)
+
+	// Reject a second active job writing to the same output path.
+	active, err := a.metadataStore.FindActiveJobByWritePath(ctx, spec.writePath)
+	if err != nil {
+		return fail(reject("active_job_lookup_failed", 500, "Failed to check for an active job", err))
+	}
+	if active != nil {
+		log.Printf("POST /task/new: rejected reason=duplicate_active_job workflow=%q", active.WorkflowName)
+		return nil, &activeJobConflict{
+			ErrorModel: huma.ErrorModel{
+				Status: http.StatusConflict,
+				Title:  http.StatusText(http.StatusConflict),
+				Detail: fmt.Sprintf("A job for %s is already %s as %s", spec.writePath, active.JobStatus, active.WorkflowName),
+			},
+			UUID: active.WorkflowName,
+		}
+	}
 
 	// Count images before workflow submission so resources can be sized.
 	taskClient, err := s3.GetS3ClientForEndpoint(spec.workflowS3Endpoint())

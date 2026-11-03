@@ -1109,6 +1109,41 @@ func TestTaskNew_MetadataCreateFailureCompensatesWorkflow(t *testing.T) {
 	assert.Equal(t, "wf-new-fail", wfClient.deletedNames[0])
 }
 
+func TestTaskNew_RejectsDuplicateOfActiveJob(t *testing.T) {
+	db, cleanup := testutil.TestDB(t)
+	defer cleanup()
+	ctx := context.Background()
+
+	metadataStore := meta.NewStore(db)
+	wfClient := &recordingWorkflowClient{}
+	_, handler := NewAPI(metadataStore, wfClient)
+
+	_, err := metadataStore.CreateJob(ctx, "wf-active", "test-project", "s3://test-bucket/images/", "s3://test-bucket/output/", nil, "us-east-1", nil)
+	require.NoError(t, err)
+
+	body, err := json.Marshal(TaskNewRequest{
+		Name:        "test-project",
+		ReadS3Path:  "s3://test-bucket/images/",
+		WriteS3Path: "s3://test-bucket/output",
+	})
+	require.NoError(t, err)
+	req := httptest.NewRequest(http.MethodPost, "/task/new", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler.ServeHTTP(w, req)
+
+	require.Equal(t, http.StatusConflict, w.Code, w.Body.String())
+	var resp struct {
+		UUID   string `json:"uuid"`
+		Detail string `json:"detail"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &resp))
+	assert.Equal(t, "wf-active", resp.UUID)
+	assert.Contains(t, resp.Detail, "already queued")
+	assert.Empty(t, wfClient.createdNames)
+}
+
 func TestTaskNew_RejectsJobAboveMemoryCeiling(t *testing.T) {
 	db, cleanup := testutil.TestDB(t)
 	defer cleanup()

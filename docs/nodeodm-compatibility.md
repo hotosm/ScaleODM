@@ -221,6 +221,8 @@ When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `w
 
 **Rejections (ScaleODM-specific):**
 
+- **409** when a queued or running job already writes to the same output path.
+  The body's `uuid` is that job, so a client can track it instead of resubmitting.
 - **422** when the image count needs more memory than `SCALEODM_PROCESS_MEMORY_MAX_GIB`
   allows. Split the job instead.
 
