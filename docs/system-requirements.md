@@ -8,7 +8,8 @@ these into pod requests and limits see [swap sizing](./swap.md) and
 
 - RAM demand is a brief **peak**, not sustained.
 - The table is RAM **+ swap**. Provision less real RAM and let swap cover the peak.
-  With ~2x swap a 62Gi machine handles ~5000 images.
+  With ~2x swap a 62Gi machine is comfortable to ~1600 images and OOMs past
+  ~2500 (see [Observed](#observed)).
 - Past ~5000 images the peak lands in OpenMVS `DensifyPointCloud` and grows faster
   than linearly. It scales with **view count**, not depth-map resolution.
 - Always pass a real `--boundary`. Render cost tracks reconstruction _extent_, so
@@ -24,6 +25,11 @@ these into pod requests and limits see [swap sizing](./swap.md) and
 |   3500 |     192 GB |
 |   5000 |     256 GB |
 |  12000 |     800 GB |
+
+Rows up to 5000 are the upstream figures, published identically in the
+[ODM](https://docs.opendronemap.org/installation/) and
+[WebODM/ODX](https://docs.webodm.org/installation/#hardware-requirements) docs.
+The 12000 row was added by us, after testing on AWS hardware.
 
 Don't go much past 12000 in one scene. Above that use `--split` /
 `--split-overlap` and let ODM build and merge submodels. Still one pod, no fan out.
@@ -41,6 +47,9 @@ Don't go much past 12000 in one scene. Above that use `--split` /
   > = 12000 while ODM loaded 11782.
 
 ## Observed
+
+Engine and version weren't recorded for the 64 GB runs below. The ~12k runs
+were ODX 3.8.3.
 
 64 GB RAM (12 core), no swap: ~4000 image ceiling. With ~2x swap (127 GB):
 
