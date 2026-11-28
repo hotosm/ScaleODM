@@ -228,16 +228,33 @@ When using `readS3Path`, outputs default to `readS3Path/output/` (or explicit `w
 
 #### Processing modes
 
-`processingMode` selects the pipeline shape. Today only `standard` is implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).
+`processingMode` selects the pipeline shape. `standard` and `thermal` are implemented; the reserved modes are recognised so clients can probe support and fail fast (HTTP 501).
 
 | Mode             | Status                | Behaviour                                                                                                                                                                                                                                                                                                                    |
 | ---------------- | --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `standard`       | implemented (default) | The regular ODM pipeline: download → process → upload. Imagery under `readS3Path` is gathered into a single ODM run. How wide the input scan is is configured separately via [`s3ScanDepth`](#scan-depth) - use depth `1` for one task's images dir, or a higher value to roll up several task subdirs under a project root. |
 | `merge-existing` | reserved (501)        | Given a project root that already contains per-task ODM outputs, run only the merge half of split-merge to stitch the existing orthos, DEMs, and point clouds into a single set of products. The "split" half is assumed already complete, which is much cheaper than re-running per-task processing from raw imagery.       |
-| `thermal`        | reserved (501)        | Dedicated pipeline for thermal imagery: applies a thermal-specific pre-processing stage (radiometric handling, alignment) before the ODM run. Implementation deferred.                                                                                                                                                       |
+| `thermal`        | implemented           | DJI thermal photos (`*_T.JPG` / `*_R.JPG`) are converted to float32 °C TIFFs by [dji-thermal-convert](https://github.com/hotosm/dji-thermal-convert) before ODM; other photos are dropped. See [Thermal mode](#thermal-mode).                                                                                                |
 | `city-scale`     | reserved (501)        | Large-area (>40 km²) projects requiring corrective alignment. The pipeline iteratively fans out from a central anchor task, aligning each subsequent task against prior LAZ point clouds, then runs a final alignment pass against a global DEM. Implementation deferred.                                                    |
 
 Reserved modes return HTTP 501 with a clear message so clients can probe support.
+
+#### Thermal mode
+
+Add any of these numeric options to tune the conversion. Unset values use those the pilot app stored in each photo.
+
+| Option               | Meaning                                                                                               |
+| -------------------- | ----------------------------------------------------------------------------------------------------- |
+| `thermal-ambient`    | Air temperature during the flight (°C)                                                                |
+| `thermal-reflection` | Reflected temperature (°C). Use the air temperature if not measured; on the Mavic 3T it matters most. |
+| `thermal-humidity`   | Relative humidity (%)                                                                                 |
+| `thermal-distance`   | Flight height above ground (m), clamped to the camera's range (1-25 m on the Mavic 3T)                |
+| `thermal-emissivity` | Surface emissivity (0.95 is a common urban default)                                                   |
+
+- Use one thermal camera model per task; the camera's ranges are read from the first photo.
+- `--texturing-skip-global-seam-leveling` is added automatically, because seam leveling alters temperatures. `radiometric-calibration` is rejected, because the images are already °C.
+- Photos that fail to convert are skipped, as ODM skips corrupt photos; the task fails only if none convert. `thermal_conversion.log` in the outputs lists the settings used and any dropped photos.
+- The conversion step needs an x86_64 node, because the DJI Thermal SDK has no ARM build.
 
 #### Scan depth
 
