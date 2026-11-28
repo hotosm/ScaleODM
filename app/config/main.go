@@ -63,6 +63,12 @@ var SCALEODM_ODM_IMAGE = cmp.Or(
 	"docker.io/opendronemap/odm:3.6.2",
 )
 
+// SCALEODM_THERMAL_IMAGE converts DJI thermal photos. x86_64 only (DJI Thermal SDK).
+var SCALEODM_THERMAL_IMAGE = cmp.Or(
+	os.Getenv("SCALEODM_THERMAL_IMAGE"),
+	"ghcr.io/hotosm/dji-thermal-convert:0.1.0",
+)
+
 // Repos allowed for the per-task odmImage override, comma separated, any tag.
 var SCALEODM_ALLOWED_ODM_IMAGES = strings.TrimSpace(os.Getenv("SCALEODM_ALLOWED_ODM_IMAGES"))
 

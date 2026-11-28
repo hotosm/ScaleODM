@@ -56,7 +56,8 @@ echo "Job ID: $JOB_ID"
 echo "Source: $SRC_DIR"
 echo "Destination: $DEST_PATH"
 
-rm -rf "$SRC_DIR/images"
+# Thermal mode keeps the original photos in source/.
+rm -rf "$SRC_DIR/images" "$SRC_DIR/source"
 
 echo "Listing ODM imagery products..."
 ls -lh "$SRC_DIR"

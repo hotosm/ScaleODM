@@ -19,8 +19,8 @@ import (
 //     to stitch the existing orthos/DEMs/point-clouds into a single set of
 //     products. Much cheaper than re-running per-task processing from raw
 //     imagery.
-//   - "thermal" (reserved, 501): thermal imagery pipeline with a dedicated
-//     pre-processing stage (radiometric handling, alignment) before ODM.
+//   - "thermal": DJI thermal R-JPEGs are converted to float32 °C TIFFs by a
+//     dedicated stage before ODM (see thermal.go).
 //   - "city-scale" (reserved, 501): large-area projects (>40 km²) that
 //     iteratively fan out from a central task with corrective alignment via
 //     prior LAZ point clouds and a final pass against a global DEM.
@@ -58,7 +58,7 @@ const (
 // IsImplementedProcessingMode reports whether mode has a working pipeline today.
 func IsImplementedProcessingMode(mode string) bool {
 	switch mode {
-	case ProcessingModeStandard:
+	case ProcessingModeStandard, ProcessingModeThermal:
 		return true
 	default:
 		return false
@@ -87,7 +87,7 @@ func ValidateS3ScanDepth(depth int) (int, error) {
 // clients can probe support without ambiguity.
 func IsReservedProcessingMode(mode string) bool {
 	switch mode {
-	case ProcessingModeMergeExisting, ProcessingModeThermal, ProcessingModeCityScale:
+	case ProcessingModeMergeExisting, ProcessingModeCityScale:
 		return true
 	default:
 		return false

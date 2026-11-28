@@ -9,6 +9,7 @@ import (
 
 func TestIsImplementedProcessingMode(t *testing.T) {
 	assert.True(t, IsImplementedProcessingMode(ProcessingModeStandard))
+	assert.True(t, IsImplementedProcessingMode(ProcessingModeThermal))
 	assert.False(t, IsImplementedProcessingMode(ProcessingModeMergeExisting))
 	assert.False(t, IsImplementedProcessingMode("single-task"))
 	assert.False(t, IsImplementedProcessingMode("multi-task"))
@@ -17,7 +18,7 @@ func TestIsImplementedProcessingMode(t *testing.T) {
 
 func TestIsReservedProcessingMode(t *testing.T) {
 	assert.True(t, IsReservedProcessingMode(ProcessingModeMergeExisting))
-	assert.True(t, IsReservedProcessingMode(ProcessingModeThermal))
+	assert.False(t, IsReservedProcessingMode(ProcessingModeThermal))
 	assert.True(t, IsReservedProcessingMode(ProcessingModeCityScale))
 	assert.False(t, IsReservedProcessingMode(ProcessingModeStandard))
 	assert.False(t, IsReservedProcessingMode("nonsense"))

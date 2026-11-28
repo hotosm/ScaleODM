@@ -18,6 +18,8 @@ var (
 	inputFileLib string
 	//go:embed scripts/download.sh
 	downloadSh string
+	//go:embed scripts/thermal.sh
+	thermalSh string
 	//go:embed scripts/process.sh
 	processSh string
 	//go:embed scripts/upload.sh
@@ -73,6 +75,15 @@ func appendInputFileVars(vars scriptVars, prefix, dest string, source FileSource
 		[2]string{prefix + "_S3_PATH", source.S3Path},
 		[2]string{prefix + "_INLINE", source.Inline},
 	)
+}
+
+func thermalScript(cfg *ODMPipelineConfig, jobID string) string {
+	return renderScript(scriptVars{
+		{"ATTEMPT", "{{retries}}"},
+		{"WORKSPACE", workspaceDir},
+		{"JOB_ID", jobID},
+		{"JOBS", strconv.Itoa(max(1, parseCPUCores(cfg.DownloadResources.Limits.CPU)))},
+	}, thermalSh)
 }
 
 func processScript(cfg *ODMPipelineConfig, jobID string) string {

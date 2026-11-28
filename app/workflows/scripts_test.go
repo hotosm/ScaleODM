@@ -34,6 +34,7 @@ func TestScripts_AreValidShell(t *testing.T) {
 	for name, tc := range map[string]struct{ shell, script string }{
 		"download": {"/bin/sh", downloadScript(cfg, "{{workflow.name}}")},
 		"process":  {"/bin/bash", processScript(cfg, "{{workflow.name}}")},
+		"thermal":  {"/bin/bash", thermalScript(cfg, "{{workflow.name}}")},
 		"upload":   {"/bin/sh", uploadScript(cfg, "{{workflow.name}}")},
 		"snapshot": {"/bin/sh", snapshotScript()},
 	} {
@@ -203,6 +204,42 @@ func TestProcessScript_PassesFlagsAsArgv(t *testing.T) {
 	assert.Equal(t, "-u\nrun.py\n--dsm\n--odm-option=a b\n--other=$(touch pwned)\n--project-path\n/workspace\njob-1\n", string(args))
 	assert.NoFileExists(t, filepath.Join(dir, "pwned"))
 	assert.DirExists(t, filepath.Join(dir, "home"), "some tools expect $HOME to exist")
+}
+
+// A retry must convert the original photos again, not the previous attempt's TIFFs.
+func TestThermalScript_KeepsSourcePhotosAcrossRetries(t *testing.T) {
+	dir := t.TempDir()
+	writeStub(t, dir, "dji-thermal-convert", `
+printf '%s\n' "$@" > "$ARGS_FILE"
+in=$(eval echo "\${$(($#-1))}"); out=$(eval echo "\${$#}")
+mkdir -p "$out"
+for f in "$in"/*_T.JPG; do touch "$out/$(basename "${f%.*}").tif"; done
+echo "Converted"`)
+	t.Setenv("ARGS_FILE", filepath.Join(dir, "args"))
+	workspace := filepath.Join(dir, "workspace")
+	images := filepath.Join(workspace, "job-1", "images")
+	require.NoError(t, os.MkdirAll(images, 0o755))
+	for _, name := range []string{"DJI_0001_T.JPG", "DJI_0001_W.JPG"} {
+		require.NoError(t, os.WriteFile(filepath.Join(images, name), nil, 0o644))
+	}
+	script := renderScript(scriptVars{
+		{"ATTEMPT", "1"}, {"WORKSPACE", workspace}, {"JOB_ID", "job-1"}, {"JOBS", "2"},
+	}, thermalSh)
+
+	for attempt := 0; attempt < 2; attempt++ {
+		out, err := runShell(t, "/bin/bash", dir, script, "--ambient", "27")
+		require.NoError(t, err, out)
+	}
+
+	entries, err := os.ReadDir(images)
+	require.NoError(t, err)
+	require.Len(t, entries, 1)
+	assert.Equal(t, "DJI_0001_T.tif", entries[0].Name())
+	assert.FileExists(t, filepath.Join(workspace, "job-1", "source", "DJI_0001_W.JPG"))
+	assert.FileExists(t, filepath.Join(workspace, "job-1", "thermal_conversion.log"))
+	args, err := os.ReadFile(filepath.Join(dir, "args"))
+	require.NoError(t, err)
+	assert.Equal(t, "--jobs\n2\n--ambient\n27\n"+filepath.Join(workspace, "job-1", "source")+"\n"+images+"\n", string(args))
 }
 
 func TestDownloadScript_Vars(t *testing.T) {
