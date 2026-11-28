@@ -152,6 +152,12 @@ func (a *API) getOptions(ctx context.Context, input *tokenInput) (*struct{ Body 
 			Domain: "cameras.json, s3:// URL, or path",
 			Help:   "Supplies camera intrinsics instead of solving them. Accepts inline JSON, an s3:// URL or a path",
 		},
+		// Unset thermal-* values fall back to those stored in each image.
+		{Name: "thermal-ambient", Type: "float", Domain: "°C", Help: "processingMode thermal: air temperature during the flight"},
+		{Name: "thermal-reflection", Type: "float", Domain: "°C", Help: "processingMode thermal: reflected temperature (use the air temperature if not measured)"},
+		{Name: "thermal-humidity", Type: "float", Domain: "%", Help: "processingMode thermal: relative humidity"},
+		{Name: "thermal-distance", Type: "float", Domain: "m", Help: "processingMode thermal: flight height above ground, clamped to the camera's range"},
+		{Name: "thermal-emissivity", Type: "float", Domain: "0.1-1.0", Help: "processingMode thermal: surface emissivity"},
 	}
 	return &struct{ Body []OptionResponse }{Body: options}, nil
 }

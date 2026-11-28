@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -70,6 +71,7 @@ type ODMPipelineConfig struct {
 	ServiceAccount string
 	RcloneImage    string
 	ODMImage       string
+	ThermalImage   string
 
 	// ProcessingMode selects the pipeline shape; see processing_mode.go.
 	// Empty string is treated as ProcessingModeStandard.
@@ -138,6 +140,7 @@ func NewDefaultODMConfig(odmProjectID, readS3Path, writeS3Path string, odmFlags 
 		ServiceAccount: "argo-odm",
 		RcloneImage:    "docker.io/rclone/rclone:1.69",
 		ODMImage:       config.SCALEODM_ODM_IMAGE,
+		ThermalImage:   config.SCALEODM_THERMAL_IMAGE,
 		RuntimeGuardrails: WorkflowRuntimeGuardrails{
 			ActiveDeadlineSeconds:  int64(config.SCALEODM_WORKFLOW_ACTIVE_DEADLINE_SECONDS),
 			TTLSuccessSeconds:      int32(config.SCALEODM_WORKFLOW_TTL_SUCCESS_SECONDS),
@@ -884,6 +887,10 @@ func (c *Client) buildODMWorkflow(cfg *ODMPipelineConfig) *wfv1.Workflow {
 	ttlSuccess := positiveOr(cfg.RuntimeGuardrails.TTLSuccessSeconds, 86400)
 	ttlFailure := positiveOr(cfg.RuntimeGuardrails.TTLFailureSeconds, 604800)
 	nodeSelector, tolerations := buildNodeScheduling(cfg.CapacityType)
+	if cfg.ProcessingMode == ProcessingModeThermal {
+		// The DJI Thermal SDK only ships x86_64 builds.
+		nodeSelector["kubernetes.io/arch"] = "amd64"
+	}
 	if isLargeJob(cfg.ProcessResources) {
 		tolerations = append(tolerations, parseTolerations(config.SCALEODM_WORKFLOW_LARGE_JOB_TOLERATIONS)...)
 	}
@@ -946,7 +953,8 @@ func positiveOr[T int32 | int64](value, fallback T) T {
 func stageContainers(cfg *ODMPipelineConfig, jobID string) []wfv1.ContainerNode {
 	awsEnv := s3SecretEnvVars(cfg)
 
-	processFlags := append([]string{}, cfg.ODMFlags...)
+	odmFlags, thermalArgs := SplitThermalFlags(cfg.ODMFlags)
+	processFlags := append([]string{}, odmFlags...)
 	if cfg.Boundary.IsSet() {
 		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", BoundaryOptionName, BoundaryFilePath(jobID)))
 	}
@@ -954,19 +962,43 @@ func stageContainers(cfg *ODMPipelineConfig, jobID string) []wfv1.ContainerNode 
 		processFlags = append(processFlags, fmt.Sprintf("--%s=%s", CamerasOptionName, CamerasFilePath(jobID)))
 	}
 
-	return []wfv1.ContainerNode{
-		{
+	download := wfv1.ContainerNode{
+		Container: apiv1.Container{
+			Name:            "download",
+			Image:           cfg.RcloneImage,
+			Command:         []string{"/bin/sh", "-c"},
+			Args:            []string{downloadScript(cfg, jobID)},
+			Env:             awsEnv,
+			Resources:       containerRequirements(cfg.DownloadResources),
+			SecurityContext: workflowContainerSecurityContext(),
+		},
+	}
+	nodes := []wfv1.ContainerNode{download}
+	processAfter := download.Name
+
+	if cfg.ProcessingMode == ProcessingModeThermal {
+		if !slices.Contains(processFlags, thermalSeamLevelingFlag) {
+			processFlags = append(processFlags, thermalSeamLevelingFlag)
+		}
+		thermal := wfv1.ContainerNode{
 			Container: apiv1.Container{
-				Name:            "download",
-				Image:           cfg.RcloneImage,
-				Command:         []string{"/bin/sh", "-c"},
-				Args:            []string{downloadScript(cfg, jobID)},
-				Env:             awsEnv,
+				Name:    "thermal",
+				Image:   cfg.ThermalImage,
+				Command: []string{"/bin/bash", "-c"},
+				// bash -c SCRIPT $0 ARGS...: converter settings arrive as "$@".
+				Args: append([]string{thermalScript(cfg, jobID), "thermal"}, thermalArgs...),
+				// Pretty low resource requirement, so same specs as download task.
 				Resources:       containerRequirements(cfg.DownloadResources),
 				SecurityContext: workflowContainerSecurityContext(),
 			},
-		},
-		{
+			Dependencies: []string{download.Name},
+		}
+		nodes = append(nodes, thermal)
+		processAfter = thermal.Name
+	}
+
+	return append(nodes,
+		wfv1.ContainerNode{
 			Container: apiv1.Container{
 				Name:            "process",
 				Image:           cfg.ODMImage,
@@ -978,9 +1010,9 @@ func stageContainers(cfg *ODMPipelineConfig, jobID string) []wfv1.ContainerNode 
 				// bash -c SCRIPT $0 ARGS...: ODM flags arrive as "$@".
 				Args: append([]string{processScript(cfg, jobID), "process"}, processFlags...),
 			},
-			Dependencies: []string{"download"},
+			Dependencies: []string{processAfter},
 		},
-		{
+		wfv1.ContainerNode{
 			Container: apiv1.Container{
 				Name:            "upload",
 				Image:           cfg.RcloneImage,
@@ -992,7 +1024,7 @@ func stageContainers(cfg *ODMPipelineConfig, jobID string) []wfv1.ContainerNode 
 			},
 			Dependencies: []string{"process"},
 		},
-	}
+	)
 }
 
 // cleanupTemplate runs onExit to print a workspace snapshot before the PVC is removed.

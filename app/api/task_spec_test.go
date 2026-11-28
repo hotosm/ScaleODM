@@ -19,7 +19,20 @@ func TestParseTaskNewRequest_Rejections(t *testing.T) {
 		wantReason string
 		wantStatus int
 	}{
-		{"reserved mode", func(r *TaskNewRequest) { r.ProcessingMode = "thermal" }, "processing_mode_not_implemented", 501},
+		{"reserved mode", func(r *TaskNewRequest) { r.ProcessingMode = "city-scale" }, "processing_mode_not_implemented", 501},
+		{"thermal option in standard mode", func(r *TaskNewRequest) { r.Options = `[{"name":"thermal-ambient","value":27}]` }, "invalid_thermal_option", 400},
+		{"non-numeric thermal option", func(r *TaskNewRequest) {
+			r.ProcessingMode = "thermal"
+			r.Options = `[{"name":"thermal-ambient","value":"warm"}]`
+		}, "invalid_thermal_option", 400},
+		{"unknown thermal option", func(r *TaskNewRequest) {
+			r.ProcessingMode = "thermal"
+			r.Options = `[{"name":"thermal-wind","value":3}]`
+		}, "invalid_thermal_option", 400},
+		{"radiometric calibration in thermal mode", func(r *TaskNewRequest) {
+			r.ProcessingMode = "thermal"
+			r.Options = `[{"name":"radiometric-calibration","value":"camera"}]`
+		}, "invalid_thermal_option", 400},
 		{"unknown mode", func(r *TaskNewRequest) { r.ProcessingMode = "nope" }, "invalid_processing_mode", 400},
 		{"bad capacity", func(r *TaskNewRequest) { r.CapacityType = "cheap" }, "invalid_capacity_type", 400},
 		{"image not allowlisted", func(r *TaskNewRequest) { r.OdmImage = "evil/image" }, "invalid_odm_image", 400},
@@ -46,6 +59,17 @@ func TestParseTaskNewRequest_Rejections(t *testing.T) {
 			assert.Equal(t, tt.wantStatus, rej.status)
 		})
 	}
+}
+
+func TestParseTaskNewRequest_ThermalOptions(t *testing.T) {
+	spec, rej := parseTaskNewRequest(TaskNewRequest{
+		ReadS3Path:     "s3://bucket/images",
+		ProcessingMode: "thermal",
+		Options:        `[{"name":"thermal-ambient","value":27.5},{"name":"thermal-distance","value":100},{"name":"dsm","value":true}]`,
+	})
+	require.Nil(t, rej)
+	assert.Equal(t, workflows.ProcessingModeThermal, spec.processingMode)
+	assert.Equal(t, []string{"--thermal-ambient=27.5", "--thermal-distance=100", "--dsm"}, spec.odmFlags)
 }
 
 func TestParseTaskNewRequest_Defaults(t *testing.T) {

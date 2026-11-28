@@ -126,6 +126,41 @@ func TestBuildODMWorkflow_StageContainersDoNotWriteLogFiles(t *testing.T) {
 	}
 }
 
+func TestBuildODMWorkflow_ThermalStage(t *testing.T) {
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/",
+		[]string{"--dsm", "--thermal-ambient=27", "--thermal-distance=100"})
+	cfg.ProcessingMode = ProcessingModeThermal
+
+	wf := (&Client{namespace: "test-namespace"}).buildODMWorkflow(cfg)
+
+	containers := wf.Spec.Templates[0].ContainerSet.Containers
+	require.Len(t, containers, 4)
+	names := []string{}
+	for _, c := range containers {
+		names = append(names, c.Name)
+	}
+	assert.Equal(t, []string{"download", "thermal", "process", "upload"}, names)
+
+	thermal, process := containers[1], containers[2]
+	assert.Equal(t, config.SCALEODM_THERMAL_IMAGE, thermal.Image)
+	assert.Equal(t, []string{"download"}, thermal.Dependencies)
+	assert.Equal(t, []string{"thermal", "--ambient", "27", "--distance", "100"}, thermal.Args[1:])
+	assert.Equal(t, []string{"thermal"}, process.Dependencies)
+	assert.Equal(t, []string{"process", "--dsm", "--texturing-skip-global-seam-leveling"}, process.Args[1:])
+	assert.Equal(t, "amd64", wf.Spec.NodeSelector["kubernetes.io/arch"])
+}
+
+func TestBuildODMWorkflow_StandardModeHasNoThermalStage(t *testing.T) {
+	cfg := NewDefaultODMConfig("test-project", "s3://bucket/images/", "s3://bucket/output/", []string{"--dsm"})
+
+	wf := (&Client{namespace: "test-namespace"}).buildODMWorkflow(cfg)
+
+	containers := wf.Spec.Templates[0].ContainerSet.Containers
+	require.Len(t, containers, 3)
+	assert.Equal(t, []string{"download"}, containers[1].Dependencies)
+	assert.NotContains(t, wf.Spec.NodeSelector, "kubernetes.io/arch")
+}
+
 func TestBuildODMWorkflow_ProcessContainerUsesUnbufferedPython(t *testing.T) {
 	cfg := NewDefaultODMConfig(
 		"test-project",

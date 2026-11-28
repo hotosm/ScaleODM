@@ -118,7 +118,7 @@ func parseTaskNewRequest(req TaskNewRequest) (taskSpec, *rejection) {
 		return taskSpec{}, reject("processing_mode_not_implemented", 501, fmt.Sprintf("processingMode %q is reserved for a future pipeline and is not yet implemented", spec.processingMode))
 	}
 	if !workflows.IsImplementedProcessingMode(spec.processingMode) {
-		return taskSpec{}, reject("invalid_processing_mode", 400, fmt.Sprintf("invalid processingMode %q (supported: standard)", spec.processingMode))
+		return taskSpec{}, reject("invalid_processing_mode", 400, fmt.Sprintf("invalid processingMode %q (supported: standard, thermal)", spec.processingMode))
 	}
 	if !workflows.IsValidCapacityType(spec.capacityType) {
 		return taskSpec{}, reject("invalid_capacity_type", 400, fmt.Sprintf("invalid capacityType %q (supported: spot, on-demand)", spec.capacityType))
@@ -153,6 +153,9 @@ func parseTaskNewRequest(req TaskNewRequest) (taskSpec, *rejection) {
 	}
 	if err := validateShellSafeFlags(spec.odmFlags); err != nil {
 		return taskSpec{}, reject("invalid_option_flag", 400, err.Error())
+	}
+	if err := workflows.ValidateThermalFlags(spec.processingMode, spec.odmFlags); err != nil {
+		return taskSpec{}, reject("invalid_thermal_option", 400, err.Error())
 	}
 	if err := validateShellSafe(spec.readPath, "readS3Path"); err != nil {
 		return taskSpec{}, reject("invalid_read_path", 400, err.Error())
@@ -197,6 +200,9 @@ func restartSpec(job *meta.JobMetadata, metadata taskMetadata, newOptions string
 	}
 	if err := validateShellSafeFlags(spec.odmFlags); err != nil {
 		return taskSpec{}, reject("invalid_option_flag", 400, err.Error())
+	}
+	if err := workflows.ValidateThermalFlags(spec.processingMode, spec.odmFlags); err != nil {
+		return taskSpec{}, reject("invalid_thermal_option", 400, err.Error())
 	}
 	if err := enforceEndpointAllowlist(spec.s3Endpoint); err != nil {
 		return taskSpec{}, reject("invalid_s3_endpoint", 400, "Invalid s3Endpoint", err)

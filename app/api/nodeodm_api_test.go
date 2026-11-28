@@ -195,7 +195,7 @@ func TestTaskNew_RejectsReservedProcessingMode(t *testing.T) {
 	wfClient := testWorkflowClient(t)
 	_, handler := NewAPI(metadataStore, wfClient)
 
-	for _, mode := range []string{"merge-existing", "thermal", "city-scale"} {
+	for _, mode := range []string{"merge-existing", "city-scale"} {
 		t.Run(mode, func(t *testing.T) {
 			body, err := json.Marshal(TaskNewRequest{
 				ReadS3Path:     "s3://test-bucket/images/",

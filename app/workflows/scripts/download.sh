@@ -131,10 +131,9 @@ while IFS= read -r imgfile; do
   if [ "$(dirname "$imgfile")" != "$FLAT_DIR" ]; then
     counter=1
     destfile="$FLAT_DIR/$filename"
+    # Prefix the counter so name suffixes such as DJI's _T stay intact.
     while [ -f "$destfile" ]; do
-      namepart="${filename%.*}"
-      extpart="${filename##*.}"
-      destfile="$FLAT_DIR/${namepart}_${counter}.${extpart}"
+      destfile="$FLAT_DIR/${counter}_${filename}"
       counter=$((counter + 1))
     done
     mv "$imgfile" "$destfile"
