@@ -109,18 +109,18 @@ type TaskNewRequest struct {
 	//     -> upload). Imagery under readS3Path is gathered into a single ODM
 	//     run; how deep the scan walks beneath readS3Path is controlled by
 	//     s3ScanDepth.
+	//   - "thermal": DJI thermal R-JPEGs are converted to float32 °C TIFFs
+	//     before ODM. Converter settings are the optional thermal-* options.
 	//
 	// Reserved (return 501 today):
 	//   - "merge-existing": stitch already-processed per-task outputs (orthos,
 	//     DEMs, point clouds) into a single set of products via the merge
 	//     half of split-merge. Much cheaper than re-running per-task
 	//     processing.
-	//   - "thermal": thermal imagery pipeline with dedicated pre-processing
-	//     before ODM (radiometric handling, alignment).
 	//   - "city-scale": large-area (>40 km²) projects with iterative
 	//     corrective alignment from a central task using prior LAZ point
 	//     clouds, plus a final alignment pass against a global DEM.
-	ProcessingMode string `json:"processingMode,omitempty" form:"processingMode" doc:"Pipeline mode: 'standard' (default). Reserved: 'merge-existing', 'thermal', 'city-scale'."`
+	ProcessingMode string `json:"processingMode,omitempty" form:"processingMode" doc:"Pipeline mode: 'standard' (default) or 'thermal'. Reserved: 'merge-existing', 'city-scale'."`
 
 	// CapacityType selects the Karpenter node pool for workflow pods.
 	// Use "on-demand" for VIP or time-sensitive jobs that cannot tolerate spot
